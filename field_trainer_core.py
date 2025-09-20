@@ -66,7 +66,8 @@ def get_gateway_status() -> Dict[str, Any]:
             neighbors = []
             lines = result.stdout.strip().split('\n')
             
-            print(f"BATMAN Debug: Processing {len(lines)} lines")
+            # Use a simple debug flag we can enable/disable
+            debug_batman = True  # Set to False to disable debug output
             
             for line in lines:
                 if line.strip() and 'wlan0' in line:
@@ -75,7 +76,8 @@ def get_gateway_status() -> Dict[str, Any]:
                     normalized_line = line.replace('\t', ' ')
                     parts = normalized_line.split()
                     
-                    print(f"BATMAN Debug: Line parts: {parts}")
+                    if debug_batman:
+                        print(f"BATMAN: Processing line with {len(parts)} parts: {parts}")
                     
                     if len(parts) >= 3:
                         # Should be: ['wlan0', 'b8:27:eb:xx:xx:xx', 'X.XXXs']
@@ -93,15 +95,14 @@ def get_gateway_status() -> Dict[str, Any]:
                                 "last_seen": last_seen,
                                 "interface": "wlan0"
                             })
-                            print(f"BATMAN Debug: Added neighbor {mac}")
+                            if debug_batman:
+                                print(f"BATMAN: Added neighbor {mac} (last seen: {last_seen})")
             
             status["batman_neighbors"] = len(neighbors)
             status["batman_neighbors_list"] = neighbors
             
-            # Debug logging
-            print(f"BATMAN Debug: Found {len(neighbors)} total neighbors")
-            for neighbor in neighbors:
-                print(f"  - {neighbor['mac']} (last seen: {neighbor['last_seen']})")
+            # Always log the final count
+            print(f"BATMAN: Found {len(neighbors)} mesh neighbors total")
                 
     except Exception as e:
         print(f"BATMAN neighbor detection error: {e}")
