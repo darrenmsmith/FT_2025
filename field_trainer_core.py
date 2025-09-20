@@ -67,10 +67,13 @@ def get_gateway_status() -> Dict[str, Any]:
                 if line and 'wlan0' in line:
                     # Parse format: "        wlan0     b8:27:eb:7f:03:d9    0.528s"
                     parts = line.split()
-                    if len(parts) >= 3 and parts[0] == 'wlan0':
-                        mac = parts[1]
-                        last_seen = parts[2]
-                        neighbors.append({"mac": mac, "last_seen": last_seen})
+                    if len(parts) >= 3 and 'wlan0' in parts:
+                        # Find wlan0 in the parts and get MAC and time
+                        wlan_index = parts.index('wlan0')
+                        if wlan_index + 2 < len(parts):
+                            mac = parts[wlan_index + 1]
+                            last_seen = parts[wlan_index + 2]
+                            neighbors.append({"mac": mac, "last_seen": last_seen})
             status["batman_neighbors"] = len(neighbors)
             status["batman_neighbors_list"] = neighbors
     except Exception as e:
@@ -318,7 +321,15 @@ class Registry:
                     deploy_msg = {"deploy": True, "action": action, "course": course_name}
                     if self.send_to_node(node_id, deploy_msg):
                         success_count += 1
-            
+
+            # Send "inactive" status to devices NOT in this course
+            with self.nodes_lock:
+                for node_id in self.nodes.keys():
+                    if node_id not in self.assignments and node_id != "192.168.99.100":
+                        inactive_msg = {"deploy": True, "action": None, "course": course_name, "status": "inactive"}
+                        self.send_to_node(node_id, inactive_msg)
+                        self.log(f"Set {node_id} to inactive (not in course)")
+                        
             self.log(f"Deployment sent to {success_count}/{len(self.assignments)-1} client devices")
             self.log(f"Devices not in course returned to standby")
             return {"success": True, "course_status": self.course_status, "deployed_to": success_count}
