@@ -60,52 +60,56 @@ def get_gateway_status() -> Dict[str, Any]:
         print(f"iwconfig wlan0 error: {e}")
     
     try:
-        # Check BATMAN neighbors - FIXED PARSING
+        # Check BATMAN neighbors - FIXED PARSING for tabs and spaces
         result = subprocess.run(['sudo', 'batctl', 'n', '-H'], capture_output=True, text=True)
         if result.returncode == 0:
             neighbors = []
             lines = result.stdout.strip().split('\n')
             
+            print(f"BATMAN Debug: Processing {len(lines)} lines")
+            
             for line in lines:
-                line = line.strip()
-                if line and 'wlan0' in line:
-                    # Parse format: "        wlan0     b8:27:eb:5f:52:6b    0.912s"
-                    parts = line.split()
+                if line.strip() and 'wlan0' in line:
+                    # Replace tabs with spaces and split on any whitespace
+                    # Format: "········wlan0→··b8:27:eb:5f:52:6b····0.028s"
+                    normalized_line = line.replace('\t', ' ')
+                    parts = normalized_line.split()
+                    
+                    print(f"BATMAN Debug: Line parts: {parts}")
+                    
                     if len(parts) >= 3:
-                        # Format: [whitespace] wlan0 [mac_address] [time]
-                        # Find the parts: interface, MAC, time
-                        interface_idx = -1
-                        for i, part in enumerate(parts):
-                            if part == 'wlan0':
-                                interface_idx = i
-                                break
+                        # Should be: ['wlan0', 'b8:27:eb:xx:xx:xx', 'X.XXXs']
+                        interface = parts[0]
+                        mac = parts[1] 
+                        last_seen = parts[2]
                         
-                        if interface_idx != -1 and len(parts) > interface_idx + 2:
-                            mac = parts[interface_idx + 1]
-                            last_seen = parts[interface_idx + 2]
+                        # Validate this looks like our expected format
+                        if (interface == 'wlan0' and 
+                            ':' in mac and len(mac) == 17 and  # MAC format: xx:xx:xx:xx:xx:xx
+                            last_seen.endswith('s')):  # Time format: X.XXXs
                             
-                            # Validate MAC address format (basic check)
-                            if ':' in mac and len(mac) == 17:  # MAC format: xx:xx:xx:xx:xx:xx
-                                neighbors.append({
-                                    "mac": mac, 
-                                    "last_seen": last_seen,
-                                    "interface": "wlan0"
-                                })
+                            neighbors.append({
+                                "mac": mac, 
+                                "last_seen": last_seen,
+                                "interface": "wlan0"
+                            })
+                            print(f"BATMAN Debug: Added neighbor {mac}")
             
             status["batman_neighbors"] = len(neighbors)
             status["batman_neighbors_list"] = neighbors
             
             # Debug logging
-            print(f"BATMAN Debug: Found {len(neighbors)} neighbors")
+            print(f"BATMAN Debug: Found {len(neighbors)} total neighbors")
             for neighbor in neighbors:
                 print(f"  - {neighbor['mac']} (last seen: {neighbor['last_seen']})")
                 
     except Exception as e:
         print(f"BATMAN neighbor detection error: {e}")
-        # Also log the raw output for debugging
+        # Log the raw output for debugging
         try:
             result = subprocess.run(['sudo', 'batctl', 'n', '-H'], capture_output=True, text=True)
             print(f"BATMAN raw output: {repr(result.stdout)}")
+            print(f"BATMAN raw lines: {result.stdout.split(chr(10))}")
         except:
             pass
     
