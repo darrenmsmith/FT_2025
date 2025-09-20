@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Field Trainer Core v5.2 - Device Management and TCP Server
+Field Trainer Core v5.2 - Enhanced Device Management and TCP Server
 - Core device registry and communication logic
-- TCP heartbeat server for device connectivity
+- Enhanced TCP heartbeat server for device connectivity
 - Course management and deployment
+- Improved connection handling and reliability
 """
 
 import json
 import os
+import socket
 import threading
 import time
 import subprocess
@@ -255,27 +257,33 @@ class Registry:
         }
 
     def send_to_node(self, node_id: str, payload: Dict[str, Any]) -> bool:
-        # Handle Device 0 (controller) specially - it doesn't need TCP messages
+        """Enhanced send method with better error handling"""
+        # Handle Device 0 (controller/gateway) specially
         if node_id == "192.168.99.100":
-            self.log(f"Device 0 assigned action: {payload.get('action', payload.get('role', 'Unknown'))}")
+            self.log(f"Device 0 (Gateway) assigned action: {payload.get('action', payload.get('role', 'Unknown'))}")
             return True
             
         with self.nodes_lock:
             n = self.nodes.get(node_id)
             if not n or not n._writer:
-                self.log(f"Cannot send to {node_id}: not connected", level="error")
+                self.log(f"Cannot send to Device {node_id}: not connected", level="error")
                 return False
             
             try:
                 data = (json.dumps(payload) + "\n").encode("utf-8")
                 n._writer.write(data)
                 n._writer.flush()
-                self.log(f"Sent to {node_id}: {payload}")
+                self.log(f"Sent to Device {node_id}: {payload}")
                 return True
-            except Exception as e:
-                self.log(f"Send failed to {node_id}: {e}", level="error")
-                # Mark as disconnected
+                
+            except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                self.log(f"Send failed to Device {node_id}: {e}", level="error")
+                # Mark device as disconnected
                 n._writer = None
+                n.status = "Offline"
+                return False
+            except Exception as e:
+                self.log(f"Unexpected error sending to Device {node_id}: {e}", level="error")
                 return False
 
     def deploy_course(self, course_name: str) -> Dict[str, Any]:
@@ -399,74 +407,207 @@ class Registry:
 # Global registry instance
 REGISTRY = Registry()
 
-# TCP Heartbeat Server
+# Enhanced TCP Heartbeat Server
 class HeartbeatHandler(socketserver.StreamRequestHandler):
+    """Enhanced heartbeat handler with better connection management"""
+    
+    def setup(self):
+        """Configure socket when connection is established"""
+        # Enable TCP keep-alive for reliable connection detection
+        self.request.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        
+        # Configure keep-alive timing (Linux/Raspberry Pi)
+        try:
+            # Send keep-alive after 30 seconds of inactivity
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+            # Send keep-alive probes every 5 seconds
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+            # Declare connection dead after 3 failed probes
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        except (OSError, AttributeError):
+            # Keep-alive parameters not available on this platform
+            pass
+        
+        # Set read timeout to detect unresponsive clients
+        self.request.settimeout(45.0)  # 45 second timeout
+        
+        super().setup()
+
     def handle(self):
         peer_ip = self.client_address[0]
         node_id = None
         
-        while True:
-            try:
-                line = self.rfile.readline()
-                if not line:
+        REGISTRY.log(f"Device connected from {peer_ip}")
+        
+        try:
+            while True:
+                try:
+                    # Read incoming heartbeat message
+                    line = self.rfile.readline()
+                    if not line:
+                        REGISTRY.log(f"Device {peer_ip} closed connection cleanly")
+                        break
+                    
+                    # Parse JSON message
+                    try:
+                        msg = json.loads(line.decode("utf-8").strip())
+                    except json.JSONDecodeError as e:
+                        REGISTRY.log(f"Invalid JSON from {peer_ip}: {e}", level="error")
+                        # Send error response and continue
+                        self._send_error_response("Invalid JSON format")
+                        continue
+                    
+                    node_id = msg.get("node_id") or peer_ip
+                    
+                    # Update node registry with received data
+                    REGISTRY.upsert_node(
+                        node_id=node_id,
+                        ip=peer_ip,
+                        writer=self.wfile,
+                        status=msg.get("status", "Unknown"),
+                        ping_ms=msg.get("ping_ms"),
+                        hops=msg.get("hops"),
+                        sensors=msg.get("sensors", {}),
+                        accelerometer_working=msg.get("accelerometer_working", False),
+                        audio_working=msg.get("audio_working", False),
+                        battery_level=msg.get("battery_level"),
+                        action=msg.get("action")
+                    )
+                    
+                    # Build and send reply
+                    reply = self._build_reply(node_id)
+                    self._send_response(reply)
+                    
+                except socket.timeout:
+                    REGISTRY.log(f"Timeout from device {peer_ip} - connection may be dead", level="warning")
+                    break
+                except ConnectionResetError:
+                    REGISTRY.log(f"Device {peer_ip} reset connection")
+                    break
+                except BrokenPipeError:
+                    REGISTRY.log(f"Broken pipe to device {peer_ip}")
+                    break
+                except Exception as e:
+                    REGISTRY.log(f"Handler error for {peer_ip}: {e}", level="error")
                     break
                     
-                msg = json.loads(line.decode("utf-8").strip())
-                node_id = msg.get("node_id") or peer_ip
-                
-                # Update node with all received data
-                REGISTRY.upsert_node(
-                    node_id=node_id,
-                    ip=peer_ip,
-                    writer=self.wfile,
-                    status=msg.get("status", "Unknown"),
-                    ping_ms=msg.get("ping_ms"),
-                    hops=msg.get("hops"),
-                    sensors=msg.get("sensors", {}),
-                    accelerometer_working=msg.get("accelerometer_working", False),
-                    audio_working=msg.get("audio_working", False),
-                    battery_level=msg.get("battery_level"),
-                    action=msg.get("action")  # Support both new 'action' and old 'role'
-                )
-                
-                # Send reply with current assignments
-                assigned_action = REGISTRY.assignments.get(node_id)
-                reply = {
-                    "ack": True,
-                    "action": assigned_action,
-                    "course_status": REGISTRY.course_status,
-                    "timestamp": utcnow_iso()
-                }
-                
-                response_data = (json.dumps(reply) + "\n").encode("utf-8")
-                self.wfile.write(response_data)
-                self.wfile.flush()
-                
-            except json.JSONDecodeError as e:
-                REGISTRY.log(f"Invalid JSON from {peer_ip}: {e}", level="error")
-                break
-            except Exception as e:
-                REGISTRY.log(f"Handler error for {peer_ip}: {e}", level="error") 
-                break
+        finally:
+            # Always clean up connection
+            self._cleanup_connection(node_id, peer_ip)
+
+    def _build_reply(self, node_id: str) -> Dict[str, Any]:
+        """Build reply message with current course assignments"""
+        assigned_action = REGISTRY.assignments.get(node_id)
         
-        # Clean up on disconnect
+        return {
+            "ack": True,
+            "action": assigned_action,
+            "course_status": REGISTRY.course_status,
+            "timestamp": utcnow_iso(),
+            "mesh_network": "smithhome"  # Your mesh network identifier
+        }
+
+    def _send_response(self, data: Dict[str, Any]):
+        """Send JSON response to device with error handling"""
+        try:
+            response_data = (json.dumps(data) + "\n").encode("utf-8")
+            self.wfile.write(response_data)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            REGISTRY.log(f"Failed to send response to device: {e}", level="error")
+            raise  # Re-raise to trigger connection cleanup
+
+    def _send_error_response(self, error_msg: str):
+        """Send error response to device"""
+        try:
+            error_data = {"error": error_msg, "timestamp": utcnow_iso()}
+            self._send_response(error_data)
+        except Exception:
+            pass  # Don't log errors for error responses
+
+    def _cleanup_connection(self, node_id: Optional[str], peer_ip: str):
+        """Clean up when device disconnects"""
         if node_id:
-            REGISTRY.log(f"Device {node_id} disconnected")
+            REGISTRY.log(f"Device {node_id} ({peer_ip}) disconnected")
+            # Mark device as disconnected
+            with REGISTRY.nodes_lock:
+                if node_id in REGISTRY.nodes:
+                    REGISTRY.nodes[node_id]._writer = None
+        else:
+            REGISTRY.log(f"Unknown device {peer_ip} disconnected")
+
 
 class ThreadedTCPServer(socketserver.ThreadingTCPServer):
+    """Enhanced TCP server optimized for field device connections"""
+    
     allow_reuse_address = True
+    daemon_threads = True  # Threads die when main thread dies
+    
+    def __init__(self, server_address, RequestHandlerClass):
+        super().__init__(server_address, RequestHandlerClass)
+        
+        # Configure server socket for reliability
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Set reasonable timeout for accept operations
+        self.socket.settimeout(1.0)
+        
+        REGISTRY.log(f"TCP server configured for mesh network on {server_address}")
+
+    def serve_forever(self, poll_interval=0.5):
+        """Enhanced serve_forever with better shutdown handling"""
+        try:
+            REGISTRY.log("TCP server ready for device connections")
+            super().serve_forever(poll_interval)
+        except KeyboardInterrupt:
+            REGISTRY.log("TCP server shutting down...")
+            self.shutdown()
+
 
 def start_heartbeat_server():
-    srv = ThreadedTCPServer((HOST, HEARTBEAT_TCP_PORT), HeartbeatHandler)
-    t = threading.Thread(target=srv.serve_forever, daemon=True)
-    t.start()
-    REGISTRY.log("TCP heartbeat server started on port 6000")
-    return srv
+    """Start enhanced TCP heartbeat server"""
+    try:
+        srv = ThreadedTCPServer((HOST, HEARTBEAT_TCP_PORT), HeartbeatHandler)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        REGISTRY.log(f"Enhanced TCP heartbeat server started on {HOST}:{HEARTBEAT_TCP_PORT}")
+        REGISTRY.log("Ready for Device 1-5 connections via wlan0 mesh")
+        return srv
+    except OSError as e:
+        REGISTRY.log(f"Failed to start TCP server on port {HEARTBEAT_TCP_PORT}: {e}", level="error")
+        raise
+
+
+def start_connection_monitor():
+    """Optional: Monitor device connections every 30 seconds"""
+    def monitor_connections():
+        while True:
+            time.sleep(30)  # Check every 30 seconds
+            
+            with REGISTRY.nodes_lock:
+                active_devices = [node_id for node_id, node in REGISTRY.nodes.items() 
+                                if node._writer is not None]
+                offline_devices = [node_id for node_id, node in REGISTRY.nodes.items() 
+                                 if node._writer is None and node.status != "Unknown"]
+            
+            if active_devices or offline_devices:
+                REGISTRY.log(f"Connection status - Active: {len(active_devices)}, Offline: {len(offline_devices)}")
+                if offline_devices:
+                    REGISTRY.log(f"Offline devices: {', '.join(offline_devices)}", level="warning")
+    
+    monitor_thread = threading.Thread(target=monitor_connections, daemon=True)
+    monitor_thread.start()
+    REGISTRY.log("Connection monitoring started")
+
 
 if __name__ == "__main__":
     # Run as standalone TCP server
     start_heartbeat_server()
-    REGISTRY.log("Field Trainer Core v5.2 TCP server running")
+    
+    # Optionally start connection monitoring
+    start_connection_monitor()
+    
+    REGISTRY.log("Field Trainer Core v5.2 Enhanced TCP server running")
     try:
         while True:
             time.sleep(1)
