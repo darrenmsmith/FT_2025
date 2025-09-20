@@ -6,7 +6,7 @@
             "type": "shell",
             "command": "ssh",
             "args": [
-                "pi@192.168.99.100",
+                "pi@192.168.7.129",
                 "/opt/field-trainer/scripts/github_deploy.sh"
             ],
             "group": "build",
