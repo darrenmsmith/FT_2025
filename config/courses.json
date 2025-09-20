@@ -1,0 +1,144 @@
+{
+  "courses": [
+    {
+      "name": "Course A",
+      "description": "6-station circuit training loop",
+      "stations": [
+        {
+          "node_id": "192.168.99.100",
+          "action": "lunge",
+          "instruction": "Welcome! Do 10 lunges, then sprint to Device 1"
+        },
+        {
+          "node_id": "192.168.99.101",
+          "action": "sprint",
+          "instruction": "Sprint to Device 2",
+          "distance_yards": 40
+        },
+        {
+          "node_id": "192.168.99.102",
+          "action": "jog",
+          "instruction": "Jog to Device 3",
+          "distance_yards": 30
+        },
+        {
+          "node_id": "192.168.99.103",
+          "action": "backpedal",
+          "instruction": "Backpedal to Device 4",
+          "distance_yards": 25
+        },
+        {
+          "node_id": "192.168.99.104",
+          "action": "carioca",
+          "instruction": "Carioca to Device 5",
+          "distance_yards": 20
+        },
+        {
+          "node_id": "192.168.99.105",
+          "action": "high_knees",
+          "instruction": "High knees back to start",
+          "distance_yards": 30
+        }
+      ]
+    },
+    {
+      "name": "Course B",
+      "description": "Strength circuit with Device 0",
+      "stations": [
+        {
+          "node_id": "192.168.99.100",
+          "action": "welcome",
+          "instruction": "Welcome! Move to Device 1"
+        },
+        {
+          "node_id": "192.168.99.101",
+          "action": "pushups",
+          "instruction": "10 pushups, then move to Device 2",
+          "reps": 10
+        },
+        {
+          "node_id": "192.168.99.102",
+          "action": "situps",
+          "instruction": "15 situps, then return to start",
+          "reps": 15
+        }
+      ]
+    },
+    {
+      "name": "Course C",
+      "description": "Agility and speed training",
+      "stations": [
+        {
+          "node_id": "192.168.99.100",
+          "action": "warmup",
+          "instruction": "Welcome! Light warmup, then move to Device 1"
+        },
+        {
+          "node_id": "192.168.99.101",
+          "action": "ladder_drills",
+          "instruction": "Agility ladder drills - 2 sets",
+          "sets": 2
+        },
+        {
+          "node_id": "192.168.99.102",
+          "action": "cone_drills", 
+          "instruction": "Weave through cones at speed",
+          "distance_yards": 25
+        },
+        {
+          "node_id": "192.168.99.103",
+          "action": "shuttle_run",
+          "instruction": "5-10-5 shuttle run - 3 reps",
+          "reps": 3
+        },
+        {
+          "node_id": "192.168.99.104",
+          "action": "box_jumps",
+          "instruction": "Box jumps - 10 reps",
+          "reps": 10
+        }
+      ]
+    },
+    {
+      "name": "Course D", 
+      "description": "Endurance circuit training",
+      "stations": [
+        {
+          "node_id": "192.168.99.100",
+          "action": "dynamic_warmup",
+          "instruction": "Dynamic warmup - high knees, butt kicks, leg swings"
+        },
+        {
+          "node_id": "192.168.99.101",
+          "action": "burpees",
+          "instruction": "15 burpees at steady pace",
+          "reps": 15
+        },
+        {
+          "node_id": "192.168.99.102",
+          "action": "mountain_climbers",
+          "instruction": "Mountain climbers - 30 seconds",
+          "duration_seconds": 30
+        },
+        {
+          "node_id": "192.168.99.103",
+          "action": "plank_hold",
+          "instruction": "Plank hold - 45 seconds",
+          "duration_seconds": 45
+        },
+        {
+          "node_id": "192.168.99.104",
+          "action": "jumping_jacks",
+          "instruction": "Jumping jacks - 20 reps",
+          "reps": 20
+        },
+        {
+          "node_id": "192.168.99.105",
+          "action": "cool_down_jog",
+          "instruction": "Cool down jog back to start",
+          "distance_yards": 40
+        }
+      ]
+    }
+  ]
+}
