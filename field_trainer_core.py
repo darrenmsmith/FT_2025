@@ -56,31 +56,58 @@ def get_gateway_status() -> Dict[str, Any]:
                 elif 'Cell:' in line:
                     cell = line.split('Cell:')[1].split()[0].strip()
                     status["mesh_cell"] = cell
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"iwconfig wlan0 error: {e}")
     
     try:
-        # Check BATMAN neighbors - use sudo and -H flag
+        # Check BATMAN neighbors - FIXED PARSING
         result = subprocess.run(['sudo', 'batctl', 'n', '-H'], capture_output=True, text=True)
         if result.returncode == 0:
             neighbors = []
-            for line in result.stdout.strip().split('\n'):
+            lines = result.stdout.strip().split('\n')
+            
+            for line in lines:
                 line = line.strip()
                 if line and 'wlan0' in line:
-                    # Parse format: "        wlan0     b8:27:eb:7f:03:d9    0.528s"
+                    # Parse format: "        wlan0     b8:27:eb:5f:52:6b    0.912s"
                     parts = line.split()
-                    if len(parts) >= 3 and 'wlan0' in parts:
-                        # Find wlan0 in the parts and get MAC and time
-                        wlan_index = parts.index('wlan0')
-                        if wlan_index + 2 < len(parts):
-                            mac = parts[wlan_index + 1]
-                            last_seen = parts[wlan_index + 2]
-                            neighbors.append({"mac": mac, "last_seen": last_seen})
+                    if len(parts) >= 3:
+                        # Format: [whitespace] wlan0 [mac_address] [time]
+                        # Find the parts: interface, MAC, time
+                        interface_idx = -1
+                        for i, part in enumerate(parts):
+                            if part == 'wlan0':
+                                interface_idx = i
+                                break
+                        
+                        if interface_idx != -1 and len(parts) > interface_idx + 2:
+                            mac = parts[interface_idx + 1]
+                            last_seen = parts[interface_idx + 2]
+                            
+                            # Validate MAC address format (basic check)
+                            if ':' in mac and len(mac) == 17:  # MAC format: xx:xx:xx:xx:xx:xx
+                                neighbors.append({
+                                    "mac": mac, 
+                                    "last_seen": last_seen,
+                                    "interface": "wlan0"
+                                })
+            
             status["batman_neighbors"] = len(neighbors)
             status["batman_neighbors_list"] = neighbors
+            
+            # Debug logging
+            print(f"BATMAN Debug: Found {len(neighbors)} neighbors")
+            for neighbor in neighbors:
+                print(f"  - {neighbor['mac']} (last seen: {neighbor['last_seen']})")
+                
     except Exception as e:
-        # Log the error for debugging
         print(f"BATMAN neighbor detection error: {e}")
+        # Also log the raw output for debugging
+        try:
+            result = subprocess.run(['sudo', 'batctl', 'n', '-H'], capture_output=True, text=True)
+            print(f"BATMAN raw output: {repr(result.stdout)}")
+        except:
+            pass
     
     try:
         # Check wlan1 connection status
@@ -99,8 +126,8 @@ def get_gateway_status() -> Dict[str, Any]:
                 if 'inet ' in line and 'scope global' in line:
                     ip = line.strip().split()[1].split('/')[0]
                     status["wlan1_ip"] = ip
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"wlan1 status error: {e}")
     
     try:
         # Get system uptime
@@ -109,8 +136,8 @@ def get_gateway_status() -> Dict[str, Any]:
             hours = int(uptime_seconds // 3600)
             minutes = int((uptime_seconds % 3600) // 60)
             status["uptime"] = f"{hours}h {minutes}m"
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Uptime error: {e}")
     
     return status
 
