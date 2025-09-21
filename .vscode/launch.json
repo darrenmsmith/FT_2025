@@ -26,7 +26,7 @@
             "env": {
                 "FLASK_ENV": "development",
                 "FLASK_DEBUG": "1",
-                "PYTHONPATH": "${workspaceFolder}"
+                "PYTHONPATH": "${workspaceFolder}" 
             },
             "args": [],
             "cwd": "${workspaceFolder}"
