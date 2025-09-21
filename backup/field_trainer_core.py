@@ -5,7 +5,6 @@ Field Trainer Core v5.2 - Enhanced Device Management and TCP Server
 - Enhanced TCP heartbeat server for device connectivity
 - Course management and deployment
 - Improved connection handling and reliability
-- Device cell information tracking
 """
 
 import json
@@ -32,14 +31,13 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 def get_gateway_status() -> Dict[str, Any]:
-    """Get comprehensive gateway status information including device cells"""
+    """Get comprehensive gateway status information"""
     status = {
         "mesh_active": False,
         "mesh_ssid": "Unknown",
         "mesh_cell": "Unknown", 
         "batman_neighbors": 0,
         "batman_neighbors_list": [],
-        "device_cells": {},  # New: Track each device's cell
         "wlan1_ssid": "Not connected",
         "wlan1_ip": "Not assigned",
         "uptime": "Unknown"
@@ -58,8 +56,6 @@ def get_gateway_status() -> Dict[str, Any]:
                 elif 'Cell:' in line:
                     cell = line.split('Cell:')[1].split()[0].strip()
                     status["mesh_cell"] = cell
-                    # Add Device 0's cell info
-                    status["device_cells"]["Device 0"] = cell
     except Exception as e:
         print(f"iwconfig wlan0 error: {e}")
     
@@ -70,10 +66,13 @@ def get_gateway_status() -> Dict[str, Any]:
             neighbors = []
             lines = result.stdout.strip().split('\n')
             
-            debug_batman = False  # Set to True for debugging
+            # Use a simple debug flag we can enable/disable
+            debug_batman = True  # Set to False to disable debug output
             
             for line in lines:
                 if line.strip() and 'wlan0' in line:
+                    # Replace tabs with spaces and split on any whitespace
+                    # Format: "········wlan0→··b8:27:eb:5f:52:6b····0.028s"
                     normalized_line = line.replace('\t', ' ')
                     parts = normalized_line.split()
                     
@@ -81,13 +80,15 @@ def get_gateway_status() -> Dict[str, Any]:
                         print(f"BATMAN: Processing line with {len(parts)} parts: {parts}")
                     
                     if len(parts) >= 3:
+                        # Should be: ['wlan0', 'b8:27:eb:xx:xx:xx', 'X.XXXs']
                         interface = parts[0]
                         mac = parts[1] 
                         last_seen = parts[2]
                         
+                        # Validate this looks like our expected format
                         if (interface == 'wlan0' and 
-                            ':' in mac and len(mac) == 17 and
-                            last_seen.endswith('s')):
+                            ':' in mac and len(mac) == 17 and  # MAC format: xx:xx:xx:xx:xx:xx
+                            last_seen.endswith('s')):  # Time format: X.XXXs
                             
                             neighbors.append({
                                 "mac": mac, 
@@ -100,43 +101,18 @@ def get_gateway_status() -> Dict[str, Any]:
             status["batman_neighbors"] = len(neighbors)
             status["batman_neighbors_list"] = neighbors
             
+            # Always log the final count
             print(f"BATMAN: Found {len(neighbors)} mesh neighbors total")
                 
     except Exception as e:
         print(f"BATMAN neighbor detection error: {e}")
-    
-    # Get cell information for other devices
-    try:
-        device_ips = ["192.168.99.101", "192.168.99.102", "192.168.99.103", 
-                      "192.168.99.104", "192.168.99.105"]
-        
-        for ip in device_ips:
-            device_num = ip.split('.')[-1]
-            device_name = f"Device {int(device_num) - 100}"
-            
-            try:
-                # Check if device is reachable first
-                ping_result = subprocess.run(['ping', '-c', '1', '-W', '2', ip], 
-                                           capture_output=True, text=True)
-                if ping_result.returncode == 0:
-                    # Get cell info from remote device
-                    cell_result = subprocess.run([
-                        'ssh', '-o', 'ConnectTimeout=5', f'pi@{ip}', 
-                        'iwconfig wlan0 | grep Cell'
-                    ], capture_output=True, text=True)
-                    
-                    if cell_result.returncode == 0 and 'Cell:' in cell_result.stdout:
-                        cell = cell_result.stdout.split('Cell:')[1].split()[0].strip()
-                        status["device_cells"][device_name] = cell
-                    else:
-                        status["device_cells"][device_name] = "Unknown"
-                else:
-                    status["device_cells"][device_name] = "Offline"
-            except Exception:
-                status["device_cells"][device_name] = "Error"
-                
-    except Exception as e:
-        print(f"Device cell detection error: {e}")
+        # Log the raw output for debugging
+        try:
+            result = subprocess.run(['sudo', 'batctl', 'n', '-H'], capture_output=True, text=True)
+            print(f"BATMAN raw output: {repr(result.stdout)}")
+            print(f"BATMAN raw lines: {result.stdout.split(chr(10))}")
+        except:
+            pass
     
     try:
         # Check wlan1 connection status
@@ -560,7 +536,7 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
             "action": assigned_action,
             "course_status": REGISTRY.course_status,
             "timestamp": utcnow_iso(),
-            "mesh_network": "ft_mesh"
+            "mesh_network": "smithhome"  # Your mesh network identifier
         }
 
     def _send_response(self, data: Dict[str, Any]):
