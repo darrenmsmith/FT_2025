@@ -42,7 +42,7 @@ def utcnow_iso() -> str:
 def get_batman_mesh_info() -> Dict[str, Any]:
     """
     Collect comprehensive mesh information using BATMAN-adv native tools
-    No SSH required - all data from local BATMAN perspective
+    Updated for older batctl versions without JSON support
     """
     mesh_info = {
         "gateway_info": {},
@@ -59,56 +59,98 @@ def get_batman_mesh_info() -> Dict[str, Any]:
         if result.returncode == 0:
             mesh_info["gateway_info"]["interfaces"] = result.stdout.strip().split('\n')
         
-        # 2. Get all mesh originators (all nodes in mesh)
-        result = subprocess.run(['batctl', 'meshif', 'bat0', 'originators', '-J'], 
+        # 2. Get all mesh originators (all nodes in mesh) - TEXT parsing
+        result = subprocess.run(['batctl', 'meshif', 'bat0', 'originators'], 
                               capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            try:
-                originators = json.loads(result.stdout)
-                for orig in originators.get('originators', []):
+            lines = result.stdout.strip().split('\n')
+            for line in lines:
+                # Skip header line and empty lines
+                if line.startswith('[') or 'Originator' in line or not line.strip():
+                    continue
+                
+                # Parse format: "aa:bb:cc:dd:ee:ff    0.123s   (255) aa:bb:cc:dd:ee:ff [wlan0]"
+                parts = line.split()
+                if len(parts) >= 4:
+                    originator = parts[0]
+                    last_seen_str = parts[1]
+                    tq_str = parts[2].strip('()')
+                    next_hop = parts[3]
+                    interface = parts[4].strip('[]') if len(parts) > 4 else 'unknown'
+                    
+                    # Convert last_seen from seconds to milliseconds
+                    try:
+                        last_seen_ms = int(float(last_seen_str.rstrip('s')) * 1000)
+                    except:
+                        last_seen_ms = 0
+                    
+                    # Convert TQ to integer
+                    try:
+                        tq = int(tq_str)
+                    except:
+                        tq = 0
+                    
                     node_info = {
-                        "mac_address": orig.get('originator'),
-                        "last_seen": orig.get('last_seen_msecs', 0),
-                        "next_hop": orig.get('nexthop'),
+                        "mac_address": originator,
+                        "last_seen": last_seen_ms,
+                        "next_hop": next_hop,
                         "link_quality": {
-                            "tq": orig.get('tq', 0),
-                            "tt_crc": orig.get('tt_crc')
+                            "tq": tq,
+                            "tt_crc": None
                         },
-                        "outgoing_interface": orig.get('outgoingIF'),
-                        "device_name": mac_to_device_name(orig.get('originator', ''))
+                        "outgoing_interface": interface,
+                        "device_name": mac_to_device_name(originator)
                     }
                     mesh_info["mesh_nodes"].append(node_info)
-            except json.JSONDecodeError:
-                print("Failed to parse originators JSON")
     
     except Exception as e:
         print(f"Error collecting originators: {e}")
     
     try:
-        # 3. Get direct neighbors (single-hop)
-        result = subprocess.run(['batctl', 'meshif', 'bat0', 'neighbors', '-J'], 
+        # 3. Get direct neighbors (single-hop) - TEXT parsing
+        result = subprocess.run(['batctl', 'meshif', 'bat0', 'neighbors'], 
                               capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            try:
-                neighbors = json.loads(result.stdout)
-                for neighbor in neighbors.get('neighbors', []):
+            lines = result.stdout.strip().split('\n')
+            for line in lines:
+                # Skip header line and empty lines
+                if 'Neighbor' in line or not line.strip():
+                    continue
+                
+                # Parse format: "aa:bb:cc:dd:ee:ff    0.123s (255) [wlan0]"
+                parts = line.split()
+                if len(parts) >= 3:
+                    neighbor_mac = parts[0]
+                    last_seen_str = parts[1]
+                    tq_str = parts[2].strip('()')
+                    interface = parts[3].strip('[]') if len(parts) > 3 else 'wlan0'
+                    
+                    # Convert last_seen and TQ
+                    try:
+                        last_seen_ms = int(float(last_seen_str.rstrip('s')) * 1000)
+                    except:
+                        last_seen_ms = 0
+                    
+                    try:
+                        tq = int(tq_str)
+                    except:
+                        tq = 0
+                    
                     neighbor_info = {
-                        "mac_address": neighbor.get('neighbor'),
-                        "interface": neighbor.get('if'),
-                        "link_quality": neighbor.get('tq', 0),
-                        "last_seen": neighbor.get('lastseen', 0),
-                        "device_name": mac_to_device_name(neighbor.get('neighbor', '')),
+                        "mac_address": neighbor_mac,
+                        "interface": interface,
+                        "link_quality": tq,
+                        "last_seen": last_seen_ms,
+                        "device_name": mac_to_device_name(neighbor_mac),
                         "is_direct_neighbor": True
                     }
                     mesh_info["neighbor_details"].append(neighbor_info)
-            except json.JSONDecodeError:
-                print("Failed to parse neighbors JSON")
     
     except Exception as e:
         print(f"Error collecting neighbors: {e}")
     
     try:
-        # 4. Get mesh statistics
+        # 4. Get mesh statistics - TEXT parsing
         result = subprocess.run(['batctl', 'meshif', 'bat0', 'statistics'], 
                               capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
@@ -128,7 +170,7 @@ def get_batman_mesh_info() -> Dict[str, Any]:
         "total_mesh_nodes": len(mesh_info["mesh_nodes"]),
         "direct_neighbors": len(mesh_info["neighbor_details"]),
         "mesh_active": len(mesh_info["mesh_nodes"]) > 0,
-        "collection_method": "batman-adv native"
+        "collection_method": "batman-adv text parsing"
     }
     
     return mesh_info
