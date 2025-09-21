@@ -4,7 +4,6 @@ Field Trainer Web Interface v5.2 - Flask Web Application
 - Web dashboard for circuit training management
 - REST API for course deployment and monitoring
 - Real-time device status and logging
-- Enhanced device display with cell information
 """
 
 from flask import Flask, jsonify, request
@@ -76,20 +75,6 @@ def index():
 </div>
 
 <script>
-function getDeviceName(nodeId) {
-  if (!nodeId) return 'Unknown Device';
-  
-  const ipParts = nodeId.split('.');
-  if (ipParts.length !== 4) return nodeId;
-  
-  const deviceNum = parseInt(ipParts[3]);
-  if (deviceNum === 100) return 'Start/Finish';
-  if (deviceNum >= 101 && deviceNum <= 199) {
-    return `Device ${deviceNum - 100}`;
-  }
-  return nodeId;
-}
-
 function updateStatus() {
   fetch('/api/state')
     .then(r => r.json())
@@ -102,10 +87,10 @@ function updateStatus() {
       // Update gateway status
       updateGatewayStatus(data.gateway_status);
       
-      // Update devices display with friendly names
+      // Update devices display - show as circuit order
       let deviceHtml = '';
       if (data.nodes && data.nodes.length > 0) {
-        // Sort devices by device number
+        // Sort devices by node_id to show circuit order (0, 1, 2, 3, 4, 5)
         const sortedNodes = data.nodes.sort((a, b) => {
           const aNum = parseInt(a.node_id.split('.').pop());
           const bNum = parseInt(b.node_id.split('.').pop());
@@ -113,11 +98,12 @@ function updateStatus() {
         });
         
         sortedNodes.forEach((n, index) => {
-          const deviceName = getDeviceName(n.node_id);
-          const pingText = n.ping_ms ? n.ping_ms.toFixed(1) + 'ms' : '-';
-          const batteryText = n.battery_level ? n.battery_level.toFixed(1) + '%' : '-';
+          const nodeNum = n.node_id.split('.').pop() || n.node_id;
+          const deviceName = nodeNum === '100' ? 'Start/Finish' : `Device ${nodeNum}`;
+          const pingText = n.ping_ms ? n.ping_ms + 'ms' : '-';
+          const batteryText = n.battery_level ? n.battery_level + '%' : '-';
           const audioIcon = n.audio_working ? '🔊' : '🔇';
-          const accelIcon = n.accelerometer_working ? '📱' : '⌀';
+          const accelIcon = n.accelerometer_working ? '📱' : '❌';
           const arrow = index < sortedNodes.length - 1 ? ' ➔ ' : '';
           
           deviceHtml += `
@@ -162,43 +148,13 @@ function updateGatewayStatus(gw) {
     `<span class="badge bg-success">Connected</span>` :
     `<span class="badge bg-warning">Disconnected</span>`;
 
-  // Build device cell information
-  let deviceCellsHtml = '';
-  if (gw.device_cells && Object.keys(gw.device_cells).length > 0) {
-    deviceCellsHtml = '<div class="mt-3"><strong>Device Mesh Cells:</strong><br>';
-    for (const [deviceName, cellId] of Object.entries(gw.device_cells)) {
-      let cellBadge = 'bg-secondary';
-      let displayCell = cellId;
-      
-      if (cellId === 'Offline') {
-        cellBadge = 'bg-danger';
-      } else if (cellId === 'Unknown' || cellId === 'Error') {
-        cellBadge = 'bg-warning';
-      } else if (cellId.length > 8) {
-        cellBadge = 'bg-info';
-        displayCell = cellId.substring(0, 8) + '...';
-      } else {
-        cellBadge = 'bg-info';
-      }
-      
-      deviceCellsHtml += `<div class="d-flex justify-content-between align-items-center mb-1">
-        <small class="text-muted">${deviceName}:</small>
-        <span class="badge ${cellBadge}" style="font-family: monospace; font-size: 0.7em;">${displayCell}</span>
-      </div>`;
-    }
-    deviceCellsHtml += '</div>';
-  }
-
   const gatewayHtml = `
     <div class="row g-2">
       <div class="col-6"><strong>Mesh Network:</strong></div>
       <div class="col-6">${meshStatus}</div>
       
       <div class="col-6"><strong>SSID:</strong></div>
-      <div class="col-6"><code style="font-size: 0.8em;">${gw.mesh_ssid}</code></div>
-      
-      <div class="col-6"><strong>Gateway Cell:</strong></div>
-      <div class="col-6"><code style="font-size: 0.7em;">${gw.mesh_cell ? gw.mesh_cell.substring(0, 8) + '...' : 'Unknown'}</code></div>
+      <div class="col-6"><code>${gw.mesh_ssid}</code></div>
       
       <div class="col-6"><strong>BATMAN Devices:</strong></div>
       <div class="col-6">${neighborsText}</div>
@@ -207,15 +163,14 @@ function updateGatewayStatus(gw) {
       <div class="col-6">${wlan1Status}</div>
       
       <div class="col-6"><strong>wlan1 SSID:</strong></div>
-      <div class="col-6"><code style="font-size: 0.8em;">${gw.wlan1_ssid}</code></div>
+      <div class="col-6"><code>${gw.wlan1_ssid}</code></div>
       
       <div class="col-6"><strong>wlan1 IP:</strong></div>
-      <div class="col-6"><code style="font-size: 0.8em;">${gw.wlan1_ip}</code></div>
+      <div class="col-6"><code>${gw.wlan1_ip}</code></div>
       
       <div class="col-6"><strong>Uptime:</strong></div>
       <div class="col-6">${gw.uptime}</div>
     </div>
-    ${deviceCellsHtml}
   `;
   
   document.getElementById('gatewayStatus').innerHTML = gatewayHtml;
