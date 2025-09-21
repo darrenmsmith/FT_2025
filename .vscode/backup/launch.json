@@ -60,13 +60,13 @@
             "type": "python",
             "request": "attach",
             "connect": {
-                "host": "192.168.7.129",
+                "host": "192.168.99.100",
                 "port": 5678
             },
             "pathMappings": [
                 {
                     "localRoot": "${workspaceFolder}",
-                    "remoteRoot": "/opt/field-trainer"
+                    "remoteRoot": "/opt/field-trainer/app"
                 }
             ],
             "justMyCode": false

@@ -24,7 +24,7 @@
             "type": "shell",
             "command": "ssh",
             "args": [
-                "pi@192.168.7.129",
+                "pi@192.168.99.100",
                 "/opt/field-trainer/scripts/github_deploy.sh",
                 "${input:branchName}"
             ],
@@ -43,7 +43,7 @@
             "type": "shell",
             "command": "ssh",
             "args": [
-                "pi@192.168.7.129",
+                "pi@192.168.99.100",
                 "sudo systemctl status field-trainer"
             ],
             "group": "test",
@@ -60,7 +60,7 @@
             "type": "shell",
             "command": "ssh",
             "args": [
-                "pi@192.168.7.129",
+                "pi@192.168.99.100",
                 "sudo journalctl -u field-trainer -f"
             ],
             "group": "test",
@@ -79,7 +79,7 @@
             "type": "shell",
             "command": "ssh",
             "args": [
-                "pi@192.168.7.129",
+                "pi@192.168.99.100",
                 "sudo systemctl restart field-trainer"
             ],
             "group": "build",
@@ -110,11 +110,67 @@
             "detail": "Start Field Trainer locally for development"
         },
         {
+            "label": "Run Tests",
+            "type": "shell",
+            "command": "python3",
+            "args": [
+                "-m",
+                "pytest",
+                "tests/",
+                "-v"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Lint Python Code",
+            "type": "shell",
+            "command": "flake8",
+            "args": [
+                ".",
+                "--max-line-length=88",
+                "--exclude=venv,env,.git,__pycache__"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$flake8"
+            ]
+        },
+        {
+            "label": "Format Python Code",
+            "type": "shell",
+            "command": "black",
+            "args": [
+                ".",
+                "--line-length=88"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "Backup Device 0",
             "type": "shell",
             "command": "ssh",
             "args": [
-                "pi@192.168.7.129",
+                "pi@192.168.99.100",
                 "/opt/field-trainer/scripts/backup.sh"
             ],
             "group": "build",
@@ -153,12 +209,49 @@
             "problemMatcher": []
         },
         {
+            "label": "Setup Virtual Environment",
+            "type": "shell",
+            "command": "python3",
+            "args": [
+                "-m",
+                "venv",
+                "venv"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Install Dependencies",
+            "type": "shell",
+            "command": "./venv/bin/pip",
+            "args": [
+                "install",
+                "-r",
+                "requirements.txt"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [],
+            "dependsOn": "Setup Virtual Environment"
+        },
+        {
             "label": "Open Device 0 Web Interface",
             "type": "shell",
             "command": "code",
             "args": [
                 "--open-url",
-                "http://192.168.7.129:5000"
+                "http://192.168.99.100:5000"
             ],
             "group": "test",
             "presentation": {
