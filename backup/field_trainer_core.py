@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-Field Trainer Core v5.2 - Enhanced Device Management and TCP Server
+Field Trainer Core v5.3 - Enhanced Device Management and TCP Server
 - Core device registry and communication logic
 - Enhanced TCP heartbeat server for device connectivity
 - Course management and deployment
+- BATMAN-adv native mesh information collection
 - Improved connection handling and reliability
+
+Version: 5.3.0
+Date: 2025-09-21
+Changes: Replaced SSH-based device discovery with BATMAN-adv native tools
 """
 
 import json
@@ -27,24 +32,226 @@ OFFLINE_SECS = 15
 LOG_MAX = 1000
 COURSE_FILE = "courses.json"
 
+# Version information
+VERSION = "5.3.0"
+VERSION_DATE = "2025-09-21"
+
 def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+def get_batman_mesh_info() -> Dict[str, Any]:
+    """
+    Collect comprehensive mesh information using BATMAN-adv native tools
+    Updated for older batctl versions without JSON support
+    """
+    mesh_info = {
+        "gateway_info": {},
+        "mesh_nodes": [],
+        "neighbor_details": [],
+        "mesh_statistics": {},
+        "routing_table": []
+    }
+    
+    try:
+        # 1. Get mesh interface status
+        result = subprocess.run(['batctl', 'meshif', 'bat0', 'if'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            mesh_info["gateway_info"]["interfaces"] = result.stdout.strip().split('\n')
+        
+        # 2. Get all mesh originators (all nodes in mesh) - TEXT parsing
+        result = subprocess.run(['batctl', 'meshif', 'bat0', 'originators'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            for line in lines:
+                # Skip header line and empty lines
+                if line.startswith('[') or 'Originator' in line or not line.strip():
+                    continue
+                
+                # Parse format: "aa:bb:cc:dd:ee:ff    0.123s   (255) aa:bb:cc:dd:ee:ff [wlan0]"
+                parts = line.split()
+                if len(parts) >= 4:
+                    originator = parts[0]
+                    last_seen_str = parts[1]
+                    tq_str = parts[2].strip('()')
+                    next_hop = parts[3]
+                    interface = parts[4].strip('[]') if len(parts) > 4 else 'unknown'
+                    
+                    # Convert last_seen from seconds to milliseconds
+                    try:
+                        last_seen_ms = int(float(last_seen_str.rstrip('s')) * 1000)
+                    except:
+                        last_seen_ms = 0
+                    
+                    # Convert TQ to integer
+                    try:
+                        tq = int(tq_str)
+                    except:
+                        tq = 0
+                    
+                    node_info = {
+                        "mac_address": originator,
+                        "last_seen": last_seen_ms,
+                        "next_hop": next_hop,
+                        "link_quality": {
+                            "tq": tq,
+                            "tt_crc": None
+                        },
+                        "outgoing_interface": interface,
+                        "device_name": mac_to_device_name(originator)
+                    }
+                    mesh_info["mesh_nodes"].append(node_info)
+    
+    except Exception as e:
+        print(f"Error collecting originators: {e}")
+    
+    try:
+        # 3. Get direct neighbors (single-hop) - TEXT parsing
+        result = subprocess.run(['batctl', 'meshif', 'bat0', 'neighbors'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            for line in lines:
+                # Skip header line and empty lines
+                if 'Neighbor' in line or not line.strip():
+                    continue
+                
+                # Parse format: "aa:bb:cc:dd:ee:ff    0.123s (255) [wlan0]"
+                parts = line.split()
+                if len(parts) >= 3:
+                    neighbor_mac = parts[0]
+                    last_seen_str = parts[1]
+                    tq_str = parts[2].strip('()')
+                    interface = parts[3].strip('[]') if len(parts) > 3 else 'wlan0'
+                    
+                    # Convert last_seen and TQ
+                    try:
+                        last_seen_ms = int(float(last_seen_str.rstrip('s')) * 1000)
+                    except:
+                        last_seen_ms = 0
+                    
+                    try:
+                        tq = int(tq_str)
+                    except:
+                        tq = 0
+                    
+                    neighbor_info = {
+                        "mac_address": neighbor_mac,
+                        "interface": interface,
+                        "link_quality": tq,
+                        "last_seen": last_seen_ms,
+                        "device_name": mac_to_device_name(neighbor_mac),
+                        "is_direct_neighbor": True
+                    }
+                    mesh_info["neighbor_details"].append(neighbor_info)
+    
+    except Exception as e:
+        print(f"Error collecting neighbors: {e}")
+    
+    try:
+        # 4. Get mesh statistics - TEXT parsing
+        result = subprocess.run(['batctl', 'meshif', 'bat0', 'statistics'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            stats_lines = result.stdout.strip().split('\n')
+            stats = {}
+            for line in stats_lines:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    stats[key.strip()] = value.strip()
+            mesh_info["mesh_statistics"] = stats
+    
+    except Exception as e:
+        print(f"Error collecting statistics: {e}")
+    
+    # 5. Add summary information
+    mesh_info["summary"] = {
+        "total_mesh_nodes": len(mesh_info["mesh_nodes"]),
+        "direct_neighbors": len(mesh_info["neighbor_details"]),
+        "mesh_active": len(mesh_info["mesh_nodes"]) > 0,
+        "collection_method": "batman-adv text parsing"
+    }
+    
+    return mesh_info
+
+def mac_to_device_name(mac_address: str) -> str:
+    """
+    Convert MAC address to friendly device name
+    Add your actual device MAC addresses here for proper mapping
+    """
+    # Known MAC mappings for Field Trainer devices
+    mac_mappings = {
+        # Replaced with your actual device MACs
+         "b8:27:eb:a7:e0:81": "Device 0 (Gateway)",
+         "b8:27:eb:60:3c:54": "Device 1",
+         "b8:27:eb:bd:c0:8f": "Device 2",
+         "b8:27:eb:7f:03:d9": "Device 3", 
+         "b8:27:eb:40:ea:f8": "Device 4",
+         "b8:27:eb:1e:e1:94": "Device 5",
+    }
+    
+    device_name = mac_mappings.get(mac_address)
+    if device_name:
+        return device_name
+    
+    # Fallback: try to derive from MAC pattern
+    if mac_address and mac_address.startswith("b8:27:eb"):  # Raspberry Pi MAC prefix
+        return f"Pi Device ({mac_address[-8:]})"
+    
+    return f"Unknown ({mac_address})" if mac_address else "Unknown"
+
+def get_wireless_cell_info() -> Dict[str, str]:
+    """
+    Get local wireless cell information for gateway device
+    """
+    cell_info = {
+        "local_cell_id": "Unknown",
+        "mesh_ssid": "Unknown", 
+        "frequency": "Unknown",
+        "interface": "wlan0"
+    }
+    
+    try:
+        result = subprocess.run(['iwconfig', 'wlan0'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                if 'Cell:' in line:
+                    cell = line.split('Cell:')[1].split()[0].strip()
+                    cell_info["local_cell_id"] = cell
+                elif 'ESSID:' in line:
+                    essid = line.split('ESSID:')[1].strip().strip('"')
+                    if essid != "off/any":
+                        cell_info["mesh_ssid"] = essid
+                elif 'Frequency:' in line:
+                    freq = line.split('Frequency:')[1].split()[0].strip()
+                    cell_info["frequency"] = freq
+    except Exception as e:
+        print(f"Error getting wireless info: {e}")
+    
+    return cell_info
+
 def get_gateway_status() -> Dict[str, Any]:
-    """Get comprehensive gateway status information"""
+    """
+    Get comprehensive gateway status using BATMAN-adv native information
+    Version 5.3: Replaced SSH-based device_cells with BATMAN mesh data
+    """
     status = {
         "mesh_active": False,
         "mesh_ssid": "Unknown",
         "mesh_cell": "Unknown", 
         "batman_neighbors": 0,
         "batman_neighbors_list": [],
+        "mesh_devices": [],  # New: BATMAN-based device information
+        "mesh_statistics": {},  # New: Mesh performance data
         "wlan1_ssid": "Not connected",
         "wlan1_ip": "Not assigned",
-        "uptime": "Unknown"
+        "uptime": "Unknown",
+        "version": VERSION
     }
     
     try:
-        # Check mesh network status (wlan0)
+        # Check local wireless status (wlan0)
         result = subprocess.run(['iwconfig', 'wlan0'], capture_output=True, text=True)
         if result.returncode == 0:
             for line in result.stdout.split('\n'):
@@ -59,60 +266,46 @@ def get_gateway_status() -> Dict[str, Any]:
     except Exception as e:
         print(f"iwconfig wlan0 error: {e}")
     
+    # Get BATMAN mesh information (replaces SSH-based collection)
     try:
-        # Check BATMAN neighbors - FIXED PARSING for tabs and spaces
-        result = subprocess.run(['sudo', 'batctl', 'n', '-H'], capture_output=True, text=True)
-        if result.returncode == 0:
-            neighbors = []
-            lines = result.stdout.strip().split('\n')
-            
-            # Use a simple debug flag we can enable/disable
-            debug_batman = True  # Set to False to disable debug output
-            
-            for line in lines:
-                if line.strip() and 'wlan0' in line:
-                    # Replace tabs with spaces and split on any whitespace
-                    # Format: "········wlan0→··b8:27:eb:5f:52:6b····0.028s"
-                    normalized_line = line.replace('\t', ' ')
-                    parts = normalized_line.split()
-                    
-                    if debug_batman:
-                        print(f"BATMAN: Processing line with {len(parts)} parts: {parts}")
-                    
-                    if len(parts) >= 3:
-                        # Should be: ['wlan0', 'b8:27:eb:xx:xx:xx', 'X.XXXs']
-                        interface = parts[0]
-                        mac = parts[1] 
-                        last_seen = parts[2]
-                        
-                        # Validate this looks like our expected format
-                        if (interface == 'wlan0' and 
-                            ':' in mac and len(mac) == 17 and  # MAC format: xx:xx:xx:xx:xx:xx
-                            last_seen.endswith('s')):  # Time format: X.XXXs
-                            
-                            neighbors.append({
-                                "mac": mac, 
-                                "last_seen": last_seen,
-                                "interface": "wlan0"
-                            })
-                            if debug_batman:
-                                print(f"BATMAN: Added neighbor {mac} (last seen: {last_seen})")
-            
-            status["batman_neighbors"] = len(neighbors)
-            status["batman_neighbors_list"] = neighbors
-            
-            # Always log the final count
-            print(f"BATMAN: Found {len(neighbors)} mesh neighbors total")
-                
+        mesh_info = get_batman_mesh_info()
+        wireless_info = get_wireless_cell_info()
+        
+        # Set BATMAN neighbor count
+        status["batman_neighbors"] = mesh_info["summary"]["total_mesh_nodes"]
+        
+        # Create batman neighbors list with MAC addresses
+        status["batman_neighbors_list"] = [
+            {
+                "mac": node["mac_address"],
+                "last_seen": f"{node['last_seen']/1000:.3f}s",
+                "interface": node.get("outgoing_interface", "wlan0"),
+                "link_quality": node["link_quality"]["tq"]
+            }
+            for node in mesh_info["mesh_nodes"]
+        ]
+        
+        # Create enhanced device information
+        for node in mesh_info["mesh_nodes"]:
+            device_info = {
+                "device_name": node["device_name"],
+                "mac_address": node["mac_address"],
+                "connection_quality": node["link_quality"]["tq"],
+                "last_seen_ms": node["last_seen"],
+                "is_direct_neighbor": any(n["mac_address"] == node["mac_address"] 
+                                        for n in mesh_info["neighbor_details"]),
+                "status": "Active" if node["last_seen"] < 30000 else "Stale",  # 30 second threshold
+                "routing_via": node.get("next_hop", "Direct")
+            }
+            status["mesh_devices"].append(device_info)
+        
+        # Add mesh statistics
+        status["mesh_statistics"] = mesh_info["mesh_statistics"]
+        
+        print(f"BATMAN: Found {len(mesh_info['mesh_nodes'])} mesh devices via native collection")
+        
     except Exception as e:
-        print(f"BATMAN neighbor detection error: {e}")
-        # Log the raw output for debugging
-        try:
-            result = subprocess.run(['sudo', 'batctl', 'n', '-H'], capture_output=True, text=True)
-            print(f"BATMAN raw output: {repr(result.stdout)}")
-            print(f"BATMAN raw lines: {result.stdout.split(chr(10))}")
-        except:
-            pass
+        print(f"BATMAN mesh collection error: {e}")
     
     try:
         # Check wlan1 connection status
@@ -285,7 +478,8 @@ class Registry:
             "course_status": self.course_status,
             "selected_course": self.selected_course,
             "nodes": nodes_list,
-            "gateway_status": get_gateway_status()
+            "gateway_status": get_gateway_status(),
+            "version": VERSION
         }
 
     def send_to_node(self, node_id: str, payload: Dict[str, Any]) -> bool:
@@ -439,6 +633,7 @@ class Registry:
 # Global registry instance
 REGISTRY = Registry()
 
+
 # Enhanced TCP Heartbeat Server
 class HeartbeatHandler(socketserver.StreamRequestHandler):
     """Enhanced heartbeat handler with better connection management"""
@@ -536,7 +731,8 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
             "action": assigned_action,
             "course_status": REGISTRY.course_status,
             "timestamp": utcnow_iso(),
-            "mesh_network": "smithhome"  # Your mesh network identifier
+            "mesh_network": "ft_mesh",
+            "server_version": VERSION
         }
 
     def _send_response(self, data: Dict[str, Any]):
@@ -639,7 +835,7 @@ if __name__ == "__main__":
     # Optionally start connection monitoring
     start_connection_monitor()
     
-    REGISTRY.log("Field Trainer Core v5.2 Enhanced TCP server running")
+    REGISTRY.log(f"Field Trainer Core v{VERSION} Enhanced TCP server running")
     try:
         while True:
             time.sleep(1)
