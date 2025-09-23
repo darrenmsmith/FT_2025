@@ -14,20 +14,6 @@ Changes: Enhanced mesh device display with BATMAN-adv native data
 from flask import Flask, jsonify, request
 from field_trainer_core import REGISTRY, start_heartbeat_server, VERSION
 
-def _get_led_color_display(led_state):
-    """Convert LED state to display name"""
-    from field_trainer_core import LEDState
-    color_map = {
-        LEDState.OFF: "Off",
-        LEDState.MESH_CONNECTED: "Orange",
-        LEDState.COURSE_DEPLOYED: "Blue", 
-        LEDState.COURSE_ACTIVE: "Green",
-        LEDState.SOFTWARE_ERROR: "Red",
-        LEDState.NETWORK_ERROR: "Red Blinking",
-        LEDState.COURSE_COMPLETE: "Rainbow"
-    }
-    return color_map.get(led_state, "Unknown")
-
 # Configuration
 HOST = "0.0.0.0"
 HTTP_PORT = 5000
@@ -52,8 +38,7 @@ def index():
       <div class="card-header">Course Management</div>
       <div class="card-body">
         <div class="mb-3">
-          <div>Status: <span id="status" class="badge bg-secondary">Loading...</span></div>
-          <div id="led-status" class="mt-1">LED Status: Loading...</div>
+          Status: <span id="status" class="badge bg-secondary">Loading...</span>
         </div>
         <select id="courseSelect" class="form-select mb-3">
           <option>Loading courses...</option>
@@ -116,35 +101,6 @@ function getQualityBadge(quality) {{
   return 'bg-secondary';
 }}
 
-function getLEDColorClass(ledState) {
-  switch(ledState) {
-    case 'mesh_connected': return 'bg-warning text-dark';  // Orange
-    case 'course_deployed': return 'bg-primary';           // Blue  
-    case 'course_active': return 'bg-success';             // Green
-    case 'software_error': return 'bg-danger';             // Red
-    case 'network_error': return 'bg-danger';              // Red blinking
-    case 'course_complete': return 'bg-info';              // Rainbow
-    case 'off': default: return 'bg-secondary';            // Off/Unknown
-  }
-}
-
-function updateLEDStatusDisplay(ledStatus) {
-  if (!ledStatus) return;
-  
-  const ledColorClass = getLEDColorClass(ledStatus.global_state);
-  const ledDisplay = ledStatus.global_state.replace('_', ' ').toUpperCase();
-  
-  const ledEl = document.getElementById('led-status');
-  let device0Text = '';
-  if (ledStatus.device_0_led_enabled) {
-    device0Text = ` (Device 0: ${ledStatus.device_0_current_state.replace('_', ' ')})`;
-  } else {
-    device0Text = ' (Device 0: Disabled)';
-  }
-  
-  ledEl.innerHTML = `LED: <span class="badge ${ledColorClass}">💡 ${ledDisplay}</span><small class="text-muted">${device0Text}</small>`;
-}
-
 function updateStatus() {{
   fetch('/api/state')
     .then(r => r.json())
@@ -153,9 +109,7 @@ function updateStatus() {{
       const statusEl = document.getElementById('status');
       statusEl.textContent = data.course_status || 'Inactive';
       statusEl.className = 'badge ' + getStatusClass(data.course_status);
-      // Update LED status display
-      updateLEDStatusDisplay(data.led_status);
-
+      
       // Update mesh status
       updateGatewayStatus(data.gateway_status);
       

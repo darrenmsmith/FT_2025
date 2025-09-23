@@ -58,9 +58,27 @@ class LEDManager:
         self.current_global_state = LEDState.MESH_CONNECTED
         self.device_specific_states = {}
         self.last_command_time = 0.0
-        
-        # Note: Device 0 LED control disabled due to hardware access conflicts
-        # LED commands are managed for client devices only
+    
+    # Enable Device 0 LED control (hardware conflicts resolved)
+        self.device_0_led_enabled = True
+        self.device_0_controller = None
+    
+    # Initialize Device 0 LED hardware
+    try:
+        from led_controller import LEDController
+        self.device_0_controller = LEDController()
+        if self.device_0_controller.initialized:
+            self.device_0_controller.set_state(LEDState.MESH_CONNECTED)
+            registry.log("Device 0 LED controller initialized successfully")
+        else:
+            self.device_0_led_enabled = False
+            registry.log("Device 0 LED hardware not available")
+    except ImportError:
+        self.device_0_led_enabled = False
+        registry.log("Device 0 LED: led_controller module not found")
+    except Exception as e:
+        self.device_0_led_enabled = False
+        registry.log(f"Device 0 LED initialization failed: {e}")
         
     def set_global_state(self, state: LEDState):
         """Set LED state for all client devices (not Device 0)"""
