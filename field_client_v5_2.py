@@ -9,10 +9,7 @@ This client connects to the Field Trainer controller and:
 - Reports sensor data (accelerometer, audio, battery)
 - Executes training actions
 - Controls LED status display for visual feedback
-
-Version: 0.0.3
-Date: 2025-09-22
-Changes: Added LED status system for visual device feedback
+-  Added LED status system for visual device feedback
 """
 
 import json
@@ -44,7 +41,7 @@ LOG_LEVEL = "INFO"
 
 # LED Configuration
 LED_COUNT = 15          # Number of LED pixels
-LED_PIN = 18           # GPIO pin connected to the pixels (BCM numbering)
+LED_PIN = 12           # GPIO pin connected to the pixels (BCM numbering)
 LED_FREQ_HZ = 800000   # LED signal frequency in hertz (usually 800khz)
 LED_DMA = 10           # DMA channel to use for generating signal
 LED_BRIGHTNESS = 128   # Set to 0 for darkest and 255 for brightest (50% brightness)
