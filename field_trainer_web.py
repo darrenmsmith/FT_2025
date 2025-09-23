@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
-Field Trainer Web Interface v5.3 - Flask Web Application with LED Status
+Field Trainer Web Interface v5.3 - Flask Web Application
 - Web dashboard for circuit training management
 - REST API for course deployment and monitoring
 - Real-time device status and logging
 - Enhanced BATMAN-adv mesh information display
-- LED status synchronization with hardware devices
 
-Version: 5.3.2
-Date: 2025-09-23
-Changes: Added LED status display and synchronization
+Version: 5.3.0
+Date: 2025-09-21
+Changes: Enhanced mesh device display with BATMAN-adv native data
 """
 
 from flask import Flask, jsonify, request
-from field_trainer_core import REGISTRY, start_heartbeat_server, VERSION, LEDState
+from field_trainer_core import REGISTRY, start_heartbeat_server, VERSION
 
 # Configuration
 HOST = "0.0.0.0"
@@ -21,19 +20,6 @@ HTTP_PORT = 5000
 
 # Flask Web App
 app = Flask(__name__)
-
-def _get_led_color_display(led_state):
-    """Convert LED state to display name"""
-    color_map = {
-        LEDState.OFF: "Off",
-        LEDState.MESH_CONNECTED: "Orange",
-        LEDState.COURSE_DEPLOYED: "Blue", 
-        LEDState.COURSE_ACTIVE: "Green",
-        LEDState.SOFTWARE_ERROR: "Red",
-        LEDState.NETWORK_ERROR: "Red Blinking",
-        LEDState.COURSE_COMPLETE: "Rainbow"
-    }
-    return color_map.get(led_state, "Unknown")
 
 @app.get("/")
 def index():
@@ -52,8 +38,7 @@ def index():
       <div class="card-header">Course Management</div>
       <div class="card-body">
         <div class="mb-3">
-          <div>Status: <span id="status" class="badge bg-secondary">Loading...</span></div>
-          <div id="led-status" class="mt-1">LED Status: Loading...</div>
+          Status: <span id="status" class="badge bg-secondary">Loading...</span>
         </div>
         <select id="courseSelect" class="form-select mb-3">
           <option>Loading courses...</option>
@@ -116,74 +101,6 @@ function getQualityBadge(quality) {{
   return 'bg-secondary';
 }}
 
-function getLEDColorClass(ledState) {{
-  switch(ledState) {{
-    case 'mesh_connected': return 'bg-warning text-dark';  // Orange
-    case 'course_deployed': return 'bg-primary';           // Blue  
-    case 'course_active': return 'bg-success';             // Green
-    case 'software_error': return 'bg-danger';             // Red
-    case 'network_error': return 'bg-danger';              // Red blinking
-    case 'course_complete': return 'bg-info';              // Rainbow
-    case 'off': default: return 'bg-secondary';            // Off/Unknown
-  }}
-}}
-
-function updateLEDStatusDisplay(ledStatus) {{
-  if (!ledStatus) return;
-  
-  const ledColorClass = getLEDColorClass(ledStatus.global_state);
-  const ledDisplay = ledStatus.global_state.replace('_', ' ').toUpperCase();
-  
-  const ledEl = document.getElementById('led-status');
-  let device0Text = '';
-  if (ledStatus.device_0_led_enabled) {{
-    device0Text = ` (Device 0: ${{ledStatus.device_0_current_state.replace('_', ' ')}})`;
-  }} else {{
-    device0Text = ' (Device 0: Disabled)';
-  }}
-  
-  ledEl.innerHTML = `LED: <span class="badge ${{ledColorClass}}">💡 ${{ledDisplay}}</span><small class="text-muted">${{device0Text}}</small>`;
-}}
-
-function updateDevicesWithLED(data) {{
-  let deviceHtml = '';
-  if (data.nodes && data.nodes.length > 0) {{
-    const sortedNodes = data.nodes.sort((a, b) => {{
-      const aNum = parseInt(a.node_id.split('.').pop());
-      const bNum = parseInt(b.node_id.split('.').pop());
-      return aNum - bNum;
-    }});
-    
-    sortedNodes.forEach((n, index) => {{
-      const deviceName = getDeviceName(n.node_id);
-      const pingText = n.ping_ms ? n.ping_ms.toFixed(1) + 'ms' : '-';
-      const batteryText = n.battery_level ? n.battery_level.toFixed(1) + '%' : '-';
-      const audioIcon = n.audio_working ? '🔊' : '🔇';
-      const accelIcon = n.accelerometer_working ? '📱' : '⌀';
-      const arrow = index < sortedNodes.length - 1 ? ' ➜ ' : '';
-      
-      // LED status display
-      const ledColor = n.led_color || 'Unknown';
-      const ledBadgeClass = getLEDColorClass(n.led_state);
-      
-      deviceHtml += `
-        <div class="mb-2 p-2 border rounded d-flex align-items-center">
-          <div class="flex-grow-1">
-            <strong>${{deviceName}}</strong> 
-            <span class="badge ${{getDeviceStatusClass(n.status)}}">${{n.status}}</span>
-            <span class="badge ${{ledBadgeClass}}">💡 ${{ledColor}}</span><br>
-            <small>Action: ${{n.action || 'None'}} | Ping: ${{pingText}} | Battery: ${{batteryText}} ${{audioIcon}}${{accelIcon}}</small>
-          </div>
-          ${{arrow ? '<div class="text-primary fs-4">' + arrow + '</div>' : ''}}
-        </div>
-      `;
-    }});
-  }} else {{
-    deviceHtml = '<div class="text-muted">No devices connected</div>';
-  }}
-  document.getElementById('devices').innerHTML = deviceHtml;
-}}
-
 function updateStatus() {{
   fetch('/api/state')
     .then(r => r.json())
@@ -193,14 +110,42 @@ function updateStatus() {{
       statusEl.textContent = data.course_status || 'Inactive';
       statusEl.className = 'badge ' + getStatusClass(data.course_status);
       
-      // Update LED status display
-      updateLEDStatusDisplay(data.led_status);
-      
       // Update mesh status
       updateGatewayStatus(data.gateway_status);
       
-      // Update devices display with LED info
-      updateDevicesWithLED(data);
+      // Update devices display with friendly names
+      let deviceHtml = '';
+      if (data.nodes && data.nodes.length > 0) {{
+        // Sort devices by device number
+        const sortedNodes = data.nodes.sort((a, b) => {{
+          const aNum = parseInt(a.node_id.split('.').pop());
+          const bNum = parseInt(b.node_id.split('.').pop());
+          return aNum - bNum;
+        }});
+        
+        sortedNodes.forEach((n, index) => {{
+          const deviceName = getDeviceName(n.node_id);
+          const pingText = n.ping_ms ? n.ping_ms.toFixed(1) + 'ms' : '-';
+          const batteryText = n.battery_level ? n.battery_level.toFixed(1) + '%' : '-';
+          const audioIcon = n.audio_working ? '🔊' : '🔇';
+          const accelIcon = n.accelerometer_working ? '📱' : '⌀';
+          const arrow = index < sortedNodes.length - 1 ? ' ➔ ' : '';
+          
+          deviceHtml += `
+            <div class="mb-2 p-2 border rounded d-flex align-items-center">
+              <div class="flex-grow-1">
+                <strong>${{deviceName}}</strong> 
+                <span class="badge ${{getDeviceStatusClass(n.status)}}">${{n.status}}</span><br>
+                <small>Action: ${{n.action || 'None'}} | Ping: ${{pingText}} | Battery: ${{batteryText}} ${{audioIcon}}${{accelIcon}}</small>
+              </div>
+              ${{arrow ? '<div class="text-primary fs-4">' + arrow + '</div>' : ''}}
+            </div>
+          `;
+        }});
+      }} else {{
+        deviceHtml = '<div class="text-muted">No devices connected</div>';
+      }}
+      document.getElementById('devices').innerHTML = deviceHtml;
       
       // Update button states
       const hasDevices = data.nodes && data.nodes.length > 0;
@@ -436,21 +381,7 @@ def api_courses():
 @app.get("/api/state")
 def api_state():
     try:
-        snapshot = REGISTRY.snapshot()
-        
-        # Add LED status information to the response
-        led_status = REGISTRY.led_manager.get_status_summary()
-        snapshot['led_status'] = led_status
-        
-        # Add individual device LED states for display
-        for node in snapshot.get('nodes', []):
-            node_id = node.get('node_id')
-            if node_id:
-                device_led_state = REGISTRY.led_manager.get_device_state(node_id)
-                node['led_state'] = device_led_state.value
-                node['led_color'] = _get_led_color_display(device_led_state)
-        
-        return jsonify(snapshot)
+        return jsonify(REGISTRY.snapshot())
     except Exception as e:
         REGISTRY.log(f"State API error: {e}", level="error")
         return jsonify({"error": "Internal server error"}), 500
