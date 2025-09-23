@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-Field Trainer Core v5.3 - Enhanced Device Management with LED Status System
+Field Trainer Core v5.3 - Enhanced Device Management and TCP Server
 - Core device registry and communication logic
 - Enhanced TCP heartbeat server for device connectivity
 - Course management and deployment
 - BATMAN-adv native mesh information collection
-- LED status system for visual feedback (ALL devices including Device 0)
 - Improved connection handling and reliability
 
-Version: 5.3.2
-Date: 2025-09-23
-Changes: Enabled Device 0 LED control, hardware conflicts resolved
+Version: 5.3.0
+Date: 2025-09-21
+Changes: Replaced SSH-based device discovery with BATMAN-adv native tools
 """
 
 import json
@@ -23,7 +22,6 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from enum import Enum
 
 import socketserver
 
@@ -35,140 +33,8 @@ LOG_MAX = 1000
 COURSE_FILE = "courses.json"
 
 # Version information
-VERSION = "5.3.2"
-VERSION_DATE = "2025-09-23"
-
-
-class LEDState(Enum):
-    """LED status states for Field Trainer devices"""
-    OFF = "off"
-    MESH_CONNECTED = "mesh_connected"      # Orange solid
-    COURSE_DEPLOYED = "course_deployed"    # Blue solid  
-    COURSE_ACTIVE = "course_active"        # Green solid
-    SOFTWARE_ERROR = "software_error"      # Red solid
-    NETWORK_ERROR = "network_error"        # Red blinking
-    COURSE_COMPLETE = "course_complete"    # Rainbow animation
-
-
-class LEDManager:
-    """Enhanced LED state management for ALL devices including Device 0"""
-    
-    def __init__(self, registry):
-        self.registry = registry
-        self.current_global_state = LEDState.MESH_CONNECTED
-        self.device_specific_states = {}
-        self.last_command_time = 0.0
-        
-        # Enable Device 0 LED control (hardware conflicts resolved)
-        self.device_0_led_enabled = True
-        self.device_0_controller = None
-        
-        # Initialize Device 0 LED hardware
-        try:
-            from led_controller import LEDController
-            self.device_0_controller = LEDController()
-            if self.device_0_controller.initialized:
-                self.device_0_controller.set_state(LEDState.MESH_CONNECTED)
-                registry.log("Device 0 LED controller initialized successfully")
-                self.device_0_led_enabled = True
-            else:
-                self.device_0_led_enabled = False
-                registry.log("Device 0 LED hardware not available")
-        except ImportError:
-            self.device_0_led_enabled = False
-            registry.log("Device 0 LED: led_controller module not found")
-        except Exception as e:
-            self.device_0_led_enabled = False
-            registry.log(f"Device 0 LED initialization failed: {e}")
-        
-    def set_global_state(self, state: LEDState):
-        """Set LED state for all devices including Device 0"""
-        old_state = self.current_global_state
-        self.current_global_state = state
-        self.last_command_time = time.time()
-        self.registry.log(f"LED: Global state change {old_state.value} -> {state.value}")
-        
-        # Update Device 0 LED hardware if enabled
-        if self.device_0_led_enabled and self.device_0_controller:
-            try:
-                self.device_0_controller.set_state(state)
-                self.registry.log(f"Device 0 LED updated to {state.value}")
-            except Exception as e:
-                self.registry.log(f"Device 0 LED update error: {e}")
-        
-        # Clear device-specific states when setting global state
-        self.device_specific_states.clear()
-        
-    def set_device_state(self, device_id: str, state: LEDState):
-        """Set LED state for specific device"""
-        self.device_specific_states[device_id] = state
-        self.registry.log(f"LED: Device {device_id} specific state set to {state.value}")
-        
-        # Handle Device 0 specifically
-        if device_id == "192.168.99.100" and self.device_0_led_enabled and self.device_0_controller:
-            try:
-                self.device_0_controller.set_state(state)
-                self.registry.log(f"Device 0 LED updated to specific state {state.value}")
-            except Exception as e:
-                self.registry.log(f"Device 0 LED specific update error: {e}")
-        
-    def get_device_state(self, device_id: str) -> LEDState:
-        """Get current LED state for device"""
-        return self.device_specific_states.get(device_id, self.current_global_state)
-        
-    def get_led_command(self, device_id: str) -> Dict[str, Any]:
-        """Get LED command for heartbeat response"""
-        state = self.get_device_state(device_id)
-        return {
-            "led_command": {
-                "state": state.value,
-                "timestamp": self.last_command_time
-            }
-        }
-    
-    def handle_device_completion(self, device_id: str):
-        """Handle individual device course completion"""
-        self.set_device_state(device_id, LEDState.COURSE_COMPLETE)
-        self.registry.log(f"LED: Device {device_id} completed course - showing rainbow")
-    
-    def handle_software_error(self, device_id: str = None, error_message: str = ""):
-        """Handle software error indication"""
-        if device_id:
-            self.set_device_state(device_id, LEDState.SOFTWARE_ERROR)
-            self.registry.log(f"LED: Software error on device {device_id} - setting to red: {error_message}")
-        else:
-            self.set_global_state(LEDState.SOFTWARE_ERROR)
-            self.registry.log(f"LED: Global software error - setting all devices to red: {error_message}")
-    
-    def handle_network_error(self, device_id: str = None):
-        """Handle network error indication"""
-        if device_id:
-            self.set_device_state(device_id, LEDState.NETWORK_ERROR)
-            self.registry.log(f"LED: Network error on device {device_id} - setting to blinking red")
-        else:
-            self.set_global_state(LEDState.NETWORK_ERROR)
-            self.registry.log("LED: Global network error - setting all devices to blinking red")
-    
-    def get_status_summary(self) -> Dict[str, Any]:
-        """Get LED status summary for web interface"""
-        return {
-            "global_state": self.current_global_state.value,
-            "device_states": {k: v.value for k, v in self.device_specific_states.items()},
-            "last_command_time": self.last_command_time,
-            "device_0_led_enabled": self.device_0_led_enabled,
-            "client_led_enabled": True,
-            "device_0_current_state": self.get_device_state("192.168.99.100").value
-        }
-    
-    def shutdown(self):
-        """Clean shutdown of LED system"""
-        if self.device_0_led_enabled and self.device_0_controller:
-            try:
-                self.device_0_controller.shutdown()
-                self.registry.log("Device 0 LED controller shut down")
-            except Exception as e:
-                self.registry.log(f"Device 0 LED shutdown error: {e}")
-
+VERSION = "5.3.0"
+VERSION_DATE = "2025-09-21"
 
 def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -529,9 +395,6 @@ class Registry:
         self.assignments: Dict[str, str] = {}  # {node_id: action}
         # Track Device 0 as a virtual node for the circuit
         self.device_0_action: Optional[str] = None
-        
-        # LED Management (ALL devices including Device 0)
-        self.led_manager = LEDManager(self)
 
     def log(self, msg: str, level: str = "info", source: str = "controller", node_id: Optional[str] = None):
         entry = {"ts": utcnow_iso(), "level": level, "source": source, "node_id": node_id, "msg": msg}
@@ -611,18 +474,13 @@ class Registry:
         # Sort by node_id for consistent display
         nodes_list.sort(key=lambda x: x.get("node_id", ""))
         
-        result = {
+        return {
             "course_status": self.course_status,
             "selected_course": self.selected_course,
             "nodes": nodes_list,
             "gateway_status": get_gateway_status(),
             "version": VERSION
         }
-        
-        # Add LED status summary
-        result["led_status"] = self.led_manager.get_status_summary()
-        
-        return result
 
     def send_to_node(self, node_id: str, payload: Dict[str, Any]) -> bool:
         """Enhanced send method with better error handling"""
@@ -655,7 +513,7 @@ class Registry:
                 return False
 
     def deploy_course(self, course_name: str) -> Dict[str, Any]:
-        """Deploy a course to devices with LED state management"""
+        """Deploy a course to devices"""
         try:
             course = next((c for c in self.courses.get("courses", []) if c.get("name") == course_name), None)
             if not course:
@@ -681,4 +539,305 @@ class Registry:
             # Now deploy the new course
             self.selected_course = course_name
             self.course_status = "Deployed"
-            self.assignments = {st
+            self.assignments = {st["node_id"]: st["action"] for st in course.get("stations", [])}
+            
+            # Set Device 0 action
+            device_0_station = next((st for st in course.get("stations", []) if st["node_id"] == "192.168.99.100"), None)
+            if device_0_station:
+                self.device_0_action = device_0_station["action"]
+            
+            self.log(f"Deployed course '{course_name}' with {len(self.assignments)} stations")
+            
+            # Send deployment to connected devices (skip Device 0)
+            success_count = 0
+            for node_id, action in self.assignments.items():
+                if node_id != "192.168.99.100":  # Skip Device 0
+                    deploy_msg = {"deploy": True, "action": action, "course": course_name}
+                    if self.send_to_node(node_id, deploy_msg):
+                        success_count += 1
+
+            # Send "inactive" status to devices NOT in this course
+            with self.nodes_lock:
+                for node_id in self.nodes.keys():
+                    if node_id not in self.assignments and node_id != "192.168.99.100":
+                        inactive_msg = {"deploy": True, "action": None, "course": course_name, "status": "inactive"}
+                        self.send_to_node(node_id, inactive_msg)
+                        self.log(f"Set {node_id} to inactive (not in course)")
+                        
+            self.log(f"Deployment sent to {success_count}/{len(self.assignments)-1} client devices")
+            self.log(f"Devices not in course returned to standby")
+            return {"success": True, "course_status": self.course_status, "deployed_to": success_count}
+            
+        except Exception as e:
+            self.log(f"Deploy error: {e}", level="error")
+            return {"success": False, "error": "Deployment failed"}
+
+    def activate_course(self, course_name: Optional[str] = None) -> Dict[str, Any]:
+        """Activate the deployed course"""
+        try:
+            course_name = course_name or self.selected_course
+            
+            if not course_name:
+                return {"success": False, "error": "No course selected"}
+                
+            self.course_status = "Active"
+            self.log(f"Activated course '{course_name}' - Circuit training ready")
+            
+            # Send activation to assigned devices (Device 0 doesn't need TCP activation)
+            success_count = 0
+            for node_id in self.assignments.keys():
+                if node_id != "192.168.99.100":  # Skip Device 0
+                    if self.send_to_node(node_id, {"cmd": "start"}):
+                        success_count += 1
+            
+            self.log(f"Activation sent to {success_count}/{len(self.assignments)-1} client devices")
+            return {"success": True, "course_status": self.course_status}
+            
+        except Exception as e:
+            self.log(f"Activate error: {e}", level="error")
+            return {"success": False, "error": "Activation failed"}
+
+    def deactivate_course(self) -> Dict[str, Any]:
+        """Deactivate the current course"""
+        try:
+            self.log("Deactivating course")
+            
+            # Send stop command to all assigned devices (except Device 0)
+            for node_id in list(self.assignments.keys()):
+                if node_id != "192.168.99.100":
+                    self.send_to_node(node_id, {"cmd": "stop"})
+            
+            # Reset state
+            self.course_status = "Inactive"
+            self.selected_course = None
+            self.assignments.clear()
+            self.device_0_action = None
+            
+            # Clear device actions
+            with self.nodes_lock:
+                for node in self.nodes.values():
+                    node.action = None
+            
+            self.log("Course deactivated - all devices returned to standby")
+            return {"success": True, "course_status": self.course_status}
+            
+        except Exception as e:
+            self.log(f"Deactivate error: {e}", level="error")
+            return {"success": False, "error": "Deactivation failed"}
+
+    def clear_logs(self):
+        """Clear system logs"""
+        self.logs.clear()
+        self.log("System logs cleared by user")
+
+# Global registry instance
+REGISTRY = Registry()
+
+
+# Enhanced TCP Heartbeat Server
+class HeartbeatHandler(socketserver.StreamRequestHandler):
+    """Enhanced heartbeat handler with better connection management"""
+    
+    def setup(self):
+        """Configure socket when connection is established"""
+        # Enable TCP keep-alive for reliable connection detection
+        self.request.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        
+        # Configure keep-alive timing (Linux/Raspberry Pi)
+        try:
+            # Send keep-alive after 30 seconds of inactivity
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+            # Send keep-alive probes every 5 seconds
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+            # Declare connection dead after 3 failed probes
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        except (OSError, AttributeError):
+            # Keep-alive parameters not available on this platform
+            pass
+        
+        # Set read timeout to detect unresponsive clients
+        self.request.settimeout(45.0)  # 45 second timeout
+        
+        super().setup()
+
+    def handle(self):
+        peer_ip = self.client_address[0]
+        node_id = None
+        
+        REGISTRY.log(f"Device connected from {peer_ip}")
+        
+        try:
+            while True:
+                try:
+                    # Read incoming heartbeat message
+                    line = self.rfile.readline()
+                    if not line:
+                        REGISTRY.log(f"Device {peer_ip} closed connection cleanly")
+                        break
+                    
+                    # Parse JSON message
+                    try:
+                        msg = json.loads(line.decode("utf-8").strip())
+                    except json.JSONDecodeError as e:
+                        REGISTRY.log(f"Invalid JSON from {peer_ip}: {e}", level="error")
+                        # Send error response and continue
+                        self._send_error_response("Invalid JSON format")
+                        continue
+                    
+                    node_id = msg.get("node_id") or peer_ip
+                    
+                    # Update node registry with received data
+                    REGISTRY.upsert_node(
+                        node_id=node_id,
+                        ip=peer_ip,
+                        writer=self.wfile,
+                        status=msg.get("status", "Unknown"),
+                        ping_ms=msg.get("ping_ms"),
+                        hops=msg.get("hops"),
+                        sensors=msg.get("sensors", {}),
+                        accelerometer_working=msg.get("accelerometer_working", False),
+                        audio_working=msg.get("audio_working", False),
+                        battery_level=msg.get("battery_level"),
+                        action=msg.get("action")
+                    )
+                    
+                    # Build and send reply
+                    reply = self._build_reply(node_id)
+                    self._send_response(reply)
+                    
+                except socket.timeout:
+                    REGISTRY.log(f"Timeout from device {peer_ip} - connection may be dead", level="warning")
+                    break
+                except ConnectionResetError:
+                    REGISTRY.log(f"Device {peer_ip} reset connection")
+                    break
+                except BrokenPipeError:
+                    REGISTRY.log(f"Broken pipe to device {peer_ip}")
+                    break
+                except Exception as e:
+                    REGISTRY.log(f"Handler error for {peer_ip}: {e}", level="error")
+                    break
+                    
+        finally:
+            # Always clean up connection
+            self._cleanup_connection(node_id, peer_ip)
+
+    def _build_reply(self, node_id: str) -> Dict[str, Any]:
+        """Build reply message with current course assignments"""
+        assigned_action = REGISTRY.assignments.get(node_id)
+        
+        return {
+            "ack": True,
+            "action": assigned_action,
+            "course_status": REGISTRY.course_status,
+            "timestamp": utcnow_iso(),
+            "mesh_network": "ft_mesh",
+            "server_version": VERSION
+        }
+
+    def _send_response(self, data: Dict[str, Any]):
+        """Send JSON response to device with error handling"""
+        try:
+            response_data = (json.dumps(data) + "\n").encode("utf-8")
+            self.wfile.write(response_data)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            REGISTRY.log(f"Failed to send response to device: {e}", level="error")
+            raise  # Re-raise to trigger connection cleanup
+
+    def _send_error_response(self, error_msg: str):
+        """Send error response to device"""
+        try:
+            error_data = {"error": error_msg, "timestamp": utcnow_iso()}
+            self._send_response(error_data)
+        except Exception:
+            pass  # Don't log errors for error responses
+
+    def _cleanup_connection(self, node_id: Optional[str], peer_ip: str):
+        """Clean up when device disconnects"""
+        if node_id:
+            REGISTRY.log(f"Device {node_id} ({peer_ip}) disconnected")
+            # Mark device as disconnected
+            with REGISTRY.nodes_lock:
+                if node_id in REGISTRY.nodes:
+                    REGISTRY.nodes[node_id]._writer = None
+        else:
+            REGISTRY.log(f"Unknown device {peer_ip} disconnected")
+
+
+class ThreadedTCPServer(socketserver.ThreadingTCPServer):
+    """Enhanced TCP server optimized for field device connections"""
+    
+    allow_reuse_address = True
+    daemon_threads = True  # Threads die when main thread dies
+    
+    def __init__(self, server_address, RequestHandlerClass):
+        super().__init__(server_address, RequestHandlerClass)
+        
+        # Configure server socket for reliability
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Set reasonable timeout for accept operations
+        self.socket.settimeout(1.0)
+        
+        REGISTRY.log(f"TCP server configured for mesh network on {server_address}")
+
+    def serve_forever(self, poll_interval=0.5):
+        """Enhanced serve_forever with better shutdown handling"""
+        try:
+            REGISTRY.log("TCP server ready for device connections")
+            super().serve_forever(poll_interval)
+        except KeyboardInterrupt:
+            REGISTRY.log("TCP server shutting down...")
+            self.shutdown()
+
+
+def start_heartbeat_server():
+    """Start enhanced TCP heartbeat server"""
+    try:
+        srv = ThreadedTCPServer((HOST, HEARTBEAT_TCP_PORT), HeartbeatHandler)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        REGISTRY.log(f"Enhanced TCP heartbeat server started on {HOST}:{HEARTBEAT_TCP_PORT}")
+        REGISTRY.log("Ready for Device 1-5 connections via wlan0 mesh")
+        return srv
+    except OSError as e:
+        REGISTRY.log(f"Failed to start TCP server on port {HEARTBEAT_TCP_PORT}: {e}", level="error")
+        raise
+
+
+def start_connection_monitor():
+    """Optional: Monitor device connections every 30 seconds"""
+    def monitor_connections():
+        while True:
+            time.sleep(30)  # Check every 30 seconds
+            
+            with REGISTRY.nodes_lock:
+                active_devices = [node_id for node_id, node in REGISTRY.nodes.items() 
+                                if node._writer is not None]
+                offline_devices = [node_id for node_id, node in REGISTRY.nodes.items() 
+                                 if node._writer is None and node.status != "Unknown"]
+            
+            if active_devices or offline_devices:
+                REGISTRY.log(f"Connection status - Active: {len(active_devices)}, Offline: {len(offline_devices)}")
+                if offline_devices:
+                    REGISTRY.log(f"Offline devices: {', '.join(offline_devices)}", level="warning")
+    
+    monitor_thread = threading.Thread(target=monitor_connections, daemon=True)
+    monitor_thread.start()
+    REGISTRY.log("Connection monitoring started")
+
+
+if __name__ == "__main__":
+    # Run as standalone TCP server
+    start_heartbeat_server()
+    
+    # Optionally start connection monitoring
+    start_connection_monitor()
+    
+    REGISTRY.log(f"Field Trainer Core v{VERSION} Enhanced TCP server running")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        REGISTRY.log("Shutting down...")
