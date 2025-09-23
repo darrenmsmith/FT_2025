@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Field Trainer Core v5.3 - Enhanced Device Management and TCP Server
+Field Trainer Core v0.0.3 - Enhanced Device Management with LED Status System
 - Core device registry and communication logic
 - Enhanced TCP heartbeat server for device connectivity
 - Course management and deployment
 - BATMAN-adv native mesh information collection
+- LED status system for visual feedback
 - Improved connection handling and reliability
 
-Version: 5.3.0
-Date: 2025-09-21
-Changes: Replaced SSH-based device discovery with BATMAN-adv native tools
+Version: 0.0.3
+Date: 2025-09-22
+Changes: Added LED status system for visual device feedback
 """
 
 import json
@@ -22,6 +23,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from enum import Enum
 
 import socketserver
 
@@ -34,7 +36,79 @@ COURSE_FILE = "courses.json"
 
 # Version information
 VERSION = "5.3.0"
-VERSION_DATE = "2025-09-21"
+VERSION_DATE = "2025-09-22"
+
+
+class LEDState(Enum):
+    """LED status states for Field Trainer devices"""
+    OFF = "off"
+    MESH_CONNECTED = "mesh_connected"      # Orange solid
+    COURSE_DEPLOYED = "course_deployed"    # Blue solid  
+    COURSE_ACTIVE = "course_active"        # Green solid
+    SOFTWARE_ERROR = "software_error"      # Red solid
+    NETWORK_ERROR = "network_error"        # Red blinking
+    COURSE_COMPLETE = "course_complete"    # Rainbow animation
+
+
+class LEDManager:
+    """Server-side LED state management for all Field Trainer devices"""
+    
+    def __init__(self, registry):
+        self.registry = registry
+        self.current_global_state = LEDState.MESH_CONNECTED
+        self.device_specific_states = {}
+        self.last_command_time = 0.0
+        
+    def set_global_state(self, state: LEDState):
+        """Set LED state for all devices"""
+        self.current_global_state = state
+        self.last_command_time = time.time()
+        self.registry.log(f"LED: Setting global state to {state.value}")
+        
+        # Clear device-specific states when setting global state
+        self.device_specific_states.clear()
+        
+    def set_device_state(self, device_id: str, state: LEDState):
+        """Set LED state for specific device"""
+        self.device_specific_states[device_id] = state
+        self.registry.log(f"LED: Device {device_id} state to {state.value}")
+        
+    def get_device_state(self, device_id: str) -> LEDState:
+        """Get current LED state for device"""
+        return self.device_specific_states.get(device_id, self.current_global_state)
+        
+    def get_led_command(self, device_id: str) -> Dict[str, Any]:
+        """Get LED command for heartbeat response"""
+        state = self.get_device_state(device_id)
+        return {
+            "led_command": {
+                "state": state.value,
+                "timestamp": self.last_command_time
+            }
+        }
+    
+    def handle_device_completion(self, device_id: str):
+        """Handle individual device course completion"""
+        self.set_device_state(device_id, LEDState.COURSE_COMPLETE)
+        self.registry.log(f"LED: Device {device_id} completed course - showing rainbow")
+    
+    def handle_software_error(self, device_id: str = None, error_message: str = ""):
+        """Handle software error indication"""
+        if device_id:
+            self.set_device_state(device_id, LEDState.SOFTWARE_ERROR)
+            self.registry.log(f"LED: Software error on device {device_id} - setting to red: {error_message}")
+        else:
+            self.set_global_state(LEDState.SOFTWARE_ERROR)
+            self.registry.log(f"LED: Global software error - setting all devices to red: {error_message}")
+    
+    def get_status_summary(self) -> Dict[str, Any]:
+        """Get LED status summary for web interface"""
+        return {
+            "global_state": self.current_global_state.value,
+            "device_states": {k: v.value for k, v in self.device_specific_states.items()},
+            "last_command_time": self.last_command_time
+        }
+
 
 def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -395,6 +469,9 @@ class Registry:
         self.assignments: Dict[str, str] = {}  # {node_id: action}
         # Track Device 0 as a virtual node for the circuit
         self.device_0_action: Optional[str] = None
+        
+        # LED Management
+        self.led_manager = LEDManager(self)
 
     def log(self, msg: str, level: str = "info", source: str = "controller", node_id: Optional[str] = None):
         entry = {"ts": utcnow_iso(), "level": level, "source": source, "node_id": node_id, "msg": msg}
@@ -474,13 +551,18 @@ class Registry:
         # Sort by node_id for consistent display
         nodes_list.sort(key=lambda x: x.get("node_id", ""))
         
-        return {
+        result = {
             "course_status": self.course_status,
             "selected_course": self.selected_course,
             "nodes": nodes_list,
             "gateway_status": get_gateway_status(),
             "version": VERSION
         }
+        
+        # Add LED status summary
+        result["led_status"] = self.led_manager.get_status_summary()
+        
+        return result
 
     def send_to_node(self, node_id: str, payload: Dict[str, Any]) -> bool:
         """Enhanced send method with better error handling"""
@@ -513,7 +595,7 @@ class Registry:
                 return False
 
     def deploy_course(self, course_name: str) -> Dict[str, Any]:
-        """Deploy a course to devices"""
+        """Deploy a course to devices with LED state management"""
         try:
             course = next((c for c in self.courses.get("courses", []) if c.get("name") == course_name), None)
             if not course:
@@ -563,6 +645,9 @@ class Registry:
                         inactive_msg = {"deploy": True, "action": None, "course": course_name, "status": "inactive"}
                         self.send_to_node(node_id, inactive_msg)
                         self.log(f"Set {node_id} to inactive (not in course)")
+            
+            # LED: Set deployed state (blue)
+            self.led_manager.set_global_state(LEDState.COURSE_DEPLOYED)
                         
             self.log(f"Deployment sent to {success_count}/{len(self.assignments)-1} client devices")
             self.log(f"Devices not in course returned to standby")
@@ -573,7 +658,7 @@ class Registry:
             return {"success": False, "error": "Deployment failed"}
 
     def activate_course(self, course_name: Optional[str] = None) -> Dict[str, Any]:
-        """Activate the deployed course"""
+        """Activate the deployed course with LED state management"""
         try:
             course_name = course_name or self.selected_course
             
@@ -590,6 +675,9 @@ class Registry:
                     if self.send_to_node(node_id, {"cmd": "start"}):
                         success_count += 1
             
+            # LED: Set active state (green)
+            self.led_manager.set_global_state(LEDState.COURSE_ACTIVE)
+            
             self.log(f"Activation sent to {success_count}/{len(self.assignments)-1} client devices")
             return {"success": True, "course_status": self.course_status}
             
@@ -598,7 +686,7 @@ class Registry:
             return {"success": False, "error": "Activation failed"}
 
     def deactivate_course(self) -> Dict[str, Any]:
-        """Deactivate the current course"""
+        """Deactivate the current course with LED state management"""
         try:
             self.log("Deactivating course")
             
@@ -618,6 +706,9 @@ class Registry:
                 for node in self.nodes.values():
                     node.action = None
             
+            # LED: Return to mesh connected state (orange)
+            self.led_manager.set_global_state(LEDState.MESH_CONNECTED)
+            
             self.log("Course deactivated - all devices returned to standby")
             return {"success": True, "course_status": self.course_status}
             
@@ -632,7 +723,6 @@ class Registry:
 
 # Global registry instance
 REGISTRY = Registry()
-
 
 # Enhanced TCP Heartbeat Server
 class HeartbeatHandler(socketserver.StreamRequestHandler):
@@ -723,10 +813,10 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
             self._cleanup_connection(node_id, peer_ip)
 
     def _build_reply(self, node_id: str) -> Dict[str, Any]:
-        """Build reply message with current course assignments"""
+        """Build reply message with LED commands"""
         assigned_action = REGISTRY.assignments.get(node_id)
         
-        return {
+        reply = {
             "ack": True,
             "action": assigned_action,
             "course_status": REGISTRY.course_status,
@@ -734,6 +824,12 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
             "mesh_network": "ft_mesh",
             "server_version": VERSION
         }
+        
+        # Add LED command
+        led_command = REGISTRY.led_manager.get_led_command(node_id)
+        reply.update(led_command)
+        
+        return reply
 
     def _send_response(self, data: Dict[str, Any]):
         """Send JSON response to device with error handling"""
@@ -835,7 +931,7 @@ if __name__ == "__main__":
     # Optionally start connection monitoring
     start_connection_monitor()
     
-    REGISTRY.log(f"Field Trainer Core v{VERSION} Enhanced TCP server running")
+    REGISTRY.log(f"Field Trainer Core v{VERSION} Enhanced TCP server with LED support running")
     try:
         while True:
             time.sleep(1)

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Field Trainer Core v0.0.3 - Enhanced Device Management with LED Status System
+Field Trainer Core v5.3 - Enhanced Device Management with LED Status System
 - Core device registry and communication logic
 - Enhanced TCP heartbeat server for device connectivity
 - Course management and deployment
 - BATMAN-adv native mesh information collection
-- LED status system for visual feedback
+- LED status system for visual feedback (client device control only)
 - Improved connection handling and reliability
 
-Version: 0.0.3
+Version: 5.3.1
 Date: 2025-09-22
-Changes: Added LED status system for visual device feedback
+Changes: Stable LED management without Device 0 hardware access
 """
 
 import json
@@ -35,7 +35,7 @@ LOG_MAX = 1000
 COURSE_FILE = "courses.json"
 
 # Version information
-VERSION = "5.3.0"
+VERSION = "5.3.1"
 VERSION_DATE = "2025-09-22"
 
 
@@ -51,7 +51,7 @@ class LEDState(Enum):
 
 
 class LEDManager:
-    """Server-side LED state management for all Field Trainer devices"""
+    """Server-side LED state management for client devices (Devices 1-5)"""
     
     def __init__(self, registry):
         self.registry = registry
@@ -59,17 +59,20 @@ class LEDManager:
         self.device_specific_states = {}
         self.last_command_time = 0.0
         
+        # Note: Device 0 LED control disabled due to hardware access conflicts
+        # LED commands are managed for client devices only
+        
     def set_global_state(self, state: LEDState):
-        """Set LED state for all devices"""
+        """Set LED state for all client devices (not Device 0)"""
         self.current_global_state = state
         self.last_command_time = time.time()
-        self.registry.log(f"LED: Setting global state to {state.value}")
+        self.registry.log(f"LED: Setting global state to {state.value} for client devices")
         
         # Clear device-specific states when setting global state
         self.device_specific_states.clear()
         
     def set_device_state(self, device_id: str, state: LEDState):
-        """Set LED state for specific device"""
+        """Set LED state for specific client device"""
         self.device_specific_states[device_id] = state
         self.registry.log(f"LED: Device {device_id} state to {state.value}")
         
@@ -101,12 +104,23 @@ class LEDManager:
             self.set_global_state(LEDState.SOFTWARE_ERROR)
             self.registry.log(f"LED: Global software error - setting all devices to red: {error_message}")
     
+    def handle_network_error(self, device_id: str = None):
+        """Handle network error indication"""
+        if device_id:
+            self.set_device_state(device_id, LEDState.NETWORK_ERROR)
+            self.registry.log(f"LED: Network error on device {device_id} - setting to blinking red")
+        else:
+            self.set_global_state(LEDState.NETWORK_ERROR)
+            self.registry.log("LED: Global network error - setting all devices to blinking red")
+    
     def get_status_summary(self) -> Dict[str, Any]:
         """Get LED status summary for web interface"""
         return {
             "global_state": self.current_global_state.value,
             "device_states": {k: v.value for k, v in self.device_specific_states.items()},
-            "last_command_time": self.last_command_time
+            "last_command_time": self.last_command_time,
+            "device_0_led_enabled": False,  # Indicates Device 0 LED control is disabled
+            "client_led_enabled": True      # Client devices receive LED commands
         }
 
 
@@ -470,7 +484,7 @@ class Registry:
         # Track Device 0 as a virtual node for the circuit
         self.device_0_action: Optional[str] = None
         
-        # LED Management
+        # LED Management (client devices only)
         self.led_manager = LEDManager(self)
 
     def log(self, msg: str, level: str = "info", source: str = "controller", node_id: Optional[str] = None):
@@ -646,7 +660,7 @@ class Registry:
                         self.send_to_node(node_id, inactive_msg)
                         self.log(f"Set {node_id} to inactive (not in course)")
             
-            # LED: Set deployed state (blue)
+            # LED: Set deployed state (blue) for client devices
             self.led_manager.set_global_state(LEDState.COURSE_DEPLOYED)
                         
             self.log(f"Deployment sent to {success_count}/{len(self.assignments)-1} client devices")
@@ -675,7 +689,7 @@ class Registry:
                     if self.send_to_node(node_id, {"cmd": "start"}):
                         success_count += 1
             
-            # LED: Set active state (green)
+            # LED: Set active state (green) for client devices
             self.led_manager.set_global_state(LEDState.COURSE_ACTIVE)
             
             self.log(f"Activation sent to {success_count}/{len(self.assignments)-1} client devices")
@@ -689,6 +703,13 @@ class Registry:
         """Deactivate the current course with LED state management"""
         try:
             self.log("Deactivating course")
+            
+            # LED: Return to mesh connected state (orange) BEFORE sending stop commands
+            # This ensures the LED command is sent while devices are still connected
+            self.led_manager.set_global_state(LEDState.MESH_CONNECTED)
+            
+            # Small delay to ensure LED command is processed
+            time.sleep(0.5)
             
             # Send stop command to all assigned devices (except Device 0)
             for node_id in list(self.assignments.keys()):
@@ -705,9 +726,6 @@ class Registry:
             with self.nodes_lock:
                 for node in self.nodes.values():
                     node.action = None
-            
-            # LED: Return to mesh connected state (orange)
-            self.led_manager.set_global_state(LEDState.MESH_CONNECTED)
             
             self.log("Course deactivated - all devices returned to standby")
             return {"success": True, "course_status": self.course_status}
