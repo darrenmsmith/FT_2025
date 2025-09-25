@@ -51,7 +51,7 @@ class LEDState(Enum):
 
 
 class LEDManager:
-    """Server-side LED state management for client devices"""
+    """Server-side LED state management for ALL devices including Device 0"""
     
     def __init__(self, registry):
         self.registry = registry
@@ -59,12 +59,66 @@ class LEDManager:
         self.device_specific_states = {}
         self.last_command_time = 0.0
         
+        # Enable Device 0 LED control
+        self.device_0_led_enabled = True
+        self.device_0_controller = None
+        
+    # Initialize Device 0 LED hardware directly
+        try:
+            from rpi_ws281x import PixelStrip, Color
+            self.device_0_strip = PixelStrip(15, 12, 800000, 10, False, 128, 0)
+            self.device_0_strip.begin()
+            self.device_0_led_enabled = True
+            # Set initial orange state
+            for i in range(15):
+                self.device_0_strip.setPixelColor(i, Color(255, 165, 0))
+            self.device_0_strip.show()
+            registry.log("Device 0 LED hardware initialized successfully")
+        except ImportError:
+            self.device_0_led_enabled = False
+            self.device_0_strip = None
+            registry.log("Device 0 LED: rpi_ws281x not available")
+        except Exception as e:
+            self.device_0_led_enabled = False
+            self.device_0_strip = None
+            registry.log(f"Device 0 LED hardware initialization failed: {e}")        
+
     def set_global_state(self, state: LEDState):
-        """Set LED state for client devices"""
+        """Set LED state for ALL devices including Device 0"""
+        old_state = self.current_global_state
         self.current_global_state = state
         self.last_command_time = time.time()
-        self.registry.log(f"LED: Setting global state to {state.value}")
-        
+        self.registry.log(f"LED: Global state change {old_state.value} -> {state.value}")
+    
+        # Update Device 0 LED hardware if enabled
+        if self.device_0_led_enabled and self.device_0_strip:
+            try:
+                from rpi_ws281x import Color
+                # Define colors for each state
+                if state == LEDState.OFF:
+                    color = Color(0, 0, 0)
+                elif state == LEDState.MESH_CONNECTED:
+                    color = Color(255, 165, 0)  # Orange
+                elif state == LEDState.COURSE_DEPLOYED:
+                    color = Color(0, 0, 255)    # Blue
+                elif state == LEDState.COURSE_ACTIVE:
+                    color = Color(0, 255, 0)    # Green
+                elif state == LEDState.SOFTWARE_ERROR:
+                    color = Color(255, 0, 0)    # Red
+                elif state == LEDState.NETWORK_ERROR:
+                    color = Color(255, 0, 0)    # Red
+                elif state == LEDState.COURSE_COMPLETE:
+                    color = Color(128, 0, 255)  # Purple
+                else:
+                    color = Color(0, 0, 0)
+                # Set all LEDs to the color
+                for i in range(15):
+                    self.device_0_strip.setPixelColor(i, color)
+                self.device_0_strip.show()
+                self.registry.log(f"Device 0 LED hardware updated to {state.value}")
+            except Exception as e:
+                self.registry.log(f"Device 0 LED hardware update error: {e}")
+
     def get_led_command(self, node_id: str) -> Dict[str, Any]:
         """Get LED command for heartbeat response"""
         return {
@@ -73,16 +127,22 @@ class LEDManager:
                 "timestamp": self.last_command_time
             }
         }
-        
+
+
     def get_status_summary(self) -> Dict[str, Any]:
         """Get LED status summary for web interface"""
         return {
             "global_state": self.current_global_state.value,
             "device_states": {k: v.value for k, v in self.device_specific_states.items()},
             "last_command_time": self.last_command_time,
-            "device_0_led_enabled": False,
+            "device_0_led_enabled": self.device_0_led_enabled,
             "client_led_enabled": True
-        }
+        }        
+    def shutdown(self):
+        """Clean shutdown of the registry and LED system"""
+        self.led_manager.shutdown()
+        self.log("Registry shutdown complete")
+
 
 
 def utcnow_iso() -> str:

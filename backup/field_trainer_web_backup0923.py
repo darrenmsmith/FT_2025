@@ -336,15 +336,6 @@ def api_state():
         return jsonify(snapshot)
     except Exception as e:
         REGISTRY.log(f"State API error: {e}", level="error")
-        return jsonify({"error": "Internal server error"}), 500 
-       
-        # Add LED status information to the response
-        led_status = REGISTRY.led_manager.get_status_summary()
-        snapshot['led_status'] = led_status
-        
-        return jsonify(snapshot)
-    except Exception as e:
-        REGISTRY.log(f"State API error: {e}", level="error")
         return jsonify({"error": "Internal server error"}), 500
 
 @app.get("/api/logs")
