@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Field Trainer Core v0.0.4 Date: 2025-09-26
-- Enhanced Device Management with LED Status System
+Field Trainer Core v5.3 - Enhanced Device Management with LED Status System
 - Core device registry and communication logic
 - Enhanced TCP heartbeat server for device connectivity
 - Course management and deployment
 - BATMAN-adv native mesh information collection
 - LED status system for visual feedback
 - Improved connection handling and reliability
-- Added LED management system with TCP heartbeat integration
-- Added ClockSyncManager Class
+
+Version: 5.3.1
+Date: 2025-09-23
+Changes: Added LED management system with TCP heartbeat integration
 """
 
 import json
@@ -34,135 +35,10 @@ LOG_MAX = 1000
 COURSE_FILE = "courses.json"
 
 # Version information
-VERSION = "0.0.4"
-VERSION_DATE = "2025-09-26"
+VERSION = "5.3.1"
+VERSION_DATE = "2025-09-23"
 
-class ClockSyncManager:
-    """Basic clock synchronization manager"""
-    def __init__(self, registry, is_gateway=True):
-        self.registry = registry
-        self.is_gateway = is_gateway
-        self.sync_interval = 600  # 10 minutes
-        self.clock_offset = 0.0
-        self.running = False
-        self.last_sync_time = 0
-        
-    def get_synchronized_time(self):
-        if self.is_gateway:
-            return time.time()
-        else:
-            return time.time() + self.clock_offset
 
-    def get_synchronized_timestamp(self):
-        """Get ISO timestamp synchronized with master"""
-        sync_time = self.get_synchronized_time()
-        return datetime.fromtimestamp(sync_time, timezone.utc).isoformat(timespec="milliseconds")
-
-    def start(self):
-        """Start automatic sync service"""
-        self.running = True
-        self.sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
-        self.sync_thread.start()
-
-    def _sync_loop(self):
-        """Continuous sync monitoring and correction"""
-        while self.running:
-            try:
-                if self.is_gateway:
-                    # Gateway: Monitor client sync status
-                    self._monitor_client_sync()
-                else:
-                    # Client: Perform sync with gateway
-                    self._perform_client_sync()
-            
-                time.sleep(self.sync_interval)
-            except Exception as e:
-                self.registry.log(f"Clock sync error: {e}", level="error")
-                time.sleep(5)
-
-    def _monitor_client_sync(self):
-        """Monitor and correct client device time drift"""
-        with self.registry.nodes_lock:
-            for node_id, node in self.registry.nodes.items():
-                if hasattr(node, 'last_sync_offset') and abs(node.last_sync_offset) > 2.0:
-                    self.registry.log(f"Device {node_id} drift detected: {node.last_sync_offset:.3f}s")
-
-    def _perform_client_sync(self):
-        """Client sync with gateway - used by client devices"""
-        # This runs on client devices to maintain sync
-        self.last_sync_time = time.time()
-
-    def process_time_sync_data(self, master_timestamp, network_delay=0.0):
-        """Process sync data from heartbeat responses"""
-        if not self.is_gateway:
-            local_time = time.time()
-            self.clock_offset = master_timestamp - local_time + (network_delay / 2)
-
-    def get_sync_status(self):
-        """Get synchronization status"""
-        return {
-            "is_master": self.is_gateway,
-            "synchronized": True
-        }
-
-    def set_sync_interval(self, minutes):
-        """Set sync interval in minutes"""
-        self.sync_interval = minutes * 60
-        self.registry.log(f"Clock sync interval set to {minutes} minutes")
-
-    def get_sync_interval_minutes(self):
-        """Get current sync interval in minutes"""
-        return self.sync_interval / 60
-
-class TimingCapture:
-    def __init__(self, registry):
-        self.registry = registry
-        self.current_session = None
-        self.session_start_time = None
-        
-    def start_session(self, athlete_name, course_name):
-        start_time = self.registry.clock_sync.get_synchronized_time()
-        self.current_session = {
-            "athlete_name": athlete_name,
-            "course_name": course_name,
-            "start_time": start_time,
-            "events": []
-        }
-        self.session_start_time = start_time
-
-def record_device_completion(self, device_id, action):
-        """Record when a device action is completed"""
-        if not self.current_session:
-            return
-            
-        event_time = self.registry.clock_sync.get_synchronized_time()
-        elapsed_time = event_time - self.session_start_time
-        
-        event = {
-            "device_id": device_id,
-            "action": action,
-            "elapsed_time": elapsed_time,
-            "timestamp": event_time
-        }
-        
-        self.current_session["events"].append(event)
-        self.registry.log(f"Timing: Device {device_id} completed '{action}' at {elapsed_time:.3f}s")
-
-        
-def record_device_completion(self, device_id, action):
-        if not self.current_session:
-            return
-        event_time = self.registry.clock_sync.get_synchronized_time()
-        elapsed_time = event_time - self.session_start_time
-        
-        event = {
-            "device_id": device_id,
-            "action": action,
-            "elapsed_time": elapsed_time
-        }
-        self.current_session["events"].append(event)
-        self.registry.log(f"Device {device_id} completed at {elapsed_time:.3f}s")
-        
 class LEDState(Enum):
     """LED status states for Field Trainer devices"""
     OFF = "off"
@@ -187,17 +63,25 @@ class LEDManager:
         self.device_0_led_enabled = True
         self.device_0_controller = None
         
-        # Initialize Device 0 LED hardware
+    # Initialize Device 0 LED hardware directly
         try:
             from rpi_ws281x import PixelStrip, Color
             self.device_0_strip = PixelStrip(15, 12, 800000, 10, False, 128, 0)
             self.device_0_strip.begin()
             self.device_0_led_enabled = True
-            registry.log("Device 0 LED hardware initialized")
+            # Set initial orange state
+            for i in range(15):
+                self.device_0_strip.setPixelColor(i, Color(255, 165, 0))
+            self.device_0_strip.show()
+            registry.log("Device 0 LED hardware initialized successfully")
+        except ImportError:
+            self.device_0_led_enabled = False
+            self.device_0_strip = None
+            registry.log("Device 0 LED: rpi_ws281x not available")
         except Exception as e:
             self.device_0_led_enabled = False
             self.device_0_strip = None
-            registry.log(f"Device 0 LED init failed: {e}")
+            registry.log(f"Device 0 LED hardware initialization failed: {e}")        
 
     def set_global_state(self, state: LEDState):
         """Set LED state for ALL devices including Device 0"""
@@ -623,10 +507,6 @@ class Registry:
         
         # LED Management
         self.led_manager = LEDManager(self)
-        
-        # Clock Sync and timing 
-        self.clock_sync = ClockSyncManager(self, is_gateway=True)
-        self.timing_capture = TimingCapture(self)
 
     def log(self, msg: str, level: str = "info", source: str = "controller", node_id: Optional[str] = None):
         entry = {"ts": utcnow_iso(), "level": level, "source": source, "node_id": node_id, "msg": msg}
@@ -973,8 +853,7 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
             "course_status": REGISTRY.course_status,
             "timestamp": utcnow_iso(),
             "mesh_network": "ft_mesh",
-            "server_version": VERSION,
-            "master_time": REGISTRY.clock_sync.get_synchronized_time()
+            "server_version": VERSION
         }
         
         # Add LED command

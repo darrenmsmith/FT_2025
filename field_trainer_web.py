@@ -338,15 +338,6 @@ def api_state():
         REGISTRY.log(f"State API error: {e}", level="error")
         return jsonify({"error": "Internal server error"}), 500 
        
-        # Add LED status information to the response
-        led_status = REGISTRY.led_manager.get_status_summary()
-        snapshot['led_status'] = led_status
-        
-        return jsonify(snapshot)
-    except Exception as e:
-        REGISTRY.log(f"State API error: {e}", level="error")
-        return jsonify({"error": "Internal server error"}), 500
-
 @app.get("/api/logs")
 def api_logs():
     limit = int(request.args.get("limit", 100))
@@ -383,6 +374,8 @@ def api_activate():
         
         result = REGISTRY.activate_course(course_name)
         if result.get("success"):
+            # Start timing session when course activates
+            REGISTRY.timing_capture.start_session("Test Athlete", course_name or "Unknown Course") 
             return jsonify(result)
         else:
             return jsonify(result), 400
@@ -390,6 +383,12 @@ def api_activate():
     except Exception as e:
         REGISTRY.log(f"Activate API error: {e}", level="error")
         return jsonify({"success": False, "error": "Activation failed"}), 500
+
+@app.get("/api/timing")
+def api_timing():
+    if REGISTRY.timing_capture.current_session:
+        return jsonify(REGISTRY.timing_capture.current_session)
+    return jsonify({"active_session": False})
 
 @app.post("/api/deactivate")
 def api_deactivate():
