@@ -1,0 +1,151 @@
+/* ===== Global ===== */
+body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background-color: #f5f6fa;
+    color: #333;
+}
+
+.navbar {
+    border-bottom: 2px solid #444;
+}
+
+/* ===== Cards ===== */
+.card {
+    border: none;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.card-header {
+    background: #343a40;
+    color: #fff;
+    font-weight: 600;
+    font-size: 1rem;
+    padding: 0.75rem 1rem;
+}
+
+.card-body {
+    background: #fff;
+    padding: 1rem 1.25rem;
+}
+
+/* ===== Logs ===== */
+.log-window {
+    height: 300px;
+    overflow-y: auto;
+    background: #1e1e1e;
+    color: #dcdcdc;
+    font-size: 0.85rem;
+    padding: 1rem;
+    border-radius: 8px;
+    white-space: pre-wrap;
+}
+
+/* ===== Unified Buttons (Slate Palette) ===== */
+.btn {
+    border-radius: 10px;
+    font-weight: 600;
+    padding: 0.75rem 1rem;
+    min-width: 140px;
+    text-align: center;
+    transition: all 0.15s ease-in-out;
+    border: none;
+    color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Smaller variant (for System Log Clear button) */
+.btn-sm {
+    padding: 0.35rem 0.75rem;
+    min-width: auto;
+    font-size: 0.8rem;
+}
+
+.btn-action {
+    background-color: #4A5568;
+    /* Slate 600 */
+    color: #fff !important;
+}
+
+.btn-action:hover:not(:disabled) {
+    background-color: #2D3748;
+    /* Slate 700 */
+    color: #fff !important;
+    transform: scale(1.03);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-action:active {
+    background-color: #1A202C;
+    /* Slate 800 */
+    color: #fff !important;
+    transform: scale(0.97);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.btn:disabled,
+.btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed !important;
+    box-shadow: none;
+    background-color: #CBD5E0;
+    /* Slate 300 */
+    color: #F7FAFC !important;
+}
+
+/* ===== Scrollbars ===== */
+.log-window::-webkit-scrollbar,
+#devices::-webkit-scrollbar {
+    width: 8px;
+}
+
+.log-window::-webkit-scrollbar-thumb,
+#devices::-webkit-scrollbar-thumb {
+    background-color: #888;
+    border-radius: 4px;
+}
+
+.log-window::-webkit-scrollbar-thumb:hover,
+#devices::-webkit-scrollbar-thumb:hover {
+    background-color: #555;
+}
+
+/* ===== Mesh Network Card ===== */
+#gatewayStatus {
+    font-size: 0.9rem;
+    color: #111;
+}
+
+#gatewayStatus .row strong {
+    font-weight: 600;
+    color: #111;
+}
+
+#gatewayStatus .value {
+    font-weight: 500;
+    color: #111;
+}
+
+#gatewayStatus .badge {
+    font-size: 0.75rem;
+    padding: 0.35em 0.6em;
+    border-radius: 6px;
+    color: #fff !important;
+}
+
+/* Divider between status and details */
+#gatewayStatus hr {
+    border: 0;
+    border-top: 3px solid #2D3748;
+}
+
+.device-icons {
+    font-size: 1rem;
+    min-width: 120px;
+    /* keeps alignment consistent across rows */
+    text-align: right;
+}
+
+.device-icons span {
+    display: inline-block;
+}
