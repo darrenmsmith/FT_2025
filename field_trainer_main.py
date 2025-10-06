@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
 Field Trainer – Main Application Launcher
-- Starts the TCP heartbeat server
-- Runs the Flask web UI
-- Centralized VERSION comes from the single source of truth
+-------------------------------------------------
+Starts:
+  1) The TCP heartbeat server (devices connect here)
+  2) The Flask web UI (dashboard + REST API)
+
+Key characteristics:
+- Single version source imported from field_trainer.ft_version
+- Clean signal handling (Ctrl+C and SIGTERM)
+- Graceful shutdown: stop heartbeat + turn off server LEDs (if enabled)
+- CLI flags with environment fallbacks
 
 CLI:
-  --host 0.0.0.0   (default from env FIELD_TRAINER_HOST or 0.0.0.0)
-  --port 5000      (default from env FIELD_TRAINER_PORT or 5000)
-  --debug 0/1      (default from env FIELD_TRAINER_DEBUG or 0)
+  python field_trainer_main.py --host 0.0.0.0 --port 5000 --debug 0
+ENV:
+  FIELD_TRAINER_HOST, FIELD_TRAINER_PORT, FIELD_TRAINER_DEBUG
 """
 
 import os
@@ -18,36 +25,39 @@ import signal
 import argparse
 from typing import Any, Optional
 
-# Import the web app and public API via the shim to keep imports stable
-from field_trainer_core import VERSION, start_heartbeat_server, REGISTRY
-from field_trainer_web import app
+# Public API imports (web app + system services)
+from field_trainer.ft_version import VERSION
+from field_trainer.ft_heartbeat import start_heartbeat_server
+from field_trainer.ft_registry import REGISTRY
+from field_trainer_web import app  # Flask app instance & routes
 
+# Global shutdown flag (if you add background loops later, they can poll this)
 _SHUTDOWN_REQUESTED = False
 
 
 def _signal_handler(signum, frame):
-    """Flip a shutdown flag so background loops/servers can exit gracefully."""
+    """Basic signal handler: flip a flag so long-running tasks can exit promptly."""
+    del signum, frame
     global _SHUTDOWN_REQUESTED
     _SHUTDOWN_REQUESTED = True
 
 
 def _parse_args() -> argparse.Namespace:
-    """CLI with env var fallbacks."""
+    """Parse CLI args with environment-based defaults."""
     parser = argparse.ArgumentParser(description="Field Trainer - System Launcher")
     default_host = os.getenv("FIELD_TRAINER_HOST", "0.0.0.0")
     default_port = int(os.getenv("FIELD_TRAINER_PORT", "5000"))
     default_debug = bool(int(os.getenv("FIELD_TRAINER_DEBUG", "0")))
-    parser.add_argument("--host", default=default_host)
-    parser.add_argument("--port", type=int, default=default_port)
-    parser.add_argument("--debug", type=lambda v: bool(int(v)), default=default_debug)
+    parser.add_argument("--host", default=default_host, help="Web host (default env FIELD_TRAINER_HOST)")
+    parser.add_argument("--port", type=int, default=default_port, help="Web port (default env FIELD_TRAINER_PORT)")
+    parser.add_argument("--debug", type=lambda v: bool(int(v)), default=default_debug, help="Flask debug (0/1)")
     return parser.parse_args()
 
 
 def _graceful_stop(heartbeat_handle: Any) -> None:
     """
-    Try common stop methods on whatever start_heartbeat_server() returned:
-    - .stop() / .shutdown() / .close()
-    - If it's a Thread, try .join(timeout=2)
+    Try to gracefully stop whatever start_heartbeat_server() returned.
+    Defensive approach: try common shutdown methods; if it's a Thread, try join.
     """
     if heartbeat_handle is None:
         return
@@ -67,15 +77,16 @@ def _graceful_stop(heartbeat_handle: Any) -> None:
 
 
 def main() -> int:
-    """Launch TCP heartbeat and web UI with good lifecycle & logs."""
+    """Boot both services and handle lifecycle cleanly."""
     args = _parse_args()
 
-    # Signals for clean stop (SIGTERM is important for containers)
+    # Signals: SIGINT (Ctrl+C) and SIGTERM (containers)
     signal.signal(signal.SIGINT, _signal_handler)
     try:
         signal.signal(signal.SIGTERM, _signal_handler)
     except Exception:
-        pass  # Windows may not have SIGTERM
+        # Windows may not support SIGTERM; ignore if unsupported.
+        pass
 
     print(f"=== Field Trainer {VERSION} – Circuit Training System ===")
     print(f"Web: http://{args.host}:{args.port}  (debug={int(args.debug)})")
@@ -90,17 +101,22 @@ def main() -> int:
         print("ERROR: Heartbeat server failed. See logs.")
         return 1
 
-    # Small guard; replace with an explicit ready event if available
+    # Small guard; swap for an explicit "ready" event if you add one later.
     time.sleep(0.25)
 
     REGISTRY.log("Starting web interface…")
     try:
-        # Avoid the reloader foot-gun even when debug=True to prevent double-spawn
+        # Important: use_reloader=False prevents duplicate processes when debug is enabled
         app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False)
     except KeyboardInterrupt:
         pass
     finally:
+        # Always shut down LEDs first (so hardware turns off), then the server.
         REGISTRY.log("Shutting down Field Trainer…")
+        try:
+            REGISTRY.shutdown_leds()
+        except Exception:
+            pass
         _graceful_stop(heartbeat_handle)
         print("System shutdown complete.")
     return 0

@@ -1,7 +1,5 @@
 """
-Global version info for the entire Field Trainer stack.
-
-All other modules must import VERSION from here.
+Single source of truth for the Field Trainer version.
+Update here; every place else imports VERSION.
 """
-
-VERSION: str = "0.5.0"
+VERSION: str = "0.5.1"

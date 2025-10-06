@@ -1,28 +1,20 @@
 """
-Course loading and sane defaults for when no file is present.
-
-Kept small and focused; registry imports this.
+Course loading with sane defaults if no course file is present.
+Registry imports this and exposes the list via /api/courses.
 """
 
 import json
 import os
-from typing import Any, Dict, List
-
+from typing import Any, Dict
 from .ft_config import COURSE_FILE
 
 
 def load_courses() -> Dict[str, Any]:
-    """
-    Load courses from COURSE_FILE, or return default examples if missing.
-
-    Returns:
-        Dict with key "courses": List[Course]
-    """
+    """Load courses from a JSON file or fallback to built-in examples."""
     if os.path.exists(COURSE_FILE):
         with open(COURSE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-
-    # Default example data
+    # Default examples; safe for first-run demos
     return {
         "courses": [
             {

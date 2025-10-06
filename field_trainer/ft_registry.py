@@ -1,11 +1,9 @@
 """
-Registry orchestrates:
-- node state (connected devices)
-- system logs
-- course assign/deploy/activate/deactivate
-- snapshot() for the web API
-
-It delegates mesh status to ft_mesh.get_gateway_status().
+Registry: the system's in-memory state + operations.
+- Tracks nodes, logs, course status, assignments
+- Provides snapshot() for the UI
+- Sends commands to devices
+- Optional server LED (Device 0) control and shutdown
 """
 
 import json
@@ -15,42 +13,90 @@ from collections import deque
 from datetime import datetime
 from typing import Any, Dict, Optional, List
 
-from .ft_config import LOG_MAX, OFFLINE_SECS
+from .ft_config import (
+    LOG_MAX, OFFLINE_SECS,
+    ENABLE_SERVER_LED, SERVER_LED_PIN, SERVER_LED_COUNT, SERVER_LED_BRIGHTNESS
+)
 from .ft_courses import load_courses
 from .ft_mesh import get_gateway_status
 from .ft_models import NodeInfo, utcnow_iso
 from .ft_version import VERSION
+from .ft_led import LEDManager, LEDState
+from .ft_config import (
+    LOG_MAX, OFFLINE_SECS,
+    ENABLE_SERVER_LED, SERVER_LED_PIN, SERVER_LED_COUNT, SERVER_LED_BRIGHTNESS,
+    ENABLE_SERVER_AUDIO, AUDIO_DIR, AUDIO_CONFIG_PATH, AUDIO_VOICE_GENDER, AUDIO_VOLUME_PERCENT
+)
+from .ft_audio import AudioManager, AudioSettings
+
 
 
 class Registry:
     """Thread-safe registry for devices + course lifecycle."""
 
     def __init__(self) -> None:
+        # Node storage + lock
         self.nodes: Dict[str, NodeInfo] = {}
         self.nodes_lock = threading.Lock()
+
+        # System log
         self.logs: deque = deque(maxlen=LOG_MAX)
+
+        # Course state
         self.course_status: str = "Inactive"
         self.selected_course: Optional[str] = None
         self.courses = load_courses()
         self.assignments: Dict[str, str] = {}  # node_id -> action
-        self.device_0_action: Optional[str] = None  # virtual Device 0
+        self.device_0_action: Optional[str] = None  # virtual Device 0 state marker
 
-    # ----------------- Logging -----------------
+        # Optional server-side LED control (Device 0 hardware)
+        self._server_led: Optional[LEDManager] = None
+        if ENABLE_SERVER_LED:
+            try:
+                self._server_led = LEDManager(
+                    pin=SERVER_LED_PIN, led_count=SERVER_LED_COUNT, brightness=SERVER_LED_BRIGHTNESS
+                )
+                self.log("Server LED manager initialized")
+            except Exception as e:
+                self.log(f"Server LED init failed: {e}", level="error")
+
+        # Optional server-side Audio (Device 0 loudspeaker via mpg123)
+        self._audio: Optional[AudioManager] = None
+        if ENABLE_SERVER_AUDIO:
+            try:
+                aset = AudioSettings(
+                    audio_dir=AUDIO_DIR,
+                    voice_gender=AUDIO_VOICE_GENDER,
+                    volume_percent=AUDIO_VOLUME_PERCENT,
+                    config_path=AUDIO_CONFIG_PATH,
+                )
+                self._audio = AudioManager(settings=aset)
+                self.log(f"Server Audio manager initialized (dir={aset.audio_dir}, gender={aset.voice_gender}, vol={aset.volume_percent}%)")
+            except Exception as e:
+                self.log(f"Server Audio init failed: {e}", level="error")
+
+    # ---------------- Utilities ----------------
 
     def log(self, msg: str, level: str = "info", source: str = "controller", node_id: Optional[str] = None) -> None:
-        """Append a structured log entry and print to stdout for operators."""
+        """Append a structured log entry and also print for operator visibility."""
         entry = {"ts": utcnow_iso(), "level": level, "source": source, "node_id": node_id, "msg": msg}
         self.logs.appendleft(entry)
         print(f"[{entry['ts']}] {level.upper()}: {msg}")
 
-    # ----------------- Device state -----------------
+    @staticmethod
+    def controller_time_ms() -> int:
+        """Controller UTC timestamp in milliseconds."""
+        import time as _t
+        return int(_t.time() * 1000)
+
+    # ---------------- Device State ----------------
 
     def upsert_node(self, node_id: str, ip: str, writer=None, **fields) -> None:
         """
-        Create or update a device record.
-
-        - writer: a socket stream (not serialized) to reply to the device
-        - Backwards-compat: map incoming 'role' to 'action' if present.
+        Create or update a device record:
+          - Sets/updates all allowed NodeInfo fields
+          - Maintains last_msg timestamp
+          - Stores socket writer for replies
         """
         with self.nodes_lock:
             n = self.nodes.get(node_id)
@@ -69,14 +115,17 @@ class Registry:
             if writer is not None:
                 n._writer = writer
 
-    # ----------------- Snapshot for API -----------------
+    # ---------------- Snapshot for UI ----------------
 
     def snapshot(self) -> Dict[str, Any]:
-        """Current system picture consumed by the web UI."""
+        """
+        Return the current system state consumed by the UI.
+        Note: Provides a virtual Device 0 when course is not Inactive.
+        """
         now = time.time()
         nodes_list: List[Dict[str, Any]] = []
 
-        # Virtual Device 0 (controller/gateway) appears only when not Inactive
+        # Virtual Device 0 (controller/gateway)
         device_0_status = "Active" if self.course_status == "Active" else "Standby"
         if self.course_status != "Inactive":
             nodes_list.append({
@@ -96,7 +145,6 @@ class Registry:
         with self.nodes_lock:
             for n in self.nodes.values():
                 derived = n.status
-                # Infer offline if last_msg is too old and device isn't Unknown
                 if n.last_msg:
                     try:
                         last_ts = datetime.fromisoformat(n.last_msg).timestamp()
@@ -125,20 +173,19 @@ class Registry:
             "course_status": self.course_status,
             "selected_course": self.selected_course,
             "nodes": nodes_list,
-            "gateway_status": get_gateway_status(),  # mesh + wifi probing
+            "gateway_status": get_gateway_status(),  # live mesh/wifi probe
             "version": VERSION,
         }
 
-    # ----------------- Device messaging -----------------
+    # ---------------- Device Commands ----------------
 
     def send_to_node(self, node_id: str, payload: Dict[str, Any]) -> bool:
         """
         Send a JSON command to a connected device.
-
-        Device 0 is virtual: we only log its assignments instead of sending.
+        - Device 0 is virtual: only logs and updates state.
         """
         if node_id == "192.168.99.100":
-            self.log(f"Device 0 (Gateway) assigned action: {payload.get('action', payload.get('role', 'Unknown'))}")
+            self.log(f"Device 0 virtual command: {payload}")
             return True
 
         with self.nodes_lock:
@@ -158,7 +205,61 @@ class Registry:
                 n.status = "Offline"
                 return False
 
-    # ----------------- Course lifecycle -----------------
+    # ---- LED / Audio / Time (public API; safe even if devices ignore) ----
+
+    def set_led(self, node_id: str, pattern: str) -> bool:
+        """
+        Update LED pattern on a device.
+        For Device 0, also drive the optional server LED (if enabled on this host).
+        Known patterns: off, solid_green, solid_red, blink_amber, rainbow
+        """
+        if node_id == "192.168.99.100":
+            if self._server_led:
+                mapping = {
+                    "off": LEDState.OFF,
+                    "solid_green": LEDState.SOLID_GREEN,
+                    "solid_red": LEDState.SOLID_RED,
+                    "blink_amber": LEDState.BLINK_AMBER,
+                    "rainbow": LEDState.RAINBOW,
+                }
+                self._server_led.set_state(mapping.get(pattern, LEDState.OFF))
+            self.device_0_action = f"LED:{pattern}"
+            self.log(f"Device 0 LED set -> {pattern}")
+            return True
+
+        ok = self.send_to_node(node_id, {"cmd": "led", "pattern": pattern})
+        if ok:
+            with self.nodes_lock:
+                if node_id in self.nodes:
+                    self.nodes[node_id].led_pattern = pattern
+        return ok
+
+    def play_audio(self, node_id: str, clip: str) -> bool:
+        """
+        Ask a device to play a logical clip identifier (device maps to actual file).
+        - For Device 0 (controller), play locally via mpg123 if ENABLE_SERVER_AUDIO=1.
+        - For other devices, send a wire command; they decide how to play it.
+        """
+        if node_id == "192.168.99.100":
+            ok = True
+            if self._audio:
+                ok = self._audio.play(clip)
+                if not ok:
+                    self.log(f"Device 0 AUDIO failed (clip='{clip}')", level="error")
+            # Always reflect the intent in UI even if playback failed (so user sees the command)
+            self.device_0_action = f"AUDIO:{clip}"
+            self.log(f"Device 0 AUDIO -> {clip} (played={ok})")
+            return ok
+
+        ok = self.send_to_node(node_id, {"cmd": "audio", "clip": clip})
+        if ok:
+            with self.nodes_lock:
+                if node_id in self.nodes:
+                    self.nodes[node_id].audio_clip = clip
+        return ok
+
+
+    # ---------------- Course Lifecycle ----------------
 
     def deploy_course(self, course_name: str) -> Dict[str, Any]:
         """Assign actions to nodes per course definition and notify clients."""
@@ -167,20 +268,21 @@ class Registry:
             if not course:
                 return {"success": False, "error": "Course not found"}
 
-            # Clear existing
+            # Stop previous
             self.log("Clearing previous course assignments")
             old_assignments = self.assignments.copy()
             for node_id in old_assignments.keys():
                 if node_id != "192.168.99.100":
                     self.send_to_node(node_id, {"cmd": "stop", "action": None})
 
+            # Reset local state
             with self.nodes_lock:
                 for node in self.nodes.values():
                     node.action = None
             self.device_0_action = None
             self.assignments.clear()
 
-            # Deploy new course
+            # Deploy
             self.selected_course = course_name
             self.course_status = "Deployed"
             self.assignments = {st["node_id"]: st["action"] for st in course.get("stations", [])}
@@ -199,7 +301,7 @@ class Registry:
                     if self.send_to_node(node_id, {"deploy": True, "action": action, "course": course_name}):
                         success += 1
 
-            # Mark unassigned nodes inactive
+            # Mark unassigned devices as inactive
             with self.nodes_lock:
                 for node_id in self.nodes.keys():
                     if node_id not in self.assignments and node_id != "192.168.99.100":
@@ -235,7 +337,7 @@ class Registry:
             return {"success": False, "error": "Activation failed"}
 
     def deactivate_course(self) -> Dict[str, Any]:
-        """Stop course and reset all devices to standby."""
+        """Stop any running course and reset devices to standby."""
         try:
             self.log("Deactivating course")
             for node_id in list(self.assignments.keys()):
@@ -257,12 +359,23 @@ class Registry:
             self.log(f"Deactivate error: {e}", level="error")
             return {"success": False, "error": "Deactivation failed"}
 
-    # ----------------- Logs -----------------
+    # ---------------- Logs ----------------
 
     def clear_logs(self) -> None:
+        """Clear in-memory logs (UI 'Clear' button calls this)."""
         self.logs.clear()
         self.log("System logs cleared by user")
 
+    # ---------------- Shutdown helpers ----------------
 
-# Global singleton registry (same name as before for compatibility)
+    def shutdown_leds(self) -> None:
+        """Ensure server LED (Device 0 hardware) is turned off."""
+        if self._server_led:
+            try:
+                self._server_led.shutdown()
+            except Exception:
+                pass
+
+
+# Global registry instance (imported everywhere)
 REGISTRY = Registry()

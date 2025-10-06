@@ -1,23 +1,21 @@
 """
-BATMAN-adv mesh + wifi probing utilities, isolated behind a small API.
+BATMAN-adv mesh + Wi-Fi probing isolated behind a tiny API.
 
-All subprocess parsing is contained here so other modules don't need to know
-about `batctl`/`iwconfig` quirks or formats.
+All shell calls are contained here:
+- originators / neighbors / statistics via `batctl`
+- wlan SSIDs via `iwconfig`
+- wlan1 IP via `ip addr`
+If any command is missing or fails, we fail soft and return partial info.
 """
 
 import subprocess
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from .ft_version import VERSION
 
 
 def _safe_run(cmd: list[str], timeout: float = 10.0) -> str:
-    """
-    Run a shell command defensively, return stdout or "" on failure.
-
-    We deliberately do not raise to keep the UI responsive even when tools
-    are missing or the environment is not mesh-enabled.
-    """
+    """Run a shell command defensively; return stdout or '' on failure."""
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return res.stdout if res.returncode == 0 else ""
@@ -26,11 +24,7 @@ def _safe_run(cmd: list[str], timeout: float = 10.0) -> str:
 
 
 def mac_to_device_name(mac: str) -> str:
-    """
-    Map MAC address to friendly device name. Extend this map with real devices.
-
-    Fallback: Identify Raspberry Pi OUI and mark unknown others.
-    """
+    """Map MAC to a friendly name; extend with real devices as needed."""
     mac_mappings = {
         "b8:27:eb:a7:e0:81": "Device 0 (Gateway)",
         "b8:27:eb:60:3c:54": "Device 1",
@@ -43,21 +37,13 @@ def mac_to_device_name(mac: str) -> str:
         return "Unknown"
     if mac in mac_mappings:
         return mac_mappings[mac]
-    if mac.startswith("b8:27:eb"):  # Raspberry Pi OUI
+    if mac.startswith("b8:27:eb"):
         return f"Pi Device ({mac[-8:]})"
     return f"Unknown ({mac})"
 
 
 def get_batman_mesh_info() -> Dict[str, Any]:
-    """
-    Collect mesh info using `batctl` (text mode) and return a structured dict.
-
-    We parse:
-     - originators
-     - neighbors
-     - statistics
-    and build a `summary` block for quick status checks.
-    """
+    """Collect mesh originators + neighbors + statistics. Fail soft if commands missing."""
     mesh_info: Dict[str, Any] = {
         "mesh_nodes": [],
         "neighbor_details": [],
@@ -65,7 +51,7 @@ def get_batman_mesh_info() -> Dict[str, Any]:
         "summary": {},
     }
 
-    # originators
+    # ---- originators ----
     out = _safe_run(["batctl", "meshif", "bat0", "originators"])
     if out:
         for line in out.strip().splitlines():
@@ -74,11 +60,10 @@ def get_batman_mesh_info() -> Dict[str, Any]:
             parts = line.split()
             if len(parts) >= 4:
                 originator = parts[0]
-                last_seen_str = parts[1]  # e.g., "0.123s"
+                last_seen_str = parts[1]  # "0.123s"
                 tq_str = parts[2].strip("()")
                 next_hop = parts[3]
                 iface = parts[4].strip("[]") if len(parts) > 4 else "unknown"
-
                 try:
                     last_seen_ms = int(float(last_seen_str.rstrip("s")) * 1000)
                 except Exception:
@@ -87,7 +72,6 @@ def get_batman_mesh_info() -> Dict[str, Any]:
                     tq = int(tq_str)
                 except Exception:
                     tq = 0
-
                 mesh_info["mesh_nodes"].append({
                     "mac_address": originator,
                     "last_seen": last_seen_ms,
@@ -97,7 +81,7 @@ def get_batman_mesh_info() -> Dict[str, Any]:
                     "device_name": mac_to_device_name(originator),
                 })
 
-    # neighbors
+    # ---- neighbors ----
     out = _safe_run(["batctl", "meshif", "bat0", "neighbors"])
     if out:
         for line in out.strip().splitlines():
@@ -126,7 +110,7 @@ def get_batman_mesh_info() -> Dict[str, Any]:
                     "is_direct_neighbor": True,
                 })
 
-    # statistics
+    # ---- statistics ----
     out = _safe_run(["batctl", "meshif", "bat0", "statistics"])
     if out:
         stats: Dict[str, str] = {}
@@ -136,7 +120,7 @@ def get_batman_mesh_info() -> Dict[str, Any]:
                 stats[key.strip()] = value.strip()
         mesh_info["mesh_statistics"] = stats
 
-    # summary
+    # ---- summary ----
     mesh_info["summary"] = {
         "total_mesh_nodes": len(mesh_info["mesh_nodes"]),
         "direct_neighbors": len(mesh_info["neighbor_details"]),
@@ -148,8 +132,8 @@ def get_batman_mesh_info() -> Dict[str, Any]:
 
 def get_gateway_status() -> Dict[str, Any]:
     """
-    Merge wifi (wlan0/wlan1) and BATMAN info into a single status dict
-    consumed by the web/UI. This isolates all subprocess calls here.
+    Merge Wi-Fi (wlan0 mesh + wlan1 uplink) and BATMAN into one dict.
+    This is the structure the UI expects under /api/state.gateway_status.
     """
     status: Dict[str, Any] = {
         "mesh_active": False,
@@ -162,10 +146,10 @@ def get_gateway_status() -> Dict[str, Any]:
         "wlan1_ssid": "Not connected",
         "wlan1_ip": "Not assigned",
         "uptime": "Unknown",
-        "version": VERSION,
+        "version": VERSION,  # present but your UI now hides this on the card
     }
 
-    # wlan0 info
+    # wlan0 (mesh) information
     out = _safe_run(["iwconfig", "wlan0"], timeout=5.0)
     if out:
         for line in out.splitlines():
@@ -178,7 +162,7 @@ def get_gateway_status() -> Dict[str, Any]:
                 cell = line.split("Cell:")[1].split()[0].strip()
                 status["mesh_cell"] = cell
 
-    # BATMAN info
+    # BATMAN mesh info
     mesh_info = get_batman_mesh_info()
     status["batman_neighbors"] = mesh_info["summary"].get("total_mesh_nodes", 0)
     status["batman_neighbors_list"] = [
@@ -190,7 +174,6 @@ def get_gateway_status() -> Dict[str, Any]:
         }
         for node in mesh_info["mesh_nodes"]
     ]
-    # devices
     for node in mesh_info["mesh_nodes"]:
         status["mesh_devices"].append({
             "device_name": node["device_name"],
@@ -198,12 +181,12 @@ def get_gateway_status() -> Dict[str, Any]:
             "connection_quality": node["link_quality"]["tq"],
             "last_seen_ms": node["last_seen"],
             "is_direct_neighbor": any(n["mac_address"] == node["mac_address"] for n in mesh_info["neighbor_details"]),
-            "status": "Active" if node["last_seen"] < 30000 else "Stale",  # 30s threshold
+            "status": "Active" if node["last_seen"] < 30000 else "Stale",
             "routing_via": node.get("next_hop", "Direct"),
         })
     status["mesh_statistics"] = mesh_info["mesh_statistics"]
 
-    # wlan1 (internet uplink) info
+    # wlan1 (uplink) SSID + IP
     out = _safe_run(["iwconfig", "wlan1"], timeout=5.0)
     if out:
         for line in out.splitlines():
@@ -218,7 +201,7 @@ def get_gateway_status() -> Dict[str, Any]:
                 ip = line.strip().split()[1].split("/")[0]
                 status["wlan1_ip"] = ip
 
-    # uptime from /proc/uptime
+    # Uptime from /proc/uptime (if present)
     try:
         with open("/proc/uptime", "r") as f:
             seconds = float(f.readline().split()[0])
