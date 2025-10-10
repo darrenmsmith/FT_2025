@@ -1,0 +1,36 @@
+# Field Trainer Python Dependencies
+
+# Core web framework
+Flask>=2.0.0,<3.0.0
+
+# Development and testing (for VS Code integration)
+pytest>=6.0.0
+pytest-cov>=2.12.0
+flake8>=4.0.0
+black>=22.0.0
+
+# Optional: Enhanced production features
+# Uncomment these as needed:
+
+# Production WSGI server (recommended for production)
+# gunicorn>=20.1.0
+
+# Additional testing tools
+# flask-testing>=0.8.1
+
+# Security scanning
+# bandit>=1.7.0
+
+# Remote debugging (for VS Code remote debugging)
+# debugpy>=1.6.0
+
+# Monitoring and logging
+# prometheus-flask-exporter>=0.18.0
+
+# Documentation
+# sphinx>=4.0.0
+# sphinx-rtd-theme>=1.0.0
+
+# Note: The core Field Trainer system only requires Flask
+# Development tools (pytest, flake8, black) are included for VS Code integration
+# Other dependencies are optional for enhanced development workflow
