@@ -64,11 +64,21 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                     node_id = msg.get("node_id") or peer_ip
 
                     # Update registry state for this device
+                    # Determine display status based on course state
+                    cs = REGISTRY.course_status
+                    has_action = node_id in REGISTRY.assignments
+                    if cs == "Active" and has_action:
+                        display_status = "Active"
+                    elif cs == "Deployed" and has_action:
+                        display_status = "Deployed"
+                    else:
+                        display_status = "Standby"
+                    
                     REGISTRY.upsert_node(
                         node_id=node_id,
                         ip=peer_ip,
                         writer=self.wfile,
-                        status=msg.get("status", "Unknown"),
+                        status=display_status,
                         ping_ms=msg.get("ping_ms"),
                         hops=msg.get("hops"),
                         sensors=msg.get("sensors", {}),

@@ -217,9 +217,9 @@ class Registry:
             if self._server_led:
                 mapping = {
                     "off": LEDState.OFF,
-                    "solid_green": LEDState.SOLID_GREEN,
-                    "solid_red": LEDState.SOLID_RED,
-                    "blink_amber": LEDState.BLINK_AMBER,
+                    "solid_green": LEDState.BLINK_GREEN,
+                    "solid_red": LEDState.BLINK_BLUE,
+                    "blink_amber": LEDState.BLINK_ORANGE,
                     "rainbow": LEDState.RAINBOW,
                 }
                 self._server_led.set_state(mapping.get(pattern, LEDState.OFF))
@@ -285,6 +285,10 @@ class Registry:
             # Deploy
             self.selected_course = course_name
             self.course_status = "Deployed"
+            # Update server LED to red (deployed)
+            if self._server_led:
+                from .ft_led import LEDState
+                self._server_led.set_state(LEDState.BLINK_BLUE)
             self.assignments = {st["node_id"]: st["action"] for st in course.get("stations", [])}
 
             # Device 0 (virtual) action
@@ -322,6 +326,10 @@ class Registry:
                 return {"success": False, "error": "No course selected"}
 
             self.course_status = "Active"
+            # Update server LED to green (active)
+            if self._server_led:
+                from .ft_led import LEDState
+                self._server_led.set_state(LEDState.BLINK_GREEN)
             self.log(f"Activated course '{course_name}' - Circuit training ready")
 
             success = 0
@@ -345,6 +353,10 @@ class Registry:
                     self.send_to_node(node_id, {"cmd": "stop"})
 
             self.course_status = "Inactive"
+            # Update server LED to amber (idle)
+            if self._server_led:
+                from .ft_led import LEDState
+                self._server_led.set_state(LEDState.BLINK_ORANGE)
             self.selected_course = None
             self.assignments.clear()
             self.device_0_action = None

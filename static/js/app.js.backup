@@ -31,10 +31,10 @@ function getStatusClass(status) {
 
 function getDeviceStatusClass(status) {
     switch (status) {
-        case 'Active': return 'bg-success';      // Green
-        case 'Deployed': return 'bg-primary';    // Blue
-        case 'Standby': return 'bg-warning';     // Orange
-        case 'Offline': return 'bg-danger';      // Red
+        case 'Active': return 'bg-success';
+        case 'Ready': return 'bg-primary';
+        case 'Standby': return 'bg-warning';
+        case 'Offline': return 'bg-danger';
         case 'Unknown': default: return 'bg-secondary';
     }
 }
@@ -160,6 +160,31 @@ function updateGatewayStatus(gw) {
       </div>
     `;
 
+    // Mesh devices (grouped badges + values)
+    let meshDevicesHtml = '';
+    if (gw.mesh_devices && gw.mesh_devices.length > 0) {
+        meshDevicesHtml = '<hr class="my-2"><div class="mt-1"><strong>Mesh Devices:</strong>';
+        gw.mesh_devices.forEach(device => {
+            const qualityBadge = getQualityBadge(device.connection_quality);
+            const statusBadge = device.status === 'Active' ? 'bg-success' : 'bg-warning';
+            const lastSeenSec = (device.last_seen_ms / 1000).toFixed(1);
+
+
+            meshDevicesHtml += `
+              <div class="row g-2 align-items-center mb-1">
+                <div class="col-6">
+                  <span class="value">${device.device_name}</span>
+                  <span class="badge ${statusBadge} ms-1">${device.status}</span>
+                </div>
+                <div class="col-6">
+                  <span class="badge ${qualityBadge}">Q:${device.connection_quality}</span>
+                  <span class="value ms-2">Last: ${lastSeenSec}s</span>
+                </div>
+              </div>`;
+        });
+        meshDevicesHtml += '</div>';
+    }
+
     // Mesh statistics
     let statsHtml = '';
     if (gw.mesh_statistics && Object.keys(gw.mesh_statistics).length > 0) {
@@ -176,7 +201,7 @@ function updateGatewayStatus(gw) {
 
     // Render everything
     document.getElementById('gatewayStatus').innerHTML =
-        statusHtml + detailsHtml + statsHtml;
+        statusHtml + detailsHtml + meshDevicesHtml + statsHtml;
 }
 
 
