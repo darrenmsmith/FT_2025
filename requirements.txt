@@ -3,6 +3,10 @@
 # Core web framework
 Flask>=2.0.0,<3.0.0
 
+# Hardware dependencies (REQUIRED for LED and sensor functionality)
+rpi-ws281x>=5.0.0
+smbus2>=0.4.0
+
 # Development and testing (for VS Code integration)
 pytest>=6.0.0
 pytest-cov>=2.12.0
@@ -11,7 +15,6 @@ black>=22.0.0
 
 # Optional: Enhanced production features
 # Uncomment these as needed:
-
 # Production WSGI server (recommended for production)
 # gunicorn>=20.1.0
 
@@ -31,6 +34,6 @@ black>=22.0.0
 # sphinx>=4.0.0
 # sphinx-rtd-theme>=1.0.0
 
-# Note: The core Field Trainer system only requires Flask
+# Note: The core Field Trainer system requires Flask, rpi-ws281x, and smbus2
 # Development tools (pytest, flake8, black) are included for VS Code integration
 # Other dependencies are optional for enhanced development workflow
