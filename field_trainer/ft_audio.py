@@ -1,5 +1,5 @@
 """
-Server-side AudioManager (optional):
+Server-side AudioManager:
 - Plays MP3 clips using `mpg123`
 - Simple config: audio_dir, voice_gender, volume
 - No dependencies beyond a system `mpg123` binary (sudo apt-get install mpg123)
@@ -18,10 +18,10 @@ from typing import Optional
 
 @dataclass
 class AudioSettings:
-    audio_dir: str = "/opt/field-trainer/audio"
+    audio_dir: str = "/opt/field_trainer/audio"
     voice_gender: str = "male"    # or "female"
     volume_percent: int = 80      # 0-100
-    config_path: str = "/opt/field-trainer/config/audio_config.json"
+    config_path: str = "/opt/field_trainer/config/audio_config.json"
 
 
 class AudioManager:
