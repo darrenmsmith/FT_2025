@@ -26,6 +26,26 @@ def index():
 
 # ---------------------------- Courses --------------------------
 
+@app.route('/api/course/deploy', methods=['POST'])
+def api_deploy_course():
+    """API: Deploy a course"""
+    data = request.get_json()
+    course_name = data.get('course_name')
+    if not course_name:
+        return jsonify({'success': False, 'error': 'course_name required'}), 400
+    result = REGISTRY.deploy_course(course_name)
+    return jsonify(result)
+
+@app.route('/api/course/activate', methods=['POST'])
+def api_activate_course():
+    """API: Activate deployed course"""
+    data = request.get_json()
+    course_name = data.get('course_name')
+    if not course_name:
+        return jsonify({'success': False, 'error': 'course_name required'}), 400
+    result = REGISTRY.activate_course(course_name)
+    return jsonify(result)
+
 @app.get("/api/courses")
 def api_courses():
     """Return the course catalog (loaded by REGISTRY at startup)."""

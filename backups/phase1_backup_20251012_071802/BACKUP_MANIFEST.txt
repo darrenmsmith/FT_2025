@@ -1,0 +1,40 @@
+Field Trainer Phase 1 Backup
+Created: Sun 12 Oct 07:18:03 PDT 2025
+Backup Directory: /opt/backups/phase1_backup_20251012_071802
+
+Files Backed Up:
+================
+total 52K
+drwxr-xr-x 4 pi   pi   4.0K Oct 12 07:18 .
+drwxr-xr-x 3 pi   pi   4.0K Oct 12 07:18 ..
+-rw-r--r-- 1 root root    0 Oct 12 07:18 BACKUP_MANIFEST.txt
+drwxr-xr-x 7 pi   pi   4.0K Oct 10 20:24 field_trainer
+-rw-r--r-- 1 pi   pi   4.4K Oct  8 21:49 field_trainer_main.py
+-rw-rw-r-- 1 pi   pi   8.9K Oct  9 19:55 ft_heartbeat.py
+-rw-r--r-- 1 pi   pi    16K Oct  9 19:41 ft_registry.py
+drwxr-xr-x 2 pi   pi   4.0K Oct  8 21:49 templates
+
+Original Locations:
+===================
+/opt/field_trainer/ft_registry.py
+/opt/field_trainer/ft_heartbeat.py
+/opt/field_trainer_main.py
+/opt/field_trainer/ (entire directory)
+/opt/templates/ (entire directory)
+
+System Information:
+===================
+Hostname: Device0pi
+Kernel: 6.12.47+rpt-rpi-v8
+Python Version: Python 3.13.5
+
+Git Status (if available):
+===========================
+On branch general_review
+Your branch is up to date with 'origin/general_review'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	backups/
+
+nothing added to commit but untracked files present (use "git add" to track)

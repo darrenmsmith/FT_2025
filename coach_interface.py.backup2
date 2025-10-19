@@ -1,0 +1,495 @@
+#!/usr/bin/env python3
+"""
+Coach Interface for Field Trainer - Port 5001
+Separate from admin interface, focused on team/athlete/session management
+"""
+
+from flask import Flask, render_template, request, jsonify, redirect, url_for
+from datetime import datetime
+import sys
+import os
+
+# Add field_trainer to path
+sys.path.insert(0, '/opt')
+
+from field_trainer.db_manager import DatabaseManager
+from field_trainer.ft_registry import REGISTRY
+
+app = Flask(__name__, template_folder='/opt/templates/coach')
+app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
+
+# Initialize database
+db = DatabaseManager('/opt/data/field_trainer.db')
+
+# Store active session state
+active_session_state = {
+    'session_id': None,
+    'current_run_id': None,
+    'waiting_for_device': None
+}
+
+
+# ==================== HOME / TEAMS ====================
+
+@app.route('/')
+def index():
+    """Team list homepage"""
+    teams = db.get_all_teams()
+    return render_template('team_list.html', teams=teams)
+
+
+@app.route('/team/create', methods=['GET', 'POST'])
+def create_team():
+    """Create new team"""
+    if request.method == 'POST':
+        name = request.form.get('name')
+        age_group = request.form.get('age_group')
+        
+        try:
+            team_id = db.create_team(name=name, age_group=age_group)
+            return redirect(url_for('team_detail', team_id=team_id))
+        except Exception as e:
+            return render_template('team_create.html', error=str(e))
+    
+    return render_template('team_create.html')
+
+
+@app.route('/team/<team_id>')
+def team_detail(team_id):
+    """Team detail with roster"""
+    team = db.get_team(team_id)
+    if not team:
+        return "Team not found", 404
+    
+    athletes = db.get_athletes_by_team(team_id)
+    return render_template('team_detail.html', team=team, athletes=athletes)
+
+
+@app.route('/team/<team_id>/athlete/add', methods=['POST'])
+def add_athlete(team_id):
+    """Add athlete to team"""
+    try:
+        athlete_id = db.create_athlete(
+            team_id=team_id,
+            name=request.form.get('name'),
+            jersey_number=request.form.get('jersey_number', type=int),
+            age=request.form.get('age', type=int),
+            position=request.form.get('position')
+        )
+        return redirect(url_for('team_detail', team_id=team_id))
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/athlete/<athlete_id>/update', methods=['POST'])
+def update_athlete(athlete_id):
+    """Update athlete info"""
+    try:
+        data = request.get_json()
+        db.update_athlete(athlete_id, **data)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/athlete/<athlete_id>/delete', methods=['POST'])
+def delete_athlete(athlete_id):
+    """Delete athlete"""
+    try:
+        athlete = db.get_athlete(athlete_id)
+        team_id = athlete['team_id']
+        db.delete_athlete(athlete_id)
+        return redirect(url_for('team_detail', team_id=team_id))
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# ==================== COURSES ====================
+
+@app.route('/courses')
+def courses():
+    """Course list"""
+    courses = db.get_all_courses()
+    return render_template('course_list.html', courses=courses)
+
+
+@app.route('/course/<int:course_id>')
+def course_detail(course_id):
+    """Course detail with actions"""
+    course = db.get_course(course_id)
+    if not course:
+        return "Course not found", 404
+    
+    return render_template('course_detail.html', course=course)
+
+
+# ==================== SESSION SETUP ====================
+
+@app.route('/session/setup')
+def session_setup():
+    """Session setup page - select team, course, order athletes"""
+    teams = db.get_all_teams()
+    courses = db.get_all_courses()
+    return render_template('session_setup.html', teams=teams, courses=courses)
+
+
+@app.route('/api/team/<team_id>/athletes')
+def get_team_athletes(team_id):
+    """API: Get athletes for team (for session setup)"""
+    athletes = db.get_athletes_by_team(team_id)
+    return jsonify(athletes)
+
+
+@app.route('/session/create', methods=['POST'])
+def create_session():
+    """Create session with athlete queue"""
+    try:
+        data = request.get_json()
+        team_id = data['team_id']
+        course_id = data['course_id']
+        athlete_queue = data['athlete_queue']  # List of athlete_ids in order
+        audio_voice = data.get('audio_voice', 'male')
+        
+        # Create session
+        session_id = db.create_session(
+            team_id=team_id,
+            course_id=course_id,
+            athlete_queue=athlete_queue,
+            audio_voice=audio_voice
+        )
+        
+        # Store in global state
+        active_session_state['session_id'] = session_id
+
+        # Deploy course to devices (but don't activate yet)
+        print(f"DEBUG: course_id received: {course_id}, type: {type(course_id)}")
+        course = db.get_course(int(course_id)) #convert to int
+        print(f"DEBUG: Course retrieved: {course}")
+        if course:
+            print(f"DEBUG: Deploying course: {course['course_name']}")
+            REGISTRY.deploy_course(course['course_name']) # Chaged to course_name
+            REGISTRY.log(f"Course {course['course_name']} deployed for session")
+        else:
+            print(f"DEBUG: Course is None! Cannot deploy")
+
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'redirect': url_for('session_monitor', session_id=session_id)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# ==================== SESSION MONITORING ====================
+
+@app.route('/session/<session_id>/monitor')
+def session_monitor(session_id):
+    """Live session monitoring page"""
+    session = db.get_session(session_id)
+    if not session:
+        return "Session not found", 404
+    
+    course = db.get_course(session['course_id'])
+    team = db.get_team(session['team_id'])
+    
+    return render_template(
+        'session_monitor.html',
+        session=session,
+        course=course,
+        team=team
+    )
+
+
+@app.route('/api/session/<session_id>/status')
+def session_status(session_id):
+    """API: Get current session status"""
+    session = db.get_session(session_id)
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+    
+    # Get runs with segment details
+    runs_with_segments = []
+    for run in session['runs']:
+        segments = db.get_run_segments(run['run_id'])
+        run['segments'] = segments
+        runs_with_segments.append(run)
+    
+    session['runs'] = runs_with_segments
+    
+    return jsonify({
+        'session': session,
+        'active_run': active_session_state.get('current_run_id'),
+        'waiting_for_device': active_session_state.get('waiting_for_device')
+    })
+
+
+@app.route('/session/<session_id>/start', methods=['POST'])
+def start_session(session_id):
+    """GO button - start session and first athlete"""
+    try:
+        # Mark session as active
+        db.start_session(session_id)
+        
+        # Get first queued run
+        first_run = db.get_next_queued_run(session_id)
+        if not first_run:
+            return jsonify({'success': False, 'error': 'No athletes in queue'}), 400
+        
+        # Start first run
+        start_time = datetime.utcnow()
+        db.start_run(first_run['run_id'], start_time)
+        
+        # Pre-create segments for this run
+        session = db.get_session(session_id)
+        db.create_segments_for_run(first_run['run_id'], session['course_id'])
+        
+        # Update global state
+        active_session_state['session_id'] = session_id
+        active_session_state['current_run_id'] = first_run['run_id']
+        active_session_state['waiting_for_device'] = None
+        
+        # Set audio voice
+        audio_voice = session.get('audio_voice', 'male')
+        # TODO: Send audio voice setting to devices
+
+        # Get course for audio playback
+        session = db.get_session(session_id)
+        course = db.get_course(session['course_id'])    
+    
+        # Activate course via admin API
+        import requests
+        response = requests.post('http://localhost:5000/api/course/activate',
+                                json={'course_name': course['course_name']})
+        print(f"DEBUG: Activate API response: {response.json()}")
+        
+        # Play first audio on Device 0
+        first_action = course['actions'][0]
+        REGISTRY.play_audio('192.168.99.100', first_action['audio_file'])
+        
+        REGISTRY.log(f"Session started: {first_run['athlete_name']} beginning course")
+        
+        return jsonify({
+            'success': True,
+            'message': f"{first_run['athlete_name']} started",
+            'current_run': first_run
+        })
+    except Exception as e:
+        REGISTRY.log(f"Session start error: {e}", level="error")
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/session/<session_id>/stop', methods=['POST'])
+def stop_session(session_id):
+    """Stop session (mark incomplete)"""
+    try:
+        reason = request.get_json().get('reason', 'Stopped by coach')
+        db.mark_session_incomplete(session_id, reason)
+        
+        # Deactivate course
+        REGISTRY.deactivate_course()
+        
+        # Clear global state
+        active_session_state['session_id'] = None
+        active_session_state['current_run_id'] = None
+        active_session_state['waiting_for_device'] = None
+        
+        REGISTRY.log(f"Session stopped: {reason}")
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/session/<session_id>/athlete/<run_id>/absent', methods=['POST'])
+def mark_athlete_absent(session_id, run_id):
+    """Mark athlete as absent (remove from queue but note absence)"""
+    try:
+        db.update_run_status(run_id, 'absent')
+        
+        run = db.get_run(run_id)
+        REGISTRY.log(f"Athlete marked absent: {run.get('athlete_name', 'Unknown')}")
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# ==================== SESSION HISTORY ====================
+
+@app.route('/sessions')
+def sessions():
+    """Session history list"""
+    # Get recent sessions
+    with db.get_connection() as conn:
+        rows = conn.execute('''
+            SELECT s.*, t.name as team_name, c.course_name
+            FROM sessions s
+            JOIN teams t ON s.team_id = t.team_id
+            JOIN courses c ON s.course_id = c.course_id
+            ORDER BY s.created_at DESC
+            LIMIT 50
+        ''').fetchall()
+        sessions = [dict(row) for row in rows]
+    
+    return render_template('session_history.html', sessions=sessions)
+
+
+@app.route('/session/<session_id>/results')
+def session_results(session_id):
+    """View completed session results"""
+    session = db.get_session(session_id)
+    if not session:
+        return "Session not found", 404
+    
+    course = db.get_course(session['course_id'])
+    team = db.get_team(session['team_id'])
+    
+    # Get all runs with segments
+    runs = session['runs']
+    for run in runs:
+        run['segments'] = db.get_run_segments(run['run_id'])
+    
+    return render_template(
+        'session_results.html',
+        session=session,
+        course=course,
+        team=team,
+        runs=runs
+    )
+
+
+@app.route('/session/<session_id>/export')
+def export_session(session_id):
+    """Export session results as CSV"""
+    import csv
+    from io import StringIO
+    
+    session = db.get_session(session_id)
+    if not session:
+        return "Session not found", 404
+    
+    output = StringIO()
+    writer = csv.writer(output)
+    
+    # Header
+    writer.writerow([
+        'Athlete Name', 'Jersey Number', 'Queue Position',
+        'Status', 'Total Time', 'Started At', 'Completed At'
+    ])
+    
+    # Rows
+    for run in session['runs']:
+        writer.writerow([
+            run['athlete_name'],
+            run.get('jersey_number', ''),
+            run['queue_position'],
+            run['status'],
+            run.get('total_time', ''),
+            run.get('started_at', ''),
+            run.get('completed_at', '')
+        ])
+    
+    output.seek(0)
+    
+    from flask import Response
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename=session_{session_id[:8]}.csv'}
+    )
+
+
+# ==================== TOUCH EVENT HANDLER ====================
+
+def handle_touch_event_from_registry(device_id: str, timestamp: datetime):
+    """
+    Called by REGISTRY when a device touch is detected
+    This is the integration point for relay timing
+    """
+    session_id = active_session_state.get('session_id')
+    current_run_id = active_session_state.get('current_run_id')
+    
+    if not session_id or not current_run_id:
+        REGISTRY.log(f"Touch on {device_id} but no active session", level="warning")
+        return
+    
+    # Record the touch
+    segment_id = db.record_touch(current_run_id, device_id, timestamp)
+    
+    if not segment_id:
+        REGISTRY.log(f"Touch on {device_id} but no matching segment for run {current_run_id}", level="warning")
+        return
+    
+    # Check if this touch triggers next athlete
+    session = db.get_session(session_id)
+    course = db.get_course(session['course_id'])
+    
+    # Find the action for this device
+    action = next((a for a in course['actions'] if a['device_id'] == device_id), None)
+    
+    if action:
+        # Check for alerts
+        alert_raised, alert_type = db.check_segment_alerts(segment_id)
+        if alert_raised:
+            REGISTRY.log(f"ALERT: Segment {segment_id} - {alert_type}", level="warning")
+        
+        # If this action triggers next athlete
+        if action.get('triggers_next_athlete'):
+            # Get next queued run
+            next_run = db.get_next_queued_run(session_id)
+            if next_run:
+                # Start next athlete
+                start_time = datetime.utcnow()
+                db.start_run(next_run['run_id'], start_time)
+                db.create_segments_for_run(next_run['run_id'], session['course_id'])
+                
+                # Update state
+                active_session_state['current_run_id'] = next_run['run_id']
+                
+                # Play audio on Device 0 for next athlete
+                first_action = course['actions'][0]
+                REGISTRY.play_audio('192.168.99.100', first_action['audio_file'])
+                
+                REGISTRY.log(f"Next athlete started: {next_run['athlete_name']}")
+        
+        # If this marks run complete
+        if action.get('marks_run_complete'):
+            # Complete current run
+            run = db.get_run(current_run_id)
+            start_time = datetime.fromisoformat(run['started_at'])
+            total_time = (timestamp - start_time).total_seconds()
+            
+            db.complete_run(current_run_id, timestamp, total_time)
+            
+            REGISTRY.log(f"Run completed: {run.get('athlete_name')} in {total_time:.2f}s")
+            
+            # Check if this was last athlete
+            next_run = db.get_next_queued_run(session_id)
+            if not next_run:
+                # Session complete
+                db.complete_session(session_id)
+                REGISTRY.deactivate_course()
+                
+                active_session_state['session_id'] = None
+                active_session_state['current_run_id'] = None
+                
+                REGISTRY.log("Session completed - all athletes finished")
+
+
+# Export handler for REGISTRY integration
+app.handle_touch_event = handle_touch_event_from_registry
+
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("Field Trainer Coach Interface")
+    print("=" * 60)
+    print("Starting on http://0.0.0.0:5001")
+    print("Use this interface for:")
+    print("  - Team and athlete management")
+    print("  - Session setup and monitoring")
+    print("  - Viewing results and history")
+    print("=" * 60)
+    
+    app.run(host='0.0.0.0', port=5001, debug=True)

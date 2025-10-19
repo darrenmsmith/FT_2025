@@ -1,0 +1,17 @@
+Phase 3 Backup - Before Attribution Fix
+Date: Sat 18 Oct 10:33:08 PDT 2025
+Location: /opt/backups/phase3_before_attribution_fix_20251018_103308
+
+Working:
+- 3 athletes completing with 5 segments each (sequential)
+- UNIQUE constraint preventing duplicates
+- Solid LED (no audio popping)
+
+About to fix:
+- Touch attribution logic (handle skipped devices)
+- Currently touch goes to wrong athlete when device skipped
+
+Files backed up:
+- coach_interface.py (contains find_athlete_for_touch)
+- db_manager.py (contains segment marking)
+- field_trainer.db (current state)
