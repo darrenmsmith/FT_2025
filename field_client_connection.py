@@ -8,11 +8,15 @@ import socket
 import json
 import time
 import sys
+<<<<<<< HEAD
 sys.path.insert(0, '/opt/field_trainer')
 from ft_touch import TouchSensor
 import argparse
 from audio_manager import AudioManager
 print("Imports successful")
+=======
+import argparse
+>>>>>>> origin/main
 from enum import Enum
 
 class LEDState(Enum):
@@ -97,6 +101,7 @@ class ClientLEDManager:
         except Exception as e:
             print(f"LED command error: {e}")
 
+<<<<<<< HEAD
 # Global variable to track last touch event (Phase 1)
 last_touch_time = 0
 
@@ -139,6 +144,12 @@ def connect_to_device0(node_id):
     touch_sensor.set_touch_callback(lambda: touch_detected_callback(audio_manager, current_action[0]))
     print("Touch sensor initialized (detection disabled until course deployed)")
 
+=======
+def connect_to_device0(node_id):
+    """Connect to Device 0 with LED support"""
+    led_manager = ClientLEDManager()
+    
+>>>>>>> origin/main
     while True:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -148,24 +159,32 @@ def connect_to_device0(node_id):
             
             while True:
                 # Send heartbeat
+<<<<<<< HEAD
                 # Get current sensor reading
                 sensor_reading = touch_sensor._get_sensor_reading() if touch_sensor.hardware_available else None
                 sensor_magnitude = touch_sensor._calculate_magnitude(sensor_reading) if sensor_reading else 0.0
                 
+=======
+>>>>>>> origin/main
                 heartbeat = {
                     "node_id": node_id,
                     "status": "Active",
                     "timestamp": time.time(),
                     "sensors": {
+<<<<<<< HEAD
                         "accelerometer": sensor_reading or {"x": 0.0, "y": 0.0, "z": 0.0},
                         "touch_magnitude": sensor_magnitude,
                         "touch_threshold": touch_sensor.threshold,
                         "touch_sensor_available": touch_sensor.hardware_available,
+=======
+                        "accelerometer": {"x": 0.0, "y": 0.0, "z": 1.0},
+>>>>>>> origin/main
                         "temperature": 25.0,
                         "humidity": 50.0
                     },
                     "battery_level": 85.0,
                     "accelerometer_working": True,
+<<<<<<< HEAD
                     "audio_working": True,
                     "action": current_action[0]  # Report current action assignment
                 }
@@ -182,6 +201,11 @@ def connect_to_device0(node_id):
                     heartbeat["touch_detected"] = False
                     heartbeat["touch_timestamp"] = None
 
+=======
+                    "audio_working": True
+                }
+                
+>>>>>>> origin/main
                 sock.send((json.dumps(heartbeat) + "\n").encode())
                 
                 # Receive response with LED commands
@@ -194,6 +218,7 @@ def connect_to_device0(node_id):
                         if "led_command" in data:
                             led_manager.process_led_command(data["led_command"])
                         
+<<<<<<< HEAD
                         # Update current action assignment and touch detection state
                         action = data.get("action")
                         course_status = data.get("course_status", "Inactive")
@@ -219,6 +244,12 @@ def connect_to_device0(node_id):
                                 touch_sensor.stop_detection()
                                 touch_detection_active[0] = False
                                 print("Touch detection stopped (course inactive)")
+=======
+                        # Log received action
+                        action = data.get("action")
+                        if action:
+                            print(f"Assigned action: {action}")
+>>>>>>> origin/main
                         
                     except json.JSONDecodeError as e:
                         print(f"JSON decode error: {e}")
@@ -240,4 +271,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     print(f"Starting Field Trainer Client for {args.node_id}")
+<<<<<<< HEAD
     connect_to_device0(args.node_id)
+=======
+    connect_to_device0(args.node_id)
+>>>>>>> origin/main
