@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """
-<<<<<<< HEAD
 Field Trainer – Flask Web Interface
 -----------------------------------
 Responsibilities:
@@ -15,30 +14,6 @@ Notes:
 from flask import Flask, jsonify, request, render_template
 from field_trainer.ft_registry import REGISTRY
 from field_trainer.ft_version import VERSION
-=======
-Field Trainer Web Interface v5.2 - Flask Web Application
-- Web dashboard for circuit training management
-- REST API for course deployment and monitoring
-- Real-time device status and logging
-"""
-
-from flask import Flask, jsonify, request
-from field_trainer_core import REGISTRY, start_heartbeat_server
-
-def _get_led_color_display(led_state):
-    """Convert LED state to display name"""
-    from field_trainer_core import LEDState
-    color_map = {
-        LEDState.OFF: "Off",
-        LEDState.MESH_CONNECTED: "Orange",
-        LEDState.COURSE_DEPLOYED: "Blue", 
-        LEDState.COURSE_ACTIVE: "Green",
-        LEDState.SOFTWARE_ERROR: "Red",
-        LEDState.NETWORK_ERROR: "Red Blinking",
-        LEDState.COURSE_COMPLETE: "Rainbow"
-    }
-    return color_map.get(led_state, "Unknown")
->>>>>>> origin/main
 
 app = Flask(__name__)
 
@@ -46,58 +21,10 @@ app = Flask(__name__)
 
 @app.get("/")
 def index():
-<<<<<<< HEAD
     """Dashboard: the template uses {{ version }} in the header and meta tags."""
     return render_template("index.html", version=VERSION)
 
 # ---------------------------- Courses --------------------------
-=======
-    return '''<!DOCTYPE html>
-<html>
-<head>
-<title>Field Trainer v5.2</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="p-4">
-<h1>Field Trainer v5.2 - Circuit Training</h1>
-
-<div class="row">
-  <div class="col-md-4">
-    <div class="card">
-      <div class="card-header">Course Management</div>
-      <div class="card-body">
-        <div class="mb-3">
-          Status: <span id="status" class="badge bg-secondary">Loading...</span>
-        </div>
-        <select id="courseSelect" class="form-select mb-3">
-          <option>Loading courses...</option>
-        </select>
-        <button id="deployBtn" class="btn btn-primary me-2" onclick="deployClick()">Deploy</button>
-        <button id="activateBtn" class="btn btn-success" onclick="activateClick()">Activate</button>
-        <button id="deactivateBtn" class="btn btn-outline-secondary ms-2" onclick="deactivateClick()">Deactivate</button>
-      </div>
-    </div>
-  </div>
-  
-  <div class="col-md-4">
-    <div class="card">
-      <div class="card-header">Gateway Status</div>
-      <div class="card-body">
-        <div id="gatewayStatus">Loading gateway status...</div>
-      </div>
-    </div>
-  </div>
-  
-  <div class="col-md-4">
-    <div class="card">
-      <div class="card-header">Training Circuit</div>
-      <div class="card-body">
-        <div id="devices">No devices connected</div>
-      </div>
-    </div>
-  </div>
-</div>
->>>>>>> origin/main
 
 @app.route('/api/course/deploy', methods=['POST'])
 def api_deploy_course():
@@ -109,7 +36,6 @@ def api_deploy_course():
     result = REGISTRY.deploy_course(course_name)
     return jsonify(result)
 
-<<<<<<< HEAD
 @app.route('/api/course/activate', methods=['POST'])
 def api_activate_course():
     """API: Activate deployed course"""
@@ -119,239 +45,6 @@ def api_activate_course():
         return jsonify({'success': False, 'error': 'course_name required'}), 400
     result = REGISTRY.activate_course(course_name)
     return jsonify(result)
-=======
-<script>
-function updateStatus() {
-  fetch('/api/state')
-    .then(r => r.json())
-    .then(data => {
-      // Update course status
-      const statusEl = document.getElementById('status');
-      statusEl.textContent = data.course_status || 'Inactive';
-      statusEl.className = 'badge ' + getStatusClass(data.course_status);
-      
-      // Update gateway status
-      updateGatewayStatus(data.gateway_status);
-      
-      // Update devices display - show as circuit order
-      let deviceHtml = '';
-      if (data.nodes && data.nodes.length > 0) {
-        // Sort devices by node_id to show circuit order (0, 1, 2, 3, 4, 5)
-        const sortedNodes = data.nodes.sort((a, b) => {
-          const aNum = parseInt(a.node_id.split('.').pop());
-          const bNum = parseInt(b.node_id.split('.').pop());
-          return aNum - bNum;
-        });
-        
-        sortedNodes.forEach((n, index) => {
-          const nodeNum = n.node_id.split('.').pop() || n.node_id;
-          const deviceName = nodeNum === '100' ? 'Start/Finish' : `Device ${nodeNum}`;
-          const pingText = n.ping_ms ? n.ping_ms + 'ms' : '-';
-          const batteryText = n.battery_level ? n.battery_level + '%' : '-';
-          const audioIcon = n.audio_working ? '🔊' : '🔇';
-          const accelIcon = n.accelerometer_working ? '📱' : '❌';
-          const arrow = index < sortedNodes.length - 1 ? ' ➔ ' : '';
-          
-          deviceHtml += `
-            <div class="mb-2 p-2 border rounded d-flex align-items-center">
-              <div class="flex-grow-1">
-                <strong>${deviceName}</strong> 
-                <span class="badge ${getDeviceStatusClass(n.status)}">${n.status}</span><br>
-                <small>Action: ${n.action || 'None'} | Ping: ${pingText} | Battery: ${batteryText} ${audioIcon}${accelIcon}</small>
-              </div>
-              ${arrow ? '<div class="text-primary fs-4">' + arrow + '</div>' : ''}
-            </div>
-          `;
-        });
-      } else {
-        deviceHtml = '<div class="text-muted">No devices connected</div>';
-      }
-      document.getElementById('devices').innerHTML = deviceHtml;
-      
-      // Update button states
-      const hasDevices = data.nodes && data.nodes.length > 0;
-      const courseSelected = document.getElementById('courseSelect').value;
-      
-      document.getElementById('deployBtn').disabled = !courseSelected || !hasDevices;
-      document.getElementById('activateBtn').disabled = data.course_status !== 'Deployed';
-      document.getElementById('deactivateBtn').disabled = data.course_status === 'Inactive';
-    })
-    .catch(e => console.error('State error:', e));
-}
-
-function updateGatewayStatus(gw) {
-  if (!gw) return;
-  
-  const meshStatus = gw.mesh_active ? 
-    `<span class="badge bg-success">Active</span>` : 
-    `<span class="badge bg-danger">Inactive</span>`;
-  
-  const neighborsText = gw.batman_neighbors > 0 ? 
-    `<span class="badge bg-success">${gw.batman_neighbors} devices</span>` :
-    `<span class="badge bg-warning">No neighbors</span>`;
-  
-  const wlan1Status = gw.wlan1_ssid !== 'Not connected' ?
-    `<span class="badge bg-success">Connected</span>` :
-    `<span class="badge bg-warning">Disconnected</span>`;
-
-  const gatewayHtml = `
-    <div class="row g-2">
-      <div class="col-6"><strong>Mesh Network:</strong></div>
-      <div class="col-6">${meshStatus}</div>
-      
-      <div class="col-6"><strong>SSID:</strong></div>
-      <div class="col-6"><code>${gw.mesh_ssid}</code></div>
-      
-      <div class="col-6"><strong>BATMAN Devices:</strong></div>
-      <div class="col-6">${neighborsText}</div>
-      
-      <div class="col-6"><strong>Internet (wlan1):</strong></div>
-      <div class="col-6">${wlan1Status}</div>
-      
-      <div class="col-6"><strong>wlan1 SSID:</strong></div>
-      <div class="col-6"><code>${gw.wlan1_ssid}</code></div>
-      
-      <div class="col-6"><strong>wlan1 IP:</strong></div>
-      <div class="col-6"><code>${gw.wlan1_ip}</code></div>
-      
-      <div class="col-6"><strong>Uptime:</strong></div>
-      <div class="col-6">${gw.uptime}</div>
-    </div>
-  `;
-  
-  document.getElementById('gatewayStatus').innerHTML = gatewayHtml;
-}
-
-function getStatusClass(status) {
-  switch(status) {
-    case 'Active': return 'bg-success';
-    case 'Deployed': return 'bg-primary';
-    case 'Inactive': default: return 'bg-secondary';
-  }
-}
-
-function getDeviceStatusClass(status) {
-  switch(status) {
-    case 'Active': return 'bg-success';
-    case 'Ready': return 'bg-primary';
-    case 'Standby': return 'bg-warning';
-    case 'Offline': return 'bg-danger';
-    case 'Unknown': default: return 'bg-secondary';
-  }
-}
-
-function refreshLogs() {
-  fetch('/api/logs')
-    .then(r => r.json())
-    .then(data => {
-      if (data.events && data.events.length > 0) {
-        const logText = data.events.map(e => {
-          const time = e.ts.split('T')[1].split('+')[0];
-          const nodeId = e.node_id ? '(' + e.node_id.split('.').pop() + ')' : '';
-          return `[${time}] ${e.level.toUpperCase()} ${nodeId}: ${e.msg}`;
-        }).join('\\n');
-        document.getElementById('logs').textContent = logText;
-      } else {
-        document.getElementById('logs').textContent = 'No log entries...';
-      }
-    })
-    .catch(e => console.error('Logs error:', e));
-}
-
-function loadCourses() {
-  fetch('/api/courses')
-    .then(r => r.json())
-    .then(data => {
-      const select = document.getElementById('courseSelect');
-      select.innerHTML = '<option value="">Select course...</option>';
-      if (data.courses) {
-        data.courses.forEach(c => {
-          const opt = document.createElement('option');
-          opt.value = c.name;
-          opt.textContent = `${c.name} - ${c.description}`;
-          select.appendChild(opt);
-        });
-      }
-    })
-    .catch(e => console.error('Courses error:', e));
-}
-
-function deployClick() {
-  const course = document.getElementById('courseSelect').value;
-  if (!course) return;
-  
-  fetch('/api/deploy', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({course: course})
-  })
-  .then(r => r.json())
-  .then(data => {
-    console.log('Deploy result:', data);
-    updateStatus();
-    refreshLogs();
-  })
-  .catch(e => console.error('Deploy error:', e));
-}
-
-function activateClick() {
-  const course = document.getElementById('courseSelect').value;
-  if (!course) return;
-  
-  fetch('/api/activate', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({course: course})
-  })
-  .then(r => r.json())
-  .then(data => {
-    console.log('Activate result:', data);
-    updateStatus();
-    refreshLogs();
-  })
-  .catch(e => console.error('Activate error:', e));
-}
-
-function deactivateClick() {
-  fetch('/api/deactivate', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({})
-  })
-  .then(r => r.json())
-  .then(data => {
-    console.log('Deactivate result:', data);
-    updateStatus();
-    refreshLogs();
-  })
-  .catch(e => console.error('Deactivate error:', e));
-}
-
-function clearLogs() {
-  fetch('/api/logs/clear', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: '{}'
-  })
-  .then(() => refreshLogs())
-  .catch(e => console.error('Clear logs error:', e));
-}
-
-// Event handlers
-document.getElementById('courseSelect').addEventListener('change', updateStatus);
-
-// Initialize
-loadCourses();
-updateStatus();
-refreshLogs();
-
-// Auto-refresh
-setInterval(updateStatus, 3000);
-setInterval(refreshLogs, 5000);
-</script>
-</body>
-</html>'''
->>>>>>> origin/main
 
 @app.get("/api/courses")
 def api_courses():
@@ -370,7 +63,6 @@ def api_state():
     import json, os
 
     try:
-<<<<<<< HEAD
         snap = REGISTRY.snapshot()
 
         # ---- Enrich each node with 'threshold' if we can find its cal file ----
@@ -439,19 +131,6 @@ def api_state():
 
 # ---------------------------- Logs -----------------------------
 
-=======
-        snapshot = REGISTRY.snapshot()
-        
-        # Add LED status information to the response
-        led_status = REGISTRY.led_manager.get_status_summary()
-        snapshot['led_status'] = led_status
-        
-        return jsonify(snapshot)
-    except Exception as e:
-        REGISTRY.log(f"State API error: {e}", level="error")
-        return jsonify({"error": "Internal server error"}), 500 
-       
->>>>>>> origin/main
 @app.get("/api/logs")
 def api_logs():
     """Return recent logs (limit=n). Front-end polls this periodically."""
@@ -497,27 +176,11 @@ def api_activate():
         data = request.get_json(force=True) or {}
         course_name = data.get("course")
         result = REGISTRY.activate_course(course_name)
-<<<<<<< HEAD
         status = 200 if result.get("success") else 400
         return jsonify(result), status
-=======
-        if result.get("success"):
-            # Start timing session when course activates
-            REGISTRY.timing_capture.start_session("Test Athlete", course_name or "Unknown Course") 
-            return jsonify(result)
-        else:
-            return jsonify(result), 400
-            
->>>>>>> origin/main
     except Exception as e:
         REGISTRY.log(f"Activate API error: {e}", level="error")
         return jsonify({"success": False, "error": "Activation failed"}), 500
-
-@app.get("/api/timing")
-def api_timing():
-    if REGISTRY.timing_capture.current_session:
-        return jsonify(REGISTRY.timing_capture.current_session)
-    return jsonify({"active_session": False})
 
 @app.post("/api/deactivate")
 def api_deactivate():
@@ -572,15 +235,6 @@ def api_audio_play():
 # ----------------------- Local dev entry -----------------------
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     # For ad-hoc UI work you can run this file directly,
     # but production should use field_trainer_main.py.
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
-=======
-    # Start the TCP heartbeat server
-    start_heartbeat_server()
-    REGISTRY.log("Field Trainer Web Interface v5.2 starting")
-    
-    # Start the Flask web server
-    app.run(host=HOST, port=HTTP_PORT, debug=False)
->>>>>>> origin/main
