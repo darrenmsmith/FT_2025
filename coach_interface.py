@@ -858,5 +858,6 @@ if __name__ == '__main__':
         print("   Relay system will not work properly")
         print("=" * 60)
     print()  # blank line before Flask output
-    app.run(host='0.0.0.0', port=5001, debug=True)
+#    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
 
