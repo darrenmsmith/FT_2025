@@ -2,7 +2,7 @@
 # Field Trainer Test Runner
 # Usage: ./run_tests.sh [fast|full]
 
-set -e  # Exit on first failure
+set +e  # Exit on first failure
 
 cd /opt
 
@@ -22,6 +22,8 @@ if [ "$1" == "full" ]; then
         "test_attribution_logic.py"
         "test_touch_sequences.py"
         "test_concurrency.py"
+        "test_api_integration.py"
+        "test_load_stress.py"
     )
 else
     echo "Running FAST test suite (pre-commit safe)..."

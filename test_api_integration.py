@@ -432,9 +432,10 @@ class APIIntegrationTests:
             
             # Now stop it
             response = self.session.post(
-                f'{BASE_URL}/session/{session_id}/stop',  # Note: /session/ not /api/session/
+                f'{BASE_URL}/session/{session_id}/stop',
+                json={'reason': 'Test stop'},  # Send reason in JSON
                 timeout=5
-            )
+            )            
             
             print(f"   Status: {response.status_code}")
             

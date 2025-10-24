@@ -1,0 +1,105 @@
+# Field Trainer .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Field Trainer specific
+# Runtime data (don't commit)
+data/logs/
+data/backups/
+*.log
+
+# Configuration with secrets (create .env.example instead)
+.env.local
+config/secrets.conf
+
+# Device-specific configuration
+config/device_*.conf
+
+# Test data
+test_data/
+mock_devices/
+
+# Deployment artifacts
+*.tar.gz
+*.zip
+deployment/temp/
+
+# System files
+*.pid
+*.sock
+
+# Documentation builds
+docs/_build/
+docs/site/
+
+# Jupyter notebooks
+.ipynb_checkpoints
+
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Development/temporary files
+*.broken
+*.backup
+*_report.md
+test_load_stress.py
