@@ -15,12 +15,15 @@ sys.path.insert(0, '/opt')
 
 from field_trainer.db_manager import DatabaseManager
 from field_trainer.ft_registry import REGISTRY
+sys.path.insert(0, '/opt/field_trainer/athletic_platform')
+from bridge_layer import initialize_bridge
 
 app = Flask(__name__, template_folder='/opt/templates/coach')
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
 
 # Initialize database
 db = DatabaseManager('/opt/data/field_trainer.db')
+perf_bridge, touch_bridge = initialize_bridge(db)
 
 # Store active session state - supports multiple simultaneous athletes
 active_session_state = {
@@ -728,7 +731,18 @@ def handle_touch_event_from_registry(device_id: str, timestamp: datetime):
         total_time = (timestamp - start_time).total_seconds()
         
         db.complete_run(run_id, timestamp, total_time)
-        
+        # Athletic Training Platform Integration
+        try:
+            result = touch_bridge.on_run_completed(run_id)
+            if result and result.get('is_new_pr'):
+                print(f"   🏆 NEW PERSONAL RECORD!")
+                REGISTRY.log(f"🏆 NEW PR: {completed_athlete['athlete_name']}")
+            if result and result.get('achievements_awarded'):
+                for achievement in result['achievements_awarded']:
+                    print(f"   ⭐ ACHIEVEMENT: {achievement}")
+        except Exception as e:
+            print(f"   ⚠️ Performance tracking error: {e}")
+
         # Remove from active runs
         completed_athlete = active_session_state['active_runs'].pop(run_id)
         

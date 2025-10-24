@@ -118,14 +118,14 @@ def main() -> int:
     try:
         import coach_interface as coach_app
         
-        # Call the registration function from coach_interface
-        coach_app.register_touch_handler()
-        
-        def run_coach_interface():
-            coach_app.app.run(host='0.0.0.0', port=5001, use_reloader=False, debug=False)
-        coach_thread = threading.Thread(target=run_coach_interface, daemon=True)
-        coach_thread.start()
-        REGISTRY.log("Coach interface started on port 5001")
+        #         # Call the registration function from coach_interface
+        #         coach_app.register_touch_handler()
+        #         
+        #         def run_coach_interface():
+        #             coach_app.app.run(host='0.0.0.0', port=5001, use_reloader=False, debug=False)
+        #         coach_thread = threading.Thread(target=run_coach_interface, daemon=True)
+        #         coach_thread.start()
+        #         REGISTRY.log("Coach interface started on port 5001")
     except Exception as e:
         REGISTRY.log(f"Failed to start coach interface: {e}", level="error")
 
