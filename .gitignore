@@ -102,4 +102,3 @@ dmypy.json
 *.broken
 *.backup
 *_report.md
-test_load_stress.py
