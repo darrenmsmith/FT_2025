@@ -162,6 +162,9 @@ async function refreshStatus() {
         if (data.session.status === 'completed') {
             clearInterval(refreshInterval);
             showCompletionMessage();
+            // Hide Stop Session button
+            const stopBtn = document.getElementById('stopBtn');
+            if (stopBtn) stopBtn.style.display = 'none';
         }
     } catch (error) {
         console.error('Error refreshing status:', error);
