@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Teams - Field Trainer{% endblock %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2><i class="fas fa-users"></i> Teams</h2>
+    </div>
+    <div class="col-md-4 text-end">
+        <a href="{{ url_for('create_team') }}" class="btn btn-primary">
+            <i class="fas fa-plus"></i> New Team
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    {% if teams %}
+        {% for team in teams %}
+        <div class="col-md-6 col-lg-4 mb-3">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">{{ team.name }}</h5>
+                    <p class="card-text text-muted">
+                        {% if team.age_group %}
+                            <span class="badge bg-secondary">{{ team.age_group }}</span>
+                        {% endif %}
+                    </p>
+                    <a href="{{ url_for('team_detail', team_id=team.team_id) }}" class="btn btn-sm btn-primary">
+                        View Roster <i class="fas fa-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="col-12">
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i> No teams yet. Create your first team to get started!
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

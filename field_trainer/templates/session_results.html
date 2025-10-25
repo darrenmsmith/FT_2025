@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Session Results - Field Trainer{% endblock %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2>{{ team.name }} - {{ course.course_name }}</h2>
+        <p class="text-muted">{{ session.created_at }}</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <a href="{{ url_for('export_session', session_id=session.session_id) }}" class="btn btn-success">
+            <i class="fas fa-download"></i> Export CSV
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h5>Results</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Position</th>
+                        <th>Athlete</th>
+                        <th>Status</th>
+                        <th>Total Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for run in runs %}
+                    <tr>
+                        <td>{{ run.queue_position + 1 }}</td>
+                        <td>{{ run.athlete_name }} {% if run.jersey_number %}#{{ run.jersey_number }}{% endif %}</td>
+                        <td><span class="badge bg-{{ 'success' if run.status == 'completed' else 'secondary' }}">{{ run.status }}</span></td>
+                        <td>{% if run.total_time %}{{ "%.2f"|format(run.total_time) }}s{% else %}-{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

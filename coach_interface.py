@@ -17,8 +17,12 @@ from field_trainer.db_manager import DatabaseManager
 from field_trainer.ft_registry import REGISTRY
 sys.path.insert(0, '/opt/field_trainer/athletic_platform')
 from bridge_layer import initialize_bridge
+sys.path.insert(0, "/opt/field_trainer")
+from routes.dashboard import dashboard_bp
 
-app = Flask(__name__, template_folder='/opt/templates/coach')
+app = Flask(__name__, template_folder='/opt/field_trainer/templates', static_folder='/opt/field_trainer/static')
+# Register dashboard blueprint
+app.register_blueprint(dashboard_bp)
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
 
 # Initialize database
@@ -873,5 +877,32 @@ if __name__ == '__main__':
         print("=" * 60)
     print()  # blank line before Flask output
 #    app.run(host='0.0.0.0', port=5001, debug=True)
-    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
+    # app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
 
+
+# ==================== DASHBOARD PLACEHOLDER ROUTES ====================
+# These will be implemented in Phase 1
+
+
+# Profile and Settings placeholders
+@app.route('/profile')
+def profile():
+    return render_template_string('''
+        {% extends "base.html" %}
+        {% block content %}
+        <h1>Coach Profile</h1>
+        <p>Profile management coming soon in Phase 2</p>
+        <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
+        {% endblock %}
+    ''')
+
+@app.route('/settings')
+def settings():
+    return render_template_string('''
+        {% extends "base.html" %}
+        {% block content %}
+        <h1>Settings</h1>
+        <p>Settings coming soon in Phase 2</p>
+        <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
+        {% endblock %}
+    ''')

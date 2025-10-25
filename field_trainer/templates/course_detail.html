@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ course.course_name }} - Field Trainer{% endblock %}
+{% block content %}
+<h2>{{ course.course_name }}</h2>
+<p class="lead">{{ course.description }}</p>
+<div class="card">
+    <div class="card-header">
+        <h5>Course Actions ({{ course.actions|length }} stations)</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Device</th>
+                        <th>Action</th>
+                        <th>Instruction</th>
+                        <th>Time Range</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for action in course.actions %}
+                    <tr>
+                        <td>{{ action.sequence + 1 }}</td>
+                        <td>{{ action.device_name }}</td>
+                        <td><span class="badge bg-primary">{{ action.action }}</span></td>
+                        <td>{{ action.instruction }}</td>
+                        <td>{{ action.min_time }}s - {{ action.max_time }}s</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
