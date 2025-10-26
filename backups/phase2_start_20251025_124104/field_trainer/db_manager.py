@@ -703,39 +703,3 @@ class DatabaseManager:
             )
             
             print(f"Migrated course '{name}' (ID: {course_id}) with {len(actions)} actions")
-
-    def get_coach_preferences(self, coach_id='default_coach'):
-        """Get coach preferences"""
-        with self.get_connection() as conn:
-            cursor = conn.execute(
-                'SELECT * FROM coach_preferences WHERE coach_id = ?',
-                (coach_id,)
-            )
-            row = cursor.fetchone()
-            if row:
-                return dict(row)
-            return {
-                'distance_unit': 'yards',
-                'deployment_timeout': 300,
-                'audio_voice': 'male'
-            }
-    
-    def mark_course_deployed(self, session_id):
-        """Mark course as deployed in session"""
-        from datetime import datetime
-        with self.get_connection() as conn:
-            conn.execute(
-                'UPDATE sessions SET course_deployed = 1, deployment_timestamp = ? WHERE session_id = ?',
-                (datetime.utcnow().isoformat(), session_id)
-            )
-    
-    def get_course_actions(self, course_id):
-        """Get all actions for a course in sequence order"""
-        with self.get_connection() as conn:
-            cursor = conn.execute(
-                '''SELECT * FROM course_actions 
-                   WHERE course_id = ? 
-                   ORDER BY sequence''',
-                (course_id,)
-            )
-            return [dict(row) for row in cursor.fetchall()]

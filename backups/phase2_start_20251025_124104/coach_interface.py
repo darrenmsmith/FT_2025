@@ -196,11 +196,7 @@ def update_athlete(athlete_id):
     try:
         data = request.get_json()
         db.update_athlete(athlete_id, **data)
-        return jsonify({
-            'success': True,
-            'session_id': session_id,
-            'redirect': url_for('session_setup_cones', session_id=session_id)
-        })
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
 
@@ -274,13 +270,200 @@ def create_session():
         # Store in global state
         active_session_state['session_id'] = session_id
 
-        # Phase 2: Deploy happens in cone setup verification page
-        # Course will be deployed after coach verifies cone placement
+        # Deploy course to devices via API (but don't activate yet)
+        course = db.get_course(int(course_id))
+        if course:
+            print(f"📤 Deploying course via API: {course['course_name']}")
+            import requests
+            try:
+                response = requests.post(
+                    'http://localhost:5000/api/course/deploy',
+                    json={'course_name': course['course_name']},
+                    timeout=5
+                )
+                print(f"   Deploy response: {response.status_code} - {response.json()}")
+
+                # Activate immediately after successful deploy
+                if response.status_code == 200:
+                    print(f"🟢 Activating course immediately...")
+                    activate_response = requests.post(
+                        'http://localhost:5000/api/course/activate',
+                        json={'course_name': course['course_name']},
+                        timeout=5
+                    )
+                    print(f"   Activate response: {activate_response.status_code} - {activate_response.json()}")
+            except Exception as e:
+                print(f"   ❌ Deploy failed: {e}")
+        else:
+            print(f"❌ Course not found in database!")
+
         return jsonify({
             'success': True,
             'session_id': session_id,
-            'redirect': url_for('session_setup_cones', session_id=session_id)
+            'redirect': url_for('session_monitor', session_id=session_id)
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# ==================== SESSION MONITORING ====================
+
+@app.route('/session/<session_id>/monitor')
+def session_monitor(session_id):
+    """Live session monitoring page"""
+    session = db.get_session(session_id)
+    if not session:
+        return "Session not found", 404
+    
+    course = db.get_course(session['course_id'])
+    team = db.get_team(session['team_id'])
+    
+    return render_template(
+        'session_monitor.html',
+        session=session,
+        course=course,
+        team=team
+    )
+
+
+@app.route('/api/session/<session_id>/status')
+def session_status(session_id):
+    """API: Get current session status"""
+    session = db.get_session(session_id)
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+    
+    # Get runs with segment details
+    runs_with_segments = []
+    for run in session['runs']:
+        segments = db.get_run_segments(run['run_id'])
+        run['segments'] = segments
+        runs_with_segments.append(run)
+    
+    session['runs'] = runs_with_segments
+    
+    return jsonify({
+        'session': session,
+        'active_run': active_session_state.get('current_run_id'),
+        'waiting_for_device': active_session_state.get('waiting_for_device')
+    })
+
+
+@app.route('/session/<session_id>/start', methods=['POST'])
+def start_session(session_id):
+    """GO button - start session and first athlete"""
+    import requests
+    print(f"\n{'='*80}")
+    print(f"🎬 START_SESSION CALLED - Session ID: {session_id}")
+    print(f"{'='*80}\n")
+    try:
+        # Mark session as active
+        print(f"Step 1: Marking session as active...")
+        db.start_session(session_id)
+        
+        # Get first queued run
+        first_run = db.get_next_queued_run(session_id)
+        if not first_run:
+            return jsonify({'success': False, 'error': 'No athletes in queue'}), 400
+        
+        # Start first run
+        start_time = datetime.utcnow()
+        db.start_run(first_run['run_id'], start_time)
+        
+        # Small delay to ensure segments are committed before touches arrive
+        import time
+        time.sleep(0.1)
+        
+        # Pre-create segments for this run
+        session = db.get_session(session_id)
+        db.create_segments_for_run(first_run['run_id'], session['course_id'])
+        
+        # Get course device sequence for multi-athlete tracking
+        course = db.get_course(session['course_id'])
+        device_sequence = [action['device_id'] for action in course['actions'] if action['device_id'] != '192.168.99.100']
+        
+        # Count total athletes
+        all_runs = db.get_session_runs(session_id)
+        total_athletes = len(all_runs)
+        
+        # Initialize multi-athlete state
+        active_session_state['session_id'] = session_id
+        active_session_state['device_sequence'] = device_sequence
+        active_session_state['total_queued'] = total_athletes
+        active_session_state['active_runs'] = {
+            first_run['run_id']: {
+                'athlete_name': first_run['athlete_name'],
+                'athlete_id': first_run['athlete_id'],
+                'started_at': start_time.isoformat(),
+                'last_device': None,
+                'sequence_position': -1  # Haven't touched any device yet
+            }
+        }
+        
+        print(f"✅ Multi-athlete state initialized:")
+        print(f"   Active athletes: 1/{total_athletes}")
+        print(f"   Device sequence: {device_sequence}")
+        print(f"   First athlete: {first_run['athlete_name']}")
+
+        # Set audio voice
+        audio_voice = session.get('audio_voice', 'male')
+        # TODO: Send audio voice setting to devices
+
+        # Get course for audio playback
+        session = db.get_session(session_id)
+        course = db.get_course(session['course_id'])    
+    
+        # Course already activated during session creation
+        print(f"\nStep 5: Course already active, proceeding with audio...")
+
+        # Wait for activation to propagate
+        import time
+        time.sleep(0.5)
+
+        # Play first audio on Device 0 via API
+        first_action = course['actions'][0]
+        print(f"🔊 Playing Device 0 audio via API: {first_action['audio_file']}")
+        try:
+            audio_response = requests.post(
+                'http://localhost:5000/api/audio/play',
+                json={
+                    'node_id': '192.168.99.100',
+                    'clip': first_action['audio_file'].replace('.mp3', '')
+                },
+                timeout=2
+            )
+            print(f"   Audio response: {audio_response.status_code}")
+        except Exception as e:
+            print(f"   ❌ Audio command failed: {e}")
+        
+        return jsonify({
+            'success': True,
+            'message': f"{first_run['athlete_name']} started",
+            'current_run': first_run
+        })
+    except Exception as e:
+        REGISTRY.log(f"Session start error: {e}", level="error")
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/session/<session_id>/stop', methods=['POST'])
+def stop_session(session_id):
+    """Stop session (mark incomplete)"""
+    try:
+        reason = request.get_json().get('reason', 'Stopped by coach')
+        db.mark_session_incomplete(session_id, reason)
+        
+        # Deactivate course
+        REGISTRY.deactivate_course()
+        
+        # Clear global state
+        active_session_state['session_id'] = None
+        active_session_state['current_run_id'] = None
+        active_session_state['waiting_for_device'] = None
+        
+        REGISTRY.log(f"Session stopped: {reason}")
+        
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
 
@@ -294,11 +477,7 @@ def mark_athlete_absent(session_id, run_id):
         run = db.get_run(run_id)
         REGISTRY.log(f"Athlete marked absent: {run.get('athlete_name', 'Unknown')}")
         
-        return jsonify({
-            'success': True,
-            'session_id': session_id,
-            'redirect': url_for('session_setup_cones', session_id=session_id)
-        })
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
 
@@ -346,24 +525,6 @@ def session_results(session_id):
         runs=runs
     )
 
-
-
-@app.route('/session/<session_id>/monitor')
-def session_monitor(session_id):
-    """Session monitoring page"""
-    session = db.get_session(session_id)
-    if not session:
-        return "Session not found", 404
-    
-    team = db.get_team(session['team_id'])
-    course = db.get_course(session['course_id'])
-    
-    return render_template(
-        'session_monitor.html',
-        session=session,
-        team=team,
-        course=course
-    )
 
 @app.route('/session/<session_id>/export')
 def export_session(session_id):
@@ -745,244 +906,3 @@ def settings():
         <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
         {% endblock %}
     ''')
-
-# ============================================================================
-# PHASE 2: CONE VERIFICATION & DEPLOYMENT
-# ============================================================================
-
-@app.route('/session/<session_id>/setup/cones')
-def session_setup_cones(session_id):
-    """Cone setup verification page"""
-    session = db.get_session(session_id)
-    if not session:
-        return "Session not found", 404
-    
-    course = db.get_course(session['course_id'])
-    if not course:
-        return "Course not found", 404
-    
-    # Get timeout from preferences
-    prefs = db.get_coach_preferences()
-    timeout_minutes = prefs.get('deployment_timeout', 300) // 60
-    
-    return render_template(
-        'session_setup_cones.html',
-        session_id=session_id,
-        course=course,
-        timeout_minutes=timeout_minutes
-    )
-
-@app.route('/api/session/<session_id>/prepare-course', methods=['POST'])
-def api_prepare_course(session_id):
-    """Set all course devices to AMBER for verification"""
-    try:
-        session = db.get_session(session_id)
-        course = db.get_course(session['course_id'])
-        
-        # Get devices from course_actions
-        actions = db.get_course_actions(course['course_id'])
-        devices = []
-        device_ids_seen = set()
-        
-        for action in actions:
-            device_id = action['device_id']
-            if device_id not in device_ids_seen:
-                devices.append({'device_id': device_id, 'device_name': action['device_name']})
-                device_ids_seen.add(device_id)
-        
-        # Set all devices to AMBER using REGISTRY
-        for device in devices:
-            try:
-                REGISTRY.set_led(device['device_id'], pattern='solid_amber')
-            except Exception as e:
-                print(f"⚠️  Failed to set {device['device_id']} to amber: {e}")
-        
-        REGISTRY.log(f"Course prepared for deployment: {course['course_name']}")
-        
-        return jsonify({
-            'success': True,
-            'devices': devices
-        })
-    except Exception as e:
-        print(f"❌ Prepare course error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-@app.route('/api/session/<session_id>/status')
-def session_status(session_id):
-    """API: Get current session status"""
-    session = db.get_session(session_id)
-    if not session:
-        return jsonify({'error': 'Session not found'}), 404
-    
-    # Get runs with segment details
-    runs_with_segments = []
-    for run in session['runs']:
-        segments = db.get_run_segments(run['run_id'])
-        run['segments'] = segments
-        runs_with_segments.append(run)
-    
-    session['runs'] = runs_with_segments
-    
-    return jsonify({
-        'session': session,
-        'active_run': active_session_state.get('current_run_id'),
-        'waiting_for_device': active_session_state.get('waiting_for_device')
-    })
-
-
-
-@app.route('/session/<session_id>/start', methods=['POST'])
-def start_session(session_id):
-    """GO button - start session and first athlete"""
-    import requests
-    print(f"\n{'='*80}")
-    print(f"🎬 START_SESSION CALLED - Session ID: {session_id}")
-    print(f"{'='*80}\n")
-    try:
-        # Mark session as active
-        print(f"Step 1: Marking session as active...")
-        db.start_session(session_id)
-        
-        # Get first queued run
-        first_run = db.get_next_queued_run(session_id)
-        if not first_run:
-            return jsonify({'success': False, 'error': 'No athletes in queue'}), 400
-        
-        # Start first run
-        start_time = datetime.utcnow()
-        db.start_run(first_run['run_id'], start_time)
-        
-        # Small delay to ensure segments are committed before touches arrive
-        import time
-        time.sleep(0.1)
-        
-        # Pre-create segments for this run
-        session = db.get_session(session_id)
-        db.create_segments_for_run(first_run['run_id'], session['course_id'])
-        
-        # Get course device sequence for multi-athlete tracking
-        course = db.get_course(session['course_id'])
-        device_sequence = [action['device_id'] for action in course['actions'] if action['device_id'] != '192.168.99.100']
-        
-        # Count total athletes
-        all_runs = db.get_session_runs(session_id)
-        total_athletes = len(all_runs)
-        
-        # Initialize multi-athlete state
-        active_session_state['session_id'] = session_id
-        active_session_state['device_sequence'] = device_sequence
-        active_session_state['total_queued'] = total_athletes
-        active_session_state['active_runs'] = {
-            first_run['run_id']: {
-                'athlete_name': first_run['athlete_name'],
-                'athlete_id': first_run['athlete_id'],
-                'started_at': start_time.isoformat(),
-                'last_device': None,
-                'sequence_position': -1  # Haven't touched any device yet
-            }
-        }
-        
-        print(f"✅ Multi-athlete state initialized:")
-        print(f"   Active athletes: 1/{total_athletes}")
-        print(f"   Device sequence: {device_sequence}")
-        print(f"   First athlete: {first_run['athlete_name']}")
-
-        # Set audio voice
-        audio_voice = session.get('audio_voice', 'male')
-        # TODO: Send audio voice setting to devices
-
-        # Get course for audio playback
-        session = db.get_session(session_id)
-        course = db.get_course(session['course_id'])    
-    
-        # Course already activated during session creation
-        print(f"\nStep 5: Course already active, proceeding with audio...")
-
-        # Wait for activation to propagate
-        import time
-        time.sleep(0.5)
-
-        # Play first audio on Device 0 via API
-        first_action = course['actions'][0]
-        print(f"🔊 Playing Device 0 audio via API: {first_action['audio_file']}")
-        try:
-            audio_response = requests.post(
-                'http://localhost:5000/api/audio/play',
-                json={
-                    'node_id': '192.168.99.100',
-                    'clip': first_action['audio_file'].replace('.mp3', '')
-                },
-                timeout=2
-            )
-            print(f"   Audio response: {audio_response.status_code}")
-        except Exception as e:
-            print(f"   ❌ Audio command failed: {e}")
-        
-        return jsonify({
-            'success': True,
-            'message': f"{first_run['athlete_name']} started",
-            'current_run': first_run
-        })
-    except Exception as e:
-        REGISTRY.log(f"Session start error: {e}", level="error")
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-
-
-
-@app.route('/api/session/<session_id>/deploy-course', methods=['POST'])
-def api_deploy_course(session_id):
-    """Deploy course - set devices to GREEN and activate"""
-    try:
-        session = db.get_session(session_id)
-        course = db.get_course(session['course_id'])
-        
-        # Get devices from course_actions
-        actions = db.get_course_actions(course['course_id'])
-        devices = []
-        device_ids_seen = set()
-        
-        for action in actions:
-            device_id = action['device_id']
-            if device_id not in device_ids_seen:
-                devices.append({'device_id': device_id, 'device_name': action['device_name']})
-                device_ids_seen.add(device_id)
-        
-        # Deploy the course first (loads into REGISTRY)
-        course_name = course['course_name']
-        import requests
-        try:
-            deploy_resp = requests.post(
-                'http://localhost:5000/api/course/deploy',
-                json={'course_name': course_name},
-                timeout=5
-            )
-            print(f"Deploy API: {deploy_resp.status_code}")
-        except Exception as e:
-            print(f"Deploy API error: {e}")
-        
-        # Activate course using existing REGISTRY method
-        REGISTRY.activate_course(course_name)
-        
-        # Set all devices to GREEN
-        for device in devices:
-            try:
-                REGISTRY.set_led(device['device_id'], pattern='solid_green')
-            except Exception as e:
-                print(f"⚠️  Failed to set {device['device_id']} to green: {e}")
-        
-        # Mark course as deployed
-        db.mark_course_deployed(session_id)
-        
-        REGISTRY.log(f"Course deployed: {course['course_name']}")
-        
-        return jsonify({
-            'success': True,
-            'devices': devices,
-            'deployed': True
-        })
-    except Exception as e:
-        print(f"❌ Deploy course error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 400

@@ -1,0 +1,5 @@
+{
+  "audio_dir": "/opt/field_trainer/audio",
+  "voice_gender": "female",
+  "volume_percent": 80
+}
