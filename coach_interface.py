@@ -219,26 +219,6 @@ def delete_athlete(athlete_id):
 
 # ==================== COURSES ====================
 
-@app.route('/courses')
-def courses():
-    """Course list"""
-    courses = db.get_all_courses()
-    return render_template('course_list.html', courses=courses)
-
-
-@app.route('/course/<int:course_id>')
-def course_detail(course_id):
-    """Course detail with actions"""
-    course = db.get_course(course_id)
-    if not course:
-        return "Course not found", 404
-    
-    return render_template('course_detail.html', course=course)
-
-
-# ==================== SESSION SETUP ====================
-
-@app.route('/session/setup')
 def session_setup():
     """Session setup page - select team, course, order athletes"""
     teams = db.get_all_teams()
@@ -253,6 +233,15 @@ def get_team_athletes(team_id):
     return jsonify(athletes)
 
 
+
+@app.route('/session/setup')
+def session_setup():
+    """Session setup page - select team, course, order athletes"""
+    teams = db.get_all_teams()
+    courses = db.get_all_courses()
+    return render_template('session_setup.html', teams=teams, courses=courses)
+
+@app.route('/api/team/<team_id>/athletes')
 @app.route('/session/create', methods=['POST'])
 def create_session():
     """Create session with athlete queue"""
@@ -985,4 +974,150 @@ def api_deploy_course(session_id):
         print(f"❌ Deploy course error: {e}")
         import traceback
         traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+# ============================================================================
+# PHASE 2B: COURSE DESIGN & MANAGEMENT
+# ============================================================================
+
+@app.route('/courses')
+def courses_list():
+    """List all courses"""
+    builtin_courses = db.get_builtin_courses()
+    custom_courses = db.get_custom_courses()
+    
+    return render_template(
+        'courses.html',
+        builtin_courses=builtin_courses,
+        custom_courses=custom_courses
+    )
+
+
+@app.route('/courses/<int:course_id>/view')
+def view_course(course_id):
+    """View course details"""
+    course = db.get_course(course_id)
+    if not course:
+        return "Course not found", 404
+    
+    actions = db.get_course_actions(course_id)
+    course['actions'] = actions
+    
+    return render_template('course_view.html', course=course)
+
+@app.route('/courses/design')
+def course_design():
+    """Course design wizard"""
+    edit_id = request.args.get('edit')
+    duplicate_id = request.args.get('duplicate')
+    
+    course = None
+    if edit_id:
+        course = db.get_course(int(edit_id))
+        course['actions'] = db.get_course_actions(int(edit_id))
+    elif duplicate_id:
+        course = db.get_course(int(duplicate_id))
+        course['actions'] = db.get_course_actions(int(duplicate_id))
+        course['course_name'] = f"{course['course_name']} (Copy)"
+        course['is_builtin'] = 0
+    
+    return render_template('course_design.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
+
+@app.route('/api/courses/<int:course_id>', methods=['DELETE'])
+def delete_course(course_id):
+    """Delete a custom course"""
+    try:
+        course = db.get_course(course_id)
+        if course and course.get('is_builtin'):
+            return jsonify({'success': False, 'error': 'Cannot delete built-in courses'}), 400
+        
+        db.delete_course(course_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.route('/api/courses/<int:course_id>/export')
+def export_course_api(course_id):
+    """Export course as JSON"""
+    try:
+        course = db.get_course(course_id)
+        actions = db.get_course_actions(course_id)
+        
+        export_data = {
+            'course_name': course['course_name'],
+            'description': course['description'],
+            'category': course['category'],
+            'mode': course['mode'],
+            'num_devices': course['num_devices'],
+            'distance_unit': course['distance_unit'],
+            'total_distance': course['total_distance'],
+            'diagram_svg': course['diagram_svg'],
+            'layout_instructions': course['layout_instructions'],
+            'version': course['version'],
+            'actions': actions
+        }
+        
+        return jsonify(export_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/courses/import', methods=['POST'])
+def import_course_api():
+    """Import course from JSON"""
+    try:
+        data = request.get_json()
+        
+        # Check if course name exists
+        existing = db.get_course_by_name(data['course_name'])
+        if existing:
+            return jsonify({
+                'success': False, 
+                'error': f"Course '{data['course_name']}' already exists. Please rename in the JSON file."
+            }), 400
+        
+        # Create course
+        course_id = db.create_course_from_import(data)
+        
+        return jsonify({'success': True, 'course_id': course_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.route('/api/devices/available')
+def get_available_devices():
+    """Get list of available devices from registry"""
+    try:
+        # Get snapshot from REGISTRY (same as Admin page)
+        snap = REGISTRY.snapshot()
+        nodes = snap.get('nodes', [])
+        
+        available = []
+        
+        # Device 0
+        device_0 = next((n for n in nodes if n['node_id'] == '192.168.99.100'), None)
+        available.append({
+            'device_id': '192.168.99.100',
+            'device_name': 'Device 0',
+            'display_name': 'Start',
+            'online': device_0 is not None and device_0.get('status') != 'Offline'
+        })
+        
+        # Cones 1-5
+        for i in range(1, 6):
+            device_id = f'192.168.99.{100 + i}'
+            node = next((n for n in nodes if n['node_id'] == device_id), None)
+            online = node is not None and node.get('status') != 'Offline'
+            
+            available.append({
+                'device_id': device_id,
+                'device_name': f'Device {i}',
+                'display_name': f'Cone {i}',
+                'online': online
+            })
+        
+        return jsonify({
+            'success': True,
+            'devices': available
+        })
+    except Exception as e:
+        print(f"Error getting devices: {e}")
         return jsonify({'success': False, 'error': str(e)}), 400

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}{{ course.course_name }} - Field Trainer{% endblock %}
+
+{% block extra_css %}
+<style>
+    .diagram-container {
+        max-width: 600px;
+        margin: 20px auto;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        background: white;
+    }
+    .action-row {
+        padding: 10px;
+        border-bottom: 1px solid #e9ecef;
+    }
+    .action-row:last-child {
+        border-bottom: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>{{ course.course_name }}</h2>
+            <p class="text-muted">{{ course.description }}</p>
+        </div>
+        <a href="/courses" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Back
+        </a>
+    </div>
+
+    <!-- Course Info -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <strong>Category:</strong><br>
+                    {{ course.category or 'General' }}
+                </div>
+                <div class="col-md-3">
+                    <strong>Devices:</strong><br>
+                    {{ course.num_devices }}
+                </div>
+                <div class="col-md-3">
+                    <strong>Distance:</strong><br>
+                    {{ course.total_distance }} {{ course.distance_unit }}
+                </div>
+                <div class="col-md-3">
+                    <strong>Version:</strong><br>
+                    {{ course.version }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diagram -->
+    {% if course.diagram_svg %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5><i class="fas fa-map"></i> Course Diagram</h5>
+        </div>
+        <div class="card-body">
+            <div class="diagram-container">
+                {{ course.diagram_svg|safe }}
+            </div>
+            {% if course.layout_instructions %}
+            <div class="alert alert-info mt-3">
+                <i class="fas fa-info-circle"></i> {{ course.layout_instructions }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Course Actions -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5><i class="fas fa-list-ol"></i> Course Actions ({{ course.actions|length }} stations)</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Device</th>
+                            <th>Action</th>
+                            <th>Instruction</th>
+                            <th>Time Range</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for action in course.actions %}
+                        <tr>
+                            <td>{{ action.sequence + 1 }}</td>
+                            <td>{{ action.device_name }}</td>
+                            <td>
+                                <span class="badge bg-primary">{{ action.action }}</span>
+                            </td>
+                            <td>{{ action.instruction or '-' }}</td>
+                            <td>{{ action.min_time }}s - {{ action.max_time }}s</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

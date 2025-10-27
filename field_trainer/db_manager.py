@@ -739,3 +739,95 @@ class DatabaseManager:
                 (course_id,)
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_builtin_courses(self):
+        """Get all built-in courses"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM courses WHERE is_builtin = 1 ORDER BY course_name'
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_custom_courses(self):
+        """Get all custom (user-created) courses"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM courses WHERE is_builtin = 0 OR is_builtin IS NULL ORDER BY course_name'
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def delete_course(self, course_id):
+        """Delete a course and its actions"""
+        with self.get_connection() as conn:
+            # Delete actions first
+            conn.execute('DELETE FROM course_actions WHERE course_id = ?', (course_id,))
+            # Delete course
+            conn.execute('DELETE FROM courses WHERE course_id = ?', (course_id,))
+    
+    def get_course_by_name(self, course_name):
+        """Get course by name"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM courses WHERE course_name = ?',
+                (course_name,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    
+    def create_course_from_import(self, data):
+        """Create course from imported JSON data"""
+        from datetime import datetime
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute('''
+                INSERT INTO courses (
+                    course_name, description, course_type, total_devices,
+                    mode, category, num_devices, distance_unit, total_distance,
+                    diagram_svg, layout_instructions, is_builtin, version,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                data['course_name'],
+                data.get('description', ''),
+                data.get('category', 'Custom'),
+                data.get('num_devices', 6),
+                data.get('mode', 'sequential'),
+                data.get('category', 'Custom'),
+                data.get('num_devices', 6),
+                data.get('distance_unit', 'yards'),
+                data.get('total_distance', 0),
+                data.get('diagram_svg'),
+                data.get('layout_instructions'),
+                0,  # Not built-in
+                data.get('version', '1.0'),
+                datetime.now().isoformat(),
+                datetime.now().isoformat()
+            ))
+            
+            course_id = cursor.lastrowid
+            
+            # Insert actions
+            if 'actions' in data:
+                for action in data['actions']:
+                    conn.execute('''
+                        INSERT INTO course_actions (
+                            course_id, sequence, device_id, device_name,
+                            action, action_type, audio_file, instruction,
+                            min_time, max_time, triggers_next_athlete, marks_run_complete
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        course_id,
+                        action['sequence'],
+                        action['device_id'],
+                        action['device_name'],
+                        action['action'],
+                        action.get('action_type', 'audio_start'),
+                        action['audio_file'],
+                        action.get('instruction', ''),
+                        action.get('min_time', 0.1),
+                        action.get('max_time', 30.0),
+                        action.get('triggers_next_athlete', 0),
+                        action.get('marks_run_complete', 0)
+                    ))
+            
+            return course_id

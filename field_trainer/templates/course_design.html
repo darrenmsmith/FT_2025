@@ -1,0 +1,1083 @@
+{% extends "base.html" %}
+{% block title %}Course Design - Field Trainer{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Chevron Progress Bar */
+    .wizard-progress {
+        display: flex;
+        margin-bottom: 30px;
+        overflow: hidden;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    .wizard-chevron {
+        flex: 1;
+        position: relative;
+        background: #6c757d;
+        color: white;
+        text-align: center;
+        padding: 20px 40px 20px 50px;
+        font-weight: 600;
+        font-size: 1.1rem;
+        transition: all 0.3s;
+        cursor: pointer;
+    .wizard-chevron:first-child {
+        padding-left: 20px;
+    .wizard-chevron::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: -25px;
+        width: 0;
+        height: 0;
+        border-top: 35px solid transparent;
+        border-bottom: 35px solid transparent;
+        border-left: 25px solid #6c757d;
+        z-index: 2;
+        transition: all 0.3s;
+    .wizard-chevron::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 0;
+        height: 0;
+        border-top: 35px solid transparent;
+        border-bottom: 35px solid transparent;
+        border-left: 25px solid white;
+        z-index: 1;
+    .wizard-chevron:first-child::after {
+        display: none;
+    
+    /* Active state - blue */
+    .wizard-chevron.active {
+        background: #007bff;
+    .wizard-chevron.active::before {
+        border-left-color: #007bff;
+    
+    /* Complete state - green */
+    .wizard-chevron.complete {
+        background: #28a745;
+    .wizard-chevron.complete::before {
+        border-left-color: #28a745;
+    
+    /* Hover effect */
+    .wizard-chevron:hover {
+        opacity: 0.9;
+    
+    .design-panel {
+        display: none;
+    }
+    .design-panel.active {
+        display: block;
+    
+    /* Dropdown arrow indicator */
+    select.form-control {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+        background-repeat: no-repeat;
+        background-position: right 0.75rem center;
+        background-size: 16px 12px;
+        padding-right: 2.5rem;
+        appearance: none;
+    
+    .form-control:focus, .form-select:focus {
+        border-color: #007bff;
+        box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+    }
+    
+    /* Touch-Friendly Styles (44px minimum) */
+    .btn-touch {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 10px 20px;
+        font-size: 1rem;
+    }
+    
+    .form-control, .form-select {
+        min-height: 44px;
+        padding: 10px 12px;
+        font-size: 1rem;
+    }
+    
+    /* Device Status Banner */
+    .device-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 8px 16px;
+        font-size: 1rem;
+        font-weight: 600;
+        border-radius: 8px;
+        white-space: nowrap;
+        transition: all 0.2s;
+    }
+    
+    .device-badge.online {
+        background-color: #28a745;
+        color: white;
+        border: 2px solid #1e7e34;
+    }
+    
+    .device-badge.offline {
+        background-color: #6c757d;
+        color: white;
+        border: 2px solid #545b62;
+    }
+    
+    .device-badge.used {
+        opacity: 0.5;
+        position: relative;
+    }
+    
+    .device-badge i {
+        margin-left: 8px;
+    }
+    
+    /* Responsive Grid for Cones */
+    @media (max-width: 768px) {
+        .wizard-chevron {
+            font-size: 0.85rem;
+            padding: 15px 20px 15px 30px;
+        }
+        
+        .wizard-chevron::before {
+            border-top: 26px solid transparent;
+            border-bottom: 26px solid transparent;
+            border-left: 20px solid #6c757d;
+            right: -20px;
+        }
+        
+        .wizard-chevron::after {
+            border-top: 26px solid transparent;
+            border-bottom: 26px solid transparent;
+            border-left: 20px solid white;
+        }
+        
+        .cone-label {
+            font-size: 0.9rem;
+        }
+        
+        /* Stack form fields vertically on mobile */
+        .row > [class*="col-md-"] {
+            margin-bottom: 1rem;
+        }
+    }
+    
+    @media (max-width: 576px) {
+        .wizard-chevron {
+            font-size: 0.75rem;
+            padding: 12px 15px 12px 20px;
+        }
+        
+        .btn-touch {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        
+        .device-badge {
+            flex: 1 1 calc(50% - 8px);
+            min-width: 120px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-drafting-compass"></i> Course Design</h2>
+        <a href="/courses" class="btn btn-outline-secondary">
+            <i class="fas fa-times"></i> Cancel
+        </a>
+    </div>
+
+    <!-- Chevron Progress Bar -->
+    <div class="wizard-progress">
+        <div class="wizard-chevron active" data-step="1">
+            Info
+        </div>
+        <div class="wizard-chevron" data-step="2">
+            Devices
+        </div>
+        <div class="wizard-chevron" data-step="3">
+            Diagram
+        </div>
+        <div class="wizard-chevron" data-step="4">
+            Review
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Step 1: Basic Info -->
+        <div class="design-panel active" id="step1">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-info-circle"></i> Step 1: Basic Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Course Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-lg" id="courseName" 
+                               placeholder="Enter course name..."
+                               value="{{ course.course_name if course else '' }}" required>
+                        <small class="form-text text-muted">Choose a unique, descriptive name</small>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Description</label>
+                        <textarea class="form-control" id="courseDescription" rows="3" 
+                                  placeholder="Describe the purpose and focus of this course...">{{ course.description if course else '' }}</textarea>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-tag"></i> Category <span class="text-danger">*</span>
+                            </label>
+                            <select class="form-control" id="courseCategory" required>
+                                <option value="">Select category...</option>
+                                <option value="speed">Speed</option>
+                                <option value="agility">Agility</option>
+                                <option value="conditioning">Conditioning</option>
+                                <option value="strength">Strength</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Instruction</label>
+                            <input type="text" class="form-control" id="courseInstruction" 
+                                   placeholder="Enter general course instruction...">
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer bg-light">
+                    <div class="d-flex justify-content-end">
+                        <button type="button" class="btn btn-primary btn-lg" onclick="nextStep()">
+                            Next <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Devices & Actions -->
+        <div class="design-panel" id="step2">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-microchip"></i> Step 2: Devices & Actions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div>
+                                <label class="form-label fw-bold">Distance Unit</label>
+                                <select class="form-control" id="distanceUnit" style="width: auto; display: inline-block;">
+                                    <option value="yards">Yards</option>
+                                    <option value="meters">Meters</option>
+                                    <option value="feet">Feet</option>
+                                </select>
+                            </div>
+                            <div>
+                                <span class="badge bg-success" id="onlineCount">0 online</span>
+                                <span class="badge bg-danger" id="offlineCount">0 offline</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Device Status Banner -->
+                    <div class="mb-4">
+                        <h6 class="fw-bold mb-2">Available Devices</h6>
+                        <div id="deviceBanner" class="d-flex flex-wrap gap-2 p-3 bg-light rounded">
+                            <div class="text-muted">Loading devices...</div>
+                        </div>
+                    </div>
+
+                    <h6 class="fw-bold mb-3">Configure Cones</h6>
+                    <div id="conesContainer">
+                        <!-- Cones will be dynamically added here -->
+                    </div>
+
+                    <div class="mt-3">
+                        <button type="button" class="btn btn-success btn-touch" onclick="addCone()">
+                            <i class="fas fa-plus"></i> Add Cone
+                        </button>
+                    </div>
+                </div>
+                <div class="card-footer bg-light">
+                    <div class="d-flex justify-content-between">
+                        <button type="button" class="btn btn-secondary btn-lg" onclick="previousStep()">
+                            <i class="fas fa-arrow-left"></i> Previous
+                        </button>
+                        <button type="button" class="btn btn-primary btn-lg" onclick="nextStep()">
+                            Next <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Diagram -->
+        <div class="design-panel" id="step3">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-map"></i> Step 3: Interactive Diagram
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-secondary" id="rotateModeBtn" onclick="toggleRotateMode()">
+                                <i class="fas fa-redo"></i> Rotate Mode: OFF
+                            </button>
+                            <button type="button" class="btn btn-secondary" id="labelModeBtn" onclick="toggleLabelMode()">
+                                <i class="fas fa-ruler"></i> Show: Distance
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <strong><i class="fas fa-info-circle"></i> How to use:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li><strong>Drag cones:</strong> Click a cone, move cursor, click again to drop</li>
+                            <li><strong>Rotate arrows:</strong> Click arrows to rotate 45°, or enable Rotate Mode and click cones</li>
+                            <li><strong>Toggle labels:</strong> Switch between showing distances or actions</li>
+                        </ul>
+                    </div>
+
+                    <div id="diagramPreview" style="min-height: 400px; border: 2px solid #dee2e6; border-radius: 8px; background: white; padding: 20px;">
+                        <p class="text-center text-muted">Diagram will appear here</p>
+                    </div>
+                </div>
+                <div class="card-footer bg-light">
+                    <div class="d-flex justify-content-between">
+                        <button type="button" class="btn btn-secondary btn-lg" onclick="previousStep()">
+                            <i class="fas fa-arrow-left"></i> Previous
+                        </button>
+                        <button type="button" class="btn btn-primary btn-lg" onclick="nextStep()">
+                            Next <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Review & Save -->
+        <div class="design-panel" id="step4">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-check-circle"></i> Step 4: Review & Save
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <h6 class="mb-3"><strong>Course Information</strong></h6>
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <strong>Name:</strong> <span id="reviewName">-</span>
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Category:</strong> <span id="reviewCategory">-</span>
+                        </div>
+                        <div class="col-md-12 mt-2">
+                            <strong>Description:</strong> <span id="reviewDescription">-</span>
+                        </div>
+                        <div class="col-md-12 mt-2">
+                            <strong>Instruction:</strong> <span id="reviewInstruction">-</span>
+                        </div>
+                    </div>
+
+                    <h6 class="mb-3"><strong>Course Stations (<span id="reviewStationCount">0</span>)</strong></h6>
+                    <div class="table-responsive mb-4">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Station</th>
+                                    <th>Device</th>
+                                    <th>Distance</th>
+                                    <th>Action</th>
+                                    <th>Instruction</th>
+                                </tr>
+                            </thead>
+                            <tbody id="reviewStations">
+                                <!-- Populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h6 class="mb-3"><strong>Course Diagram</strong></h6>
+                    <div id="reviewDiagram" style="border: 2px solid #dee2e6; border-radius: 8px; background: white; padding: 20px; min-height: 300px;">
+                        <p class="text-center text-muted">Diagram preview</p>
+                    </div>
+                </div>
+                <div class="card-footer bg-light">
+                    <div class="d-flex justify-content-between">
+                        <button type="button" class="btn btn-secondary btn-lg" onclick="previousStep()">
+                            <i class="fas fa-arrow-left"></i> Previous
+                        </button>
+                        <button type="button" class="btn btn-success btn-lg" onclick="saveCourse()">
+                            <i class="fas fa-save"></i> Save Course
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Debug mode
+const DEBUG = true;
+function debug(...args) {
+    if (DEBUG) console.log('[DEBUG]', ...args);
+}
+
+let availableDevices = [];
+let usedDevices = new Set(['192.168.99.100']); // Device 0 always used
+let conePositions = [];
+let dragState = null;
+let svgElement = null;
+let rotateMode = false;
+let showActions = false;
+
+let currentStep = 1;
+const totalSteps = 4;
+let stations = [{device_id: '192.168.99.100', device_name: 'Device 0', action: '', instruction: ''}];
+let courseDiagram = '';
+
+// Action options for dropdowns
+const actionOptions = `
+    <option value="">Select action...</option>
+    <option value="backpedal">Backpedal</option>
+    <option value="bounds">Bounds</option>
+    <option value="butt_kicks">Butt Kicks</option>
+    <option value="carioca_left">Carioca Left</option>
+    <option value="carioca_right">Carioca Right</option>
+    <option value="external_hip">External Hip</option>
+    <option value="high_knees">High Knees</option>
+    <option value="high_skips">High Skips</option>
+    <option value="icky_shuffle">Icky Shuffle</option>
+    <option value="internal_hip">Internal Hip</option>
+    <option value="jog">Jog</option>
+    <option value="ladder">Ladder</option>
+    <option value="side_shuffle_left">Side Shuffle Left</option>
+    <option value="side_shuffle_right">Side Shuffle Right</option>
+    <option value="sprint">Sprint</option>
+    <option value="two_in_two_out">Two In Two Out</option>
+    <option value="walking_lunge">Walking Lunge</option>
+    <option value="finish">Finish</option>
+`;
+
+function addCone() {
+    debug('=== addCone START ===');
+    const coneNum = stations.length;
+    const displayNum = coneNum + 1;
+    
+    debug('availableDevices array length:', availableDevices.length);
+    debug('usedDevices set:', Array.from(usedDevices));
+    
+    const onlineDevices = availableDevices.filter(d => {
+        const isOnline = d.online;
+        const isNotUsed = !usedDevices.has(d.device_id);
+        return isOnline && isNotUsed;
+    });
+    
+    debug('Filtered online devices for dropdown:', onlineDevices.length);
+    
+    const coneHtml = `
+        <div class="card mb-3" id="station-${coneNum}">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0">
+                        <span class="badge bg-warning text-dark cone-label">Cone ${coneNum}</span>
+                    </h5>
+                    <button class="btn btn-sm btn-outline-danger" onclick="removeCone(${coneNum})">
+                        <i class="fas fa-times"></i> Remove
+                    </button>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label fw-bold">Device</label>
+                        <select class="form-control device-select" id="device-${coneNum}" onchange="updateDeviceSelection(${coneNum})">
+                            <option value="">Select device...</option>
+                            ${onlineDevices.map(d => `<option value="${d.device_id}">${d.display_name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="col-md-2 mb-3">
+                        <label class="form-label fw-bold">Distance</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="distance-${coneNum}" value="5" min="1">
+                            <span class="input-group-text" id="unit-${coneNum}">yards</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label fw-bold">Action</label>
+                        <select class="form-control" id="action-${coneNum}" onchange="handleActionChange(${coneNum})">
+                            ${actionOptions}
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label fw-bold">Instruction</label>
+                        <input type="text" class="form-control" id="instruction-${coneNum}"
+                               placeholder="e.g., Sprint to Cone ${displayNum}">
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('conesContainer').insertAdjacentHTML('beforeend', coneHtml);
+    stations.push({device_id: '', device_name: '', action: '', instruction: ''});
+}
+
+function handleActionChange(coneNum) {
+    const action = document.getElementById(`action-${coneNum}`).value;
+    const instructionField = document.getElementById(`instruction-${coneNum}`);
+    
+    if (action === 'finish') {
+        instructionField.value = 'Finish! Great job!';
+        instructionField.readOnly = true;
+        instructionField.classList.add('bg-light');
+    } else {
+        instructionField.readOnly = false;
+        instructionField.classList.remove('bg-light');
+    }
+}
+
+function updateDeviceSelection(coneNum) {
+    const select = document.getElementById(`device-${coneNum}`);
+    const deviceId = select.value;
+    
+    if (deviceId) {
+        const device = availableDevices.find(d => d.device_id === deviceId);
+        stations[coneNum] = {
+            ...stations[coneNum],
+            device_id: deviceId,
+            device_name: device.device_name
+        };
+        usedDevices.add(deviceId);
+        
+        document.querySelector(`#station-${coneNum} .cone-label`).textContent = device.display_name;
+        displayDeviceStatus();
+    }
+}
+
+function removeCone(coneNum) {
+    const station = stations[coneNum];
+    if (station && station.device_id) {
+        usedDevices.delete(station.device_id);
+    }
+    
+    stations.splice(coneNum, 1);
+    document.getElementById(`station-${coneNum}`).remove();
+    
+    document.querySelectorAll('#conesContainer .card').forEach((card, idx) => {
+        const newNum = idx + 1;
+        card.id = `station-${newNum}`;
+        card.querySelector('h5 .cone-label').textContent = `Cone ${newNum}`;
+    });
+    
+    displayDeviceStatus();
+    repopulateDeviceDropdowns();
+}
+
+async function loadAvailableDevices() {
+    debug('=== loadAvailableDevices START ===');
+    debug('Current availableDevices length:', availableDevices.length);
+    
+    try {
+        debug('Fetching /api/devices/available...');
+        const response = await fetch('/api/devices/available');
+        debug('Response received - status:', response.status, 'ok:', response.ok);
+        
+        const data = await response.json();
+        debug('Response data:', JSON.stringify(data, null, 2));
+        
+        if (data.success) {
+            availableDevices = data.devices;
+            debug('Available devices loaded:', availableDevices.length);
+            displayDeviceStatus();
+            
+            const conesContainer = document.getElementById('conesContainer');
+            
+            // If cones already exist but dropdowns are empty, repopulate them
+            if (conesContainer && conesContainer.children.length > 0) {
+                debug('Repopulating existing cone dropdowns');
+                repopulateDeviceDropdowns();
+            }
+            // Otherwise, initialize 5 cones (1-5) if this is the first time entering Step 2
+            else if (conesContainer && conesContainer.children.length === 0 && stations.length === 1) {
+                debug('Initializing 5 cones (1-5)');
+                for (let i = 0; i < 5; i++) {
+                    addCone();
+                repopulateDeviceDropdowns();
+                }
+            }
+        } else {
+            console.error('API returned success=false:', data.error);
+            const onlineCount = document.getElementById('onlineCount');
+            const offlineCount = document.getElementById('offlineCount');
+            if (onlineCount) onlineCount.textContent = '0 online';
+            if (offlineCount) offlineCount.textContent = '0 offline';
+        }
+    } catch (error) {
+        console.error('Failed to load devices:', error);
+        const onlineCount = document.getElementById('onlineCount');
+        const offlineCount = document.getElementById('offlineCount');
+        if (onlineCount) onlineCount.textContent = '0 online';
+        if (offlineCount) offlineCount.textContent = '0 offline';
+    }
+}
+
+function displayDeviceStatus() {
+    debug('=== displayDeviceStatus START ===');
+    debug('Displaying', availableDevices.length, 'devices');
+    debug('usedDevices:', Array.from(usedDevices));
+    
+    // Count online and offline devices
+    const onlineDevices = availableDevices.filter(d => d.online).length;
+    const offlineDevices = availableDevices.filter(d => !d.online).length;
+    
+    const onlineCount = document.getElementById('onlineCount');
+    const offlineCount = document.getElementById('offlineCount');
+    
+    if (onlineCount) onlineCount.textContent = `${onlineDevices} online`;
+    if (offlineCount) offlineCount.textContent = `${offlineDevices} offline`;
+    
+    // Populate device banner
+    const deviceBanner = document.getElementById('deviceBanner');
+    if (deviceBanner) {
+        deviceBanner.innerHTML = '';
+        
+        availableDevices.forEach(device => {
+            const statusClass = device.online ? 'online' : 'offline';
+            const icon = device.online ? 'check-circle' : 'times-circle';
+            const usedClass = usedDevices.has(device.device_id) ? ' used' : '';
+            
+            const badge = document.createElement('div');
+            badge.className = `device-badge ${statusClass}${usedClass}`;
+            badge.innerHTML = `
+                ${device.display_name}
+                <i class="fas fa-${icon}"></i>
+            `;
+            
+            deviceBanner.appendChild(badge);
+        });
+    }
+    
+    debug('Device status displayed - Online:', onlineDevices, 'Offline:', offlineDevices);
+}
+
+function repopulateDeviceDropdowns() {
+    debug('=== repopulateDeviceDropdowns START ===');
+    
+    // Get all device dropdowns
+    const deviceDropdowns = document.querySelectorAll('.device-select');
+    debug('Found', deviceDropdowns.length, 'device dropdowns to repopulate');
+    
+    deviceDropdowns.forEach((dropdown, index) => {
+        const coneNum = index + 1; // Cone numbers start at 1
+        const currentValue = dropdown.value; // Preserve selected value if any
+   
+        const onlineDevices = availableDevices.filter(d => {
+            const isStart = d.device_id === '192.168.99.100';
+            const isOnline = d.online;
+            const isNotUsed = !usedDevices.has(d.device_id) || d.device_id === currentValue;
+        return isStart || (isOnline && isNotUsed);
+        });
+        
+        debug(`Cone ${coneNum}: ${onlineDevices.length} available devices`);
+        
+        // Rebuild dropdown options
+        dropdown.innerHTML = '<option value="">Select device...</option>';
+        onlineDevices.forEach(d => {
+            const option = document.createElement('option');
+            option.value = d.device_id;
+            option.textContent = d.display_name;
+            if (d.device_id === currentValue) {
+                option.selected = true;
+            }
+            dropdown.appendChild(option);
+        });
+    });
+    
+    debug('Device dropdowns repopulated');
+}
+
+function updateWizard() {
+    debug('updateWizard called - currentStep:', currentStep);
+    
+    document.querySelectorAll('.wizard-step').forEach((step, index) => {
+        step.classList.toggle('active', index + 1 === currentStep);
+    });
+    
+    document.querySelectorAll('.wizard-chevron').forEach((chevron, index) => {
+        chevron.classList.toggle('active', index + 1 <= currentStep);
+    });
+    
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    
+    if (prevBtn) prevBtn.style.display = currentStep === 1 ? 'none' : 'inline-block';
+    if (nextBtn) nextBtn.textContent = currentStep === totalSteps ? 'Save Course' : 'Next';
+}
+
+function nextStep() {
+    debug('nextStep called - currentStep:', currentStep);
+    
+    if (currentStep === 1) {
+        const name = document.getElementById('courseName').value.trim();
+        if (!name) {
+            alert('Please enter a course name');
+            return;
+        }
+    }
+    
+    if (currentStep === 2) {
+        if (stations.length < 2) {
+            alert('Please add at least one cone');
+            return;
+        }
+    }
+    
+    if (currentStep < totalSteps) {
+        currentStep++;
+        updateWizard();
+        
+        if (currentStep === 2) {
+            debug('*** ENTERING STEP 2 - Loading devices ***');
+            loadAvailableDevices();
+        }
+        
+        if (currentStep === 3) {
+            generateDiagram();
+        }
+        
+        if (currentStep === 4) {
+            populateReview();
+        }
+    }
+}
+
+function previousStep() {
+    if (currentStep > 1) {
+        currentStep--;
+        updateWizard();
+    }
+}
+
+function toggleRotateMode() {
+    rotateMode = !rotateMode;
+    const btn = document.getElementById('rotateModeBtn');
+    
+    if (rotateMode) {
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-warning');
+        btn.innerHTML = '<i class="fas fa-redo"></i> Rotate Mode: ON';
+        if (svgElement) svgElement.style.cursor = 'crosshair';
+    } else {
+        btn.classList.remove('btn-warning');
+        btn.classList.add('btn-secondary');
+        btn.innerHTML = '<i class="fas fa-redo"></i> Rotate Mode: OFF';
+        if (svgElement) svgElement.style.cursor = 'default';
+    }
+}
+
+function toggleLabelMode() {
+    showActions = !showActions;
+    const btn = document.getElementById('labelModeBtn');
+    
+    if (showActions) {
+        btn.innerHTML = '<i class="fas fa-running"></i> Show: Actions';
+    } else {
+        btn.innerHTML = '<i class="fas fa-ruler"></i> Show: Distance';
+    }
+    
+    generateDiagram();
+}
+
+function generateDiagram() {
+    console.log('Generating diagram for', stations.length, 'stations');
+    
+    if (stations.length < 2) {
+        document.getElementById('diagramPreview').innerHTML = 
+            '<p class="text-warning">Add cones in Step 2 to generate diagram</p>';
+        return;
+    }
+    
+    const distanceUnit = document.getElementById('distanceUnit')?.value || 'yards';
+    const width = 800;
+    const height = 500;
+    const padding = 80;
+    
+    if (conePositions.length !== stations.length) {
+        conePositions = [];
+        const spacing = (width - 2 * padding) / (stations.length - 1);
+        stations.forEach((station, idx) => {
+            conePositions.push({
+                x: padding + (idx * spacing),
+                y: height / 2,
+                arrowAngle: 0
+            });
+        });
+    }
+    
+    let svg = `<svg id="courseSvg" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%; cursor:default;">`;
+    svg += `<rect width="${width}" height="${height}" fill="white"/>`;
+    svg += `<defs><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">`;
+    svg += `<path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" stroke-width="1"/></pattern></defs>`;
+    svg += `<rect width="${width}" height="${height}" fill="url(#grid)"/>`;
+    
+    for (let i = 0; i < conePositions.length - 1; i++) {
+        const p1 = conePositions[i];
+        const p2 = conePositions[i + 1];
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2;
+        
+        svg += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="#2196F3" stroke-width="2" stroke-dasharray="5,5" opacity="0.5"/>`;
+        
+        if (!showActions) {
+            const distance = document.getElementById(`distance-${i + 1}`)?.value || '5';
+            svg += `<rect x="${midX - 25}" y="${midY - 15}" width="50" height="20" fill="white" stroke="#2196F3" rx="3"/>`;
+            svg += `<text x="${midX}" y="${midY}" text-anchor="middle" font-size="12" font-weight="bold" fill="#2196F3">${distance} ${distanceUnit}</text>`;
+        }
+    }
+    
+    conePositions.forEach((pos, idx) => {
+        const isStart = idx === 0;
+        const color = isStart ? '#4CAF50' : '#FF9800';
+        const label = isStart ? 'S' : idx;
+        const coneName = isStart ? 'Start' : `Cone ${idx}`;
+        
+        svg += `<g class="cone-group" data-idx="${idx}" style="cursor:grab;">`;
+        svg += `<circle cx="${pos.x}" cy="${pos.y}" r="25" fill="white" stroke="${color}" stroke-width="3"/>`;
+        svg += `<text x="${pos.x}" y="${pos.y + 6}" text-anchor="middle" font-size="18" font-weight="bold" fill="${color}" pointer-events="none">${label}</text>`;
+        svg += `</g>`;
+        
+        if (showActions) {
+            const action = document.getElementById(`action-${idx}`)?.value || 'no_action';
+            const actionText = action === 'finish' ? 'FINISH' : action.replace(/_/g, ' ');
+            svg += `<text x="${pos.x}" y="${pos.y + 45}" text-anchor="middle" font-size="10" font-weight="bold" fill="#E91E63" pointer-events="none">${actionText}</text>`;
+        } else {
+            svg += `<text x="${pos.x}" y="${pos.y + 45}" text-anchor="middle" font-size="11" fill="#666" pointer-events="none">${coneName}</text>`;
+        }
+        
+        const circleRadius = 25;
+        const arrowLen = 30;
+        const angle = pos.arrowAngle * Math.PI / 180;
+        
+        const arrowStartX = pos.x + Math.cos(angle) * circleRadius;
+        const arrowStartY = pos.y + Math.sin(angle) * circleRadius;
+        const arrowEndX = pos.x + Math.cos(angle) * (circleRadius + arrowLen);
+        const arrowEndY = pos.y + Math.sin(angle) * (circleRadius + arrowLen);
+        
+        const arrowHeadLen = 15;
+        const arrowHeadWidth = Math.PI/5;
+        const arrowHead1X = arrowEndX - arrowHeadLen * Math.cos(angle - arrowHeadWidth);
+        const arrowHead1Y = arrowEndY - arrowHeadLen * Math.sin(angle - arrowHeadWidth);
+        const arrowHead2X = arrowEndX - arrowHeadLen * Math.cos(angle + arrowHeadWidth);
+        const arrowHead2Y = arrowEndY - arrowHeadLen * Math.sin(angle + arrowHeadWidth);
+        
+        svg += `<g class="arrow-group" data-idx="${idx}" style="cursor:pointer;">`;
+        svg += `<line x1="${arrowStartX}" y1="${arrowStartY}" x2="${arrowEndX}" y2="${arrowEndY}" stroke="${color}" stroke-width="4"/>`;
+        svg += `<polygon points="${arrowEndX},${arrowEndY} ${arrowHead1X},${arrowHead1Y} ${arrowHead2X},${arrowHead2Y}" fill="${color}"/>`;
+        svg += `</g>`;
+    });
+    
+    svg += '</svg>';
+    courseDiagram = svg;
+    document.getElementById('diagramPreview').innerHTML = svg;
+    setupDragging();
+}
+
+function setupDragging() {
+    svgElement = document.getElementById('courseSvg');
+    if (!svgElement) return;
+    
+    const newSvg = svgElement.cloneNode(true);
+    svgElement.parentNode.replaceChild(newSvg, svgElement);
+    svgElement = newSvg;
+    
+    svgElement.addEventListener('click', (e) => {
+        const coneGroup = e.target.closest('.cone-group');
+        if (coneGroup) {
+            const idx = parseInt(coneGroup.dataset.idx);
+            
+            if (rotateMode) {
+                conePositions[idx].arrowAngle = (conePositions[idx].arrowAngle + 45) % 360;
+                generateDiagram();
+                return;
+            }
+            
+            if (dragState === null) {
+                dragState = idx;
+                svgElement.style.cursor = 'grabbing';
+            } else if (dragState === idx) {
+                dragState = null;
+                svgElement.style.cursor = 'default';
+            } else {
+                dragState = idx;
+            }
+            return;
+        }
+        
+        const arrowGroup = e.target.closest('.arrow-group');
+        if (arrowGroup && !rotateMode && dragState === null) {
+            const idx = parseInt(arrowGroup.dataset.idx);
+            conePositions[idx].arrowAngle = (conePositions[idx].arrowAngle + 45) % 360;
+            generateDiagram();
+            return;
+        }
+        
+        if (dragState !== null) {
+            dragState = null;
+            svgElement.style.cursor = 'default';
+        }
+    });
+    
+    svgElement.addEventListener('mousemove', (e) => {
+        if (dragState !== null && !rotateMode) {
+            const rect = svgElement.getBoundingClientRect();
+            const scaleX = svgElement.viewBox.baseVal.width / rect.width;
+            const scaleY = svgElement.viewBox.baseVal.height / rect.height;
+            
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            
+            const padding = 30;
+            const maxX = svgElement.viewBox.baseVal.width - padding;
+            const maxY = svgElement.viewBox.baseVal.height - padding;
+            
+            conePositions[dragState].x = Math.max(padding, Math.min(maxX, x));
+            conePositions[dragState].y = Math.max(padding, Math.min(maxY, y));
+            
+            generateDiagram();
+        }
+    });
+}
+
+function populateReview() {
+    debug('Populating review in Step 4');
+    
+    // Populate course info
+    document.getElementById('reviewName').textContent = document.getElementById('courseName').value || '-';
+    document.getElementById('reviewCategory').textContent = document.getElementById('courseCategory').value || '-';
+    document.getElementById('reviewDescription').textContent = document.getElementById('courseDescription').value || '-';
+    document.getElementById('reviewInstruction').textContent = document.getElementById('courseInstruction').value || '-';
+    
+    // Populate stations table
+    const distanceUnit = document.getElementById('distanceUnit')?.value || 'yards';
+    document.getElementById('reviewStationCount').textContent = stations.length;
+    
+    const tbody = document.getElementById('reviewStations');
+    tbody.innerHTML = '';
+    
+    stations.forEach((station, idx) => {
+        const row = tbody.insertRow();
+        const isStart = idx === 0;
+        const label = isStart ? 'Start' : `Cone ${idx}`;
+        const distance = isStart ? '-' : (document.getElementById(`distance-${idx}`)?.value || '5') + ' ' + distanceUnit;
+        const action = station.action || '-';
+        const instruction = station.instruction || '-';
+        
+        row.innerHTML = `
+            <td>${label}</td>
+            <td>${station.device_name || station.device_id}</td>
+            <td>${distance}</td>
+            <td><span class="badge bg-primary">${action}</span></td>
+            <td>${instruction}</td>
+        `;
+    });
+    
+    // Populate diagram
+    document.getElementById('reviewDiagram').innerHTML = courseDiagram || '<p class="text-center text-muted">No diagram available</p>';
+}
+
+async function saveCourse() {
+    debug('Saving course...');
+    
+    // Gather all course data
+    const courseData = {
+        course_name: document.getElementById('courseName').value,
+        description: document.getElementById('courseDescription').value,
+        category: document.getElementById('courseCategory').value,
+        instruction: document.getElementById('courseInstruction').value,
+        distance_unit: document.getElementById('distanceUnit')?.value || 'yards',
+        num_devices: stations.length,
+        diagram_svg: courseDiagram,
+        stations: stations.map((station, idx) => ({
+            sequence: idx,
+            device_id: station.device_id,
+            device_name: station.device_name || station.device_id,
+            action: station.action || '',
+            instruction: station.instruction || '',
+            distance: idx === 0 ? 0 : (parseFloat(document.getElementById(`distance-${idx}`)?.value) || 5)
+        }))
+    };
+    
+    debug('Course data to save:', courseData);
+    
+    // Validate
+    if (!courseData.course_name) {
+        alert('Please enter a course name');
+        return;
+    }
+    
+    if (stations.length < 2) {
+        alert('Please add at least one cone');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/courses', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(courseData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('Course saved successfully!');
+            window.location.href = '/courses';
+        } else {
+            alert('Error saving course: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Save error:', error);
+        alert('Failed to save course: ' + error.message);
+    }
+}
+
+// Initialize
+debug('=== COURSE DESIGN INITIALIZED ===');
+updateWizard();
+
+setTimeout(() => {
+    const step2Panel = document.getElementById('step2');
+    if (step2Panel && step2Panel.classList.contains('active')) {
+        loadAvailableDevices();
+    }
+}, 100);
+
+// Event listeners
+const numDevicesEl = document.getElementById('numDevices');
+if (numDevicesEl) {
+    numDevicesEl.addEventListener('change', function() {
+        if (currentStep === 2) {
+            loadAvailableDevices();
+        }
+    });
+}
+
+</script>
+{% endblock %}
