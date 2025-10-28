@@ -1098,7 +1098,8 @@ def get_available_devices():
             'device_id': '192.168.99.100',
             'device_name': 'Device 0',
             'display_name': 'Start',
-            'online': device_0 is not None and device_0.get('status') != 'Offline'
+            # 'online': device_0 is not None and device_0.get('status') != 'Offline'
+            'online': True  # Start (Device 0) is always online when server is running, changed for course_design
         })
         
         # Cones 1-5

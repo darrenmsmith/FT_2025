@@ -64,13 +64,13 @@
     /* Hover effect */
     .wizard-chevron:hover {
         opacity: 0.9;
-    
+}    
     .design-panel {
         display: none;
     }
     .design-panel.active {
         display: block;
-    
+}   
     /* Dropdown arrow indicator */
     select.form-control {
         background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
@@ -79,7 +79,7 @@
         background-size: 16px 12px;
         padding-right: 2.5rem;
         appearance: none;
-    
+}    
     .form-control:focus, .form-select:focus {
         border-color: #007bff;
         box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
@@ -440,7 +440,7 @@ function debug(...args) {
 }
 
 let availableDevices = [];
-let usedDevices = new Set(['192.168.99.100']); // Device 0 always used
+let usedDevices = new Set(); // Empty Initially 
 let conePositions = [];
 let dragState = null;
 let svgElement = null;
@@ -449,7 +449,8 @@ let showActions = false;
 
 let currentStep = 1;
 const totalSteps = 4;
-let stations = [{device_id: '192.168.99.100', device_name: 'Device 0', action: '', instruction: ''}];
+//let devices = [{device_id: '192.168.99.100', device_name: 'Device 0', action: '', instruction: ''}];  this incremented the num of cones
+let devices = [];
 let courseDiagram = '';
 
 // Action options for dropdowns
@@ -477,7 +478,7 @@ const actionOptions = `
 
 function addCone() {
     debug('=== addCone START ===');
-    const coneNum = stations.length;
+    const coneNum = devices.length;
     const displayNum = coneNum + 1;
     
     debug('availableDevices array length:', availableDevices.length);
@@ -492,7 +493,7 @@ function addCone() {
     debug('Filtered online devices for dropdown:', onlineDevices.length);
     
     const coneHtml = `
-        <div class="card mb-3" id="station-${coneNum}">
+        <div class="card mb-3" id="device-${coneNum}">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h5 class="mb-0">
@@ -505,7 +506,7 @@ function addCone() {
                 <div class="row">
                     <div class="col-md-4 mb-3">
                         <label class="form-label fw-bold">Device</label>
-                        <select class="form-control device-select" id="device-${coneNum}" onchange="updateDeviceSelection(${coneNum})">
+                        <select class="form-control device-select" id="device-select-${coneNum}" onchange="updateDeviceSelection(${coneNum})">
                             <option value="">Select device...</option>
                             ${onlineDevices.map(d => `<option value="${d.device_id}">${d.display_name}</option>`).join('')}
                         </select>
@@ -534,7 +535,7 @@ function addCone() {
     `;
     
     document.getElementById('conesContainer').insertAdjacentHTML('beforeend', coneHtml);
-    stations.push({device_id: '', device_name: '', action: '', instruction: ''});
+    devices.push({device_id: '', device_name: '', action: '', instruction: ''});
 }
 
 function handleActionChange(coneNum) {
@@ -552,36 +553,36 @@ function handleActionChange(coneNum) {
 }
 
 function updateDeviceSelection(coneNum) {
-    const select = document.getElementById(`device-${coneNum}`);
+    const select = document.getElementById(`device-select-${coneNum}`);
     const deviceId = select.value;
     
     if (deviceId) {
         const device = availableDevices.find(d => d.device_id === deviceId);
-        stations[coneNum] = {
-            ...stations[coneNum],
+        devices[coneNum] = {
+            ...devices[coneNum],
             device_id: deviceId,
             device_name: device.device_name
         };
         usedDevices.add(deviceId);
         
-        document.querySelector(`#station-${coneNum} .cone-label`).textContent = device.display_name;
+        document.querySelector(`#device-${coneNum} .cone-label`).textContent = device.display_name;
         displayDeviceStatus();
+        repopulateDeviceDropdowns();
     }
 }
 
 function removeCone(coneNum) {
-    const station = stations[coneNum];
-    if (station && station.device_id) {
-        usedDevices.delete(station.device_id);
+    const device = devices[coneNum];
+    if (device && device.device_id) {
+        usedDevices.delete(device.device_id);
     }
     
-    stations.splice(coneNum, 1);
-    document.getElementById(`station-${coneNum}`).remove();
-    
+    devices.splice(coneNum, 1);
+    document.getElementById(`device-select-${coneNum}`).remove();    
     document.querySelectorAll('#conesContainer .card').forEach((card, idx) => {
         const newNum = idx + 1;
-        card.id = `station-${newNum}`;
-        card.querySelector('h5 .cone-label').textContent = `Cone ${newNum}`;
+        card.id = `device-${newNum}`;
+        card.querySelector('h5 .cone-label').textContent = `Cone ${idx}`;
     });
     
     displayDeviceStatus();
@@ -613,13 +614,13 @@ async function loadAvailableDevices() {
                 repopulateDeviceDropdowns();
             }
             // Otherwise, initialize 5 cones (1-5) if this is the first time entering Step 2
-            else if (conesContainer && conesContainer.children.length === 0 && stations.length === 1) {
-                debug('Initializing 5 cones (1-5)');
-                for (let i = 0; i < 5; i++) {
-                    addCone();
-                repopulateDeviceDropdowns();
-                }
-            }
+//            else if (conesContainer && conesContainer.children.length === 0 && devices.length === 1) {
+//                debug('Initializing 5 cones (1-5)');
+//                for (let i = 0; i < 5; i++) {
+//                    addCone();
+//                repopulateDeviceDropdowns();
+//                }
+//            }
         } else {
             console.error('API returned success=false:', data.error);
             const onlineCount = document.getElementById('onlineCount');
@@ -683,14 +684,14 @@ function repopulateDeviceDropdowns() {
     debug('Found', deviceDropdowns.length, 'device dropdowns to repopulate');
     
     deviceDropdowns.forEach((dropdown, index) => {
-        const coneNum = index + 1; // Cone numbers start at 1
+        const coneNum = parseInt(dropdown.id.replace('device-', ''));
         const currentValue = dropdown.value; // Preserve selected value if any
    
         const onlineDevices = availableDevices.filter(d => {
             const isStart = d.device_id === '192.168.99.100';
-            const isOnline = d.online;
+            const isOnline = d.online || isStart; 
             const isNotUsed = !usedDevices.has(d.device_id) || d.device_id === currentValue;
-        return isStart || (isOnline && isNotUsed);
+        return isOnline && isNotUsed; 
         });
         
         debug(`Cone ${coneNum}: ${onlineDevices.length} available devices`);
@@ -741,7 +742,7 @@ function nextStep() {
     }
     
     if (currentStep === 2) {
-        if (stations.length < 2) {
+        if (devices.length < 2) {
             alert('Please add at least one cone');
             return;
         }
@@ -804,9 +805,10 @@ function toggleLabelMode() {
 }
 
 function generateDiagram() {
-    console.log('Generating diagram for', stations.length, 'stations');
-    
-    if (stations.length < 2) {
+    const configuredDevices = devices.filter(s => s.device_id && s.device_id !== '');
+    console.log('Generating diagram for', configuredDevices.length, 'devices');
+
+    if (configuredDevices.length < 2) {    
         document.getElementById('diagramPreview').innerHTML = 
             '<p class="text-warning">Add cones in Step 2 to generate diagram</p>';
         return;
@@ -816,11 +818,11 @@ function generateDiagram() {
     const width = 800;
     const height = 500;
     const padding = 80;
-    
-    if (conePositions.length !== stations.length) {
+
+    if (conePositions.length !== configuredDevices.length) {
         conePositions = [];
-        const spacing = (width - 2 * padding) / (stations.length - 1);
-        stations.forEach((station, idx) => {
+        const spacing = (width - 2 * padding) / (configuredDevices.length - 1);
+        configuredDevices.forEach((validStation, idx) => {
             conePositions.push({
                 x: padding + (idx * spacing),
                 y: height / 2,
@@ -972,24 +974,24 @@ function populateReview() {
     document.getElementById('reviewDescription').textContent = document.getElementById('courseDescription').value || '-';
     document.getElementById('reviewInstruction').textContent = document.getElementById('courseInstruction').value || '-';
     
-    // Populate stations table
+    // Populate devices table
     const distanceUnit = document.getElementById('distanceUnit')?.value || 'yards';
-    document.getElementById('reviewStationCount').textContent = stations.length;
+    document.getElementById('reviewStationCount').textContent = devices.length;
     
     const tbody = document.getElementById('reviewStations');
     tbody.innerHTML = '';
     
-    stations.forEach((station, idx) => {
+    devices.forEach((device, idx) => {
         const row = tbody.insertRow();
         const isStart = idx === 0;
         const label = isStart ? 'Start' : `Cone ${idx}`;
         const distance = isStart ? '-' : (document.getElementById(`distance-${idx}`)?.value || '5') + ' ' + distanceUnit;
-        const action = station.action || '-';
-        const instruction = station.instruction || '-';
+        const action = device.action || '-';
+        const instruction = device.instruction || '-';
         
         row.innerHTML = `
             <td>${label}</td>
-            <td>${station.device_name || station.device_id}</td>
+            <td>${device.device_name || device.device_id}</td>
             <td>${distance}</td>
             <td><span class="badge bg-primary">${action}</span></td>
             <td>${instruction}</td>
@@ -1010,14 +1012,14 @@ async function saveCourse() {
         category: document.getElementById('courseCategory').value,
         instruction: document.getElementById('courseInstruction').value,
         distance_unit: document.getElementById('distanceUnit')?.value || 'yards',
-        num_devices: stations.length,
+        num_devices: devices.length,
         diagram_svg: courseDiagram,
-        stations: stations.map((station, idx) => ({
+        stations: devices.map((device, idx) => ({
             sequence: idx,
-            device_id: station.device_id,
-            device_name: station.device_name || station.device_id,
-            action: station.action || '',
-            instruction: station.instruction || '',
+            device_id: device.device_id,
+            device_name: device.device_name || device.device_id,
+            action: device.action || '',
+            instruction: device.instruction || '',
             distance: idx === 0 ? 0 : (parseFloat(document.getElementById(`distance-${idx}`)?.value) || 5)
         }))
     };
@@ -1030,7 +1032,7 @@ async function saveCourse() {
         return;
     }
     
-    if (stations.length < 2) {
+    if (devices.length < 2) {
         alert('Please add at least one cone');
         return;
     }
