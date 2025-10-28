@@ -844,15 +844,22 @@ function generateDiagram() {
         const midY = (p1.y + p2.y) / 2;
         
         svg += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="#2196F3" stroke-width="2" stroke-dasharray="5,5" opacity="0.5"/>`;
-        
-        if (!showActions) {
+
+        if (showActions) {
+            // Show action on the connecting line
+            const action = document.getElementById(`action-${i}`)?.value || 'no_action';
+            const actionText = action === 'finish' ? 'FINISH' : action.replace(/_/g, ' ');
+            svg += `<rect x="${midX - 40}" y="${midY - 15}" width="80" height="20" fill="white" stroke="#E91E63" rx="3"/>`;
+            svg += `<text x="${midX}" y="${midY}" text-anchor="middle" font-size="12" font-weight="bold" fill="#E91E63">${actionText}</text>`;
+        } else {
+            // Show distance on the connecting line  
             const distance = document.getElementById(`distance-${i + 1}`)?.value || '5';
             svg += `<rect x="${midX - 25}" y="${midY - 15}" width="50" height="20" fill="white" stroke="#2196F3" rx="3"/>`;
             svg += `<text x="${midX}" y="${midY}" text-anchor="middle" font-size="12" font-weight="bold" fill="#2196F3">${distance} ${distanceUnit}</text>`;
         }
     }
     
-    conePositions.forEach((pos, idx) => {
+    conePositions.forEach((pos, idx) => { //  THIS IS LABEL UNDER EACH CONE
         const isStart = idx === 0;
         const color = isStart ? '#4CAF50' : '#FF9800';
         const label = isStart ? 'S' : idx;
@@ -863,13 +870,18 @@ function generateDiagram() {
         svg += `<text x="${pos.x}" y="${pos.y + 6}" text-anchor="middle" font-size="18" font-weight="bold" fill="${color}" pointer-events="none">${label}</text>`;
         svg += `</g>`;
         
-        if (showActions) {
-            const action = document.getElementById(`action-${idx}`)?.value || 'no_action';
-            const actionText = action === 'finish' ? 'FINISH' : action.replace(/_/g, ' ');
-            svg += `<text x="${pos.x}" y="${pos.y + 45}" text-anchor="middle" font-size="10" font-weight="bold" fill="#E91E63" pointer-events="none">${actionText}</text>`;
-        } else {
-            svg += `<text x="${pos.x}" y="${pos.y + 45}" text-anchor="middle" font-size="11" fill="#666" pointer-events="none">${coneName}</text>`;
-        }
+        //         if (showActions) {
+        //             const action = document.getElementById(`action-${idx}`)?.value || 'no_action';
+        //             const actionText = action === 'finish' ? 'FINISH' : action.replace(/_/g, ' ');
+        //             svg += `<text x="${pos.x}" y="${pos.y + 45}" text-anchor="middle" font-size="10" font-weight="bold" fill="#E91E63" pointer-events="none">${actionText}</text>`;
+        //         } else {
+        //             // Show distance to next cone
+        //             if (idx < configuredDevices.length - 1) {
+        //                 const distance = document.getElementById(`distance-${idx + 1}`)?.value || '5';
+        //                 const distanceUnit = document.getElementById('distanceUnit')?.value || 'yards';
+        //                 svg += `<text x="${pos.x}" y="${pos.y + 45}" text-anchor="middle" font-size="10" fill="#2196F3" pointer-events="none">${distance} ${distanceUnit}</text>`;
+        //             }
+        //         }
         
         const circleRadius = 25;
         const arrowLen = 30;
