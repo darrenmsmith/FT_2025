@@ -46,6 +46,7 @@ class Registry:
         # Course state
         self.course_status: str = "Inactive"
         self.selected_course: Optional[str] = None
+
         # courses loaded after DB init below
         self.assignments: Dict[str, str] = {}  # node_id -> action
         self.device_0_action: Optional[str] = None  # virtual Device 0 state marker
@@ -298,6 +299,7 @@ class Registry:
                 if node_id in self.nodes:
                     self.nodes[node_id].led_pattern = pattern
         return ok
+
     def play_audio(self, node_id: str, clip: str) -> bool:
         """
         Ask a device to play a logical clip identifier (device maps to actual file).
@@ -457,6 +459,7 @@ class Registry:
                     self.send_to_node(node_id, {"cmd": "stop"})
 
             self.course_status = "Inactive"
+
             # Update server LED to amber (idle)
             if self._server_led:
                 from .ft_led import LEDState
