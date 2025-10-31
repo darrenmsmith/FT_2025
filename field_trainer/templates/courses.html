@@ -133,15 +133,19 @@
                         </div>
                         
                         <div class="mt-3">
-                            <button class="btn btn-sm btn-primary" 
+                            <button class="btn btn-sm btn-primary"
                                     onclick="editCourse({{ course.course_id }})">
                                 <i class="fas fa-edit"></i> Edit
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" 
+                            <button class="btn btn-sm btn-outline-success"
+                                    onclick="duplicateCourse({{ course.course_id }})">
+                                <i class="fas fa-copy"></i> Duplicate
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger"
                                     onclick="deleteCourse({{ course.course_id }}, '{{ course.course_name }}')">
                                 <i class="fas fa-trash"></i> Delete
                             </button>
-                            <button class="btn btn-sm btn-outline-secondary" 
+                            <button class="btn btn-sm btn-outline-secondary"
                                     onclick="exportCourse({{ course.course_id }})">
                                 <i class="fas fa-download"></i> Export
                             </button>

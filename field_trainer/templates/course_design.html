@@ -484,13 +484,14 @@ function addCone() {
     debug('availableDevices array length:', availableDevices.length);
     debug('usedDevices set:', Array.from(usedDevices));
     
-    const onlineDevices = availableDevices.filter(d => {
-        const isOnline = d.online;
+    // For course design, show ALL devices (online and offline), not just online
+    // Only filter out devices that are already used
+    const availableForSelection = availableDevices.filter(d => {
         const isNotUsed = !usedDevices.has(d.device_id);
-        return isOnline && isNotUsed;
+        return isNotUsed;
     });
     
-    debug('Filtered online devices for dropdown:', onlineDevices.length);
+    debug('Available devices for dropdown (online + offline):', availableForSelection.length);
     
     const coneHtml = `
         <div class="card mb-3" id="device-${coneNum}">
@@ -508,13 +509,13 @@ function addCone() {
                         <label class="form-label fw-bold">Device</label>
                         <select class="form-control device-select" id="device-select-${coneNum}" onchange="updateDeviceSelection(${coneNum})">
                             <option value="">Select device...</option>
-                            ${onlineDevices.map(d => `<option value="${d.device_id}">${d.display_name}</option>`).join('')}
+                            ${availableForSelection.map(d => `<option value="${d.device_id}">${d.display_name} ${d.online ? "" : "(offline)"}</option>`).join('')}
                         </select>
                     </div>
                     <div class="col-md-2 mb-3">
                         <label class="form-label fw-bold">Distance</label>
                         <div class="input-group">
-                            <input type="number" class="form-control" id="distance-${coneNum}" value="5" min="1">
+                            <input type="number" class="form-control" id="distance-${coneNum}" value="${coneNum === 0 ? '0' : '5'}" min="0">
                             <span class="input-group-text" id="unit-${coneNum}">yards</span>
                         </div>
                     </div>
@@ -608,8 +609,81 @@ async function loadAvailableDevices() {
             
             const conesContainer = document.getElementById('conesContainer');
             
+            // If devices array has data from duplicate/edit mode, render them
+            if (conesContainer && devices.length > 0 && conesContainer.children.length === 0) {
+                debug('Rendering', devices.length, 'existing devices from duplicate/edit mode');
+                const savedDevices = [...devices]; // Save the device data
+                devices = []; // Clear array so addCone() can rebuild it
+                usedDevices.clear(); // Clear used devices
+                
+                // NOW availableDevices is loaded, we can create cones with proper dropdowns
+                savedDevices.forEach((device, idx) => {
+                    debug(`Creating cone ${idx} for device:`, device);
+                    addCone(); // This creates UI with dropdowns populated from availableDevices
+                });
+                
+                // Now set all the values - availableDevices is loaded so dropdowns have options
+                setTimeout(() => {
+                    savedDevices.forEach((device, idx) => {
+                        debug(`Setting values for cone ${idx}:`, device);
+                        
+                        // Update the devices array directly with saved data
+                        devices[idx] = {
+                            device_id: device.device_id,
+                            device_name: device.device_name,
+                            action: device.action,
+                            instruction: device.instruction,
+                            distance: device.distance
+                        };
+                        
+                        const deviceSelect = document.getElementById(`device-select-${idx}`);
+                        const actionSelect = document.getElementById(`action-${idx}`);
+                        const instructionInput = document.getElementById(`instruction-${idx}`);
+                        const distanceInput = document.getElementById(`distance-${idx}`);
+                        
+                        // Set device selection
+                        if (deviceSelect && device.device_id) {
+                            debug(`Setting device select ${idx} to:`, device.device_id);
+                            deviceSelect.value = device.device_id;
+                            
+                            if (device.device_id) {
+                                usedDevices.add(device.device_id);
+                                // Update the cone label
+                                const coneLabel = document.querySelector(`#device-${idx} .cone-label`);
+                                const deviceInfo = availableDevices.find(d => d.device_id === device.device_id);
+                                if (coneLabel && deviceInfo) {
+                                    coneLabel.textContent = deviceInfo.display_name;
+                                }
+                            }
+                        }
+                        
+                        // Set action
+                        if (actionSelect && device.action) {
+                            debug(`Setting action ${idx} to:`, device.action);
+                            actionSelect.value = device.action;
+                        }
+                        
+                        // Set instruction
+                        if (instructionInput && device.instruction) {
+                            instructionInput.value = device.instruction;
+                        }
+                        
+                        // Set distance
+                        if (distanceInput) {
+                            // Always set distance, even if it's 0 or undefined
+                            const distValue = device.distance !== undefined ? device.distance : (idx === 0 ? 0 : 5);
+                            debug(`Setting distance ${idx} to:`, distValue, '(from device.distance:', device.distance, ')');
+                            distanceInput.value = distValue;
+                        }
+                    });
+                    
+                    // After all values are set, update UI
+                    displayDeviceStatus();
+                    repopulateDeviceDropdowns();
+                }, 200); // Wait for DOM to be fully ready
+            }
             // If cones already exist but dropdowns are empty, repopulate them
-            if (conesContainer && conesContainer.children.length > 0) {
+            else if (conesContainer && conesContainer.children.length > 0) {
                 debug('Repopulating existing cone dropdowns');
                 repopulateDeviceDropdowns();
             }
@@ -687,21 +761,21 @@ function repopulateDeviceDropdowns() {
         const coneNum = parseInt(dropdown.id.replace('device-', ''));
         const currentValue = dropdown.value; // Preserve selected value if any
    
-        const onlineDevices = availableDevices.filter(d => {
-            const isStart = d.device_id === '192.168.99.100';
-            const isOnline = d.online || isStart; 
+        // For course design, show ALL devices (online and offline)
+        const availableForSelection = availableDevices.filter(d => {
             const isNotUsed = !usedDevices.has(d.device_id) || d.device_id === currentValue;
-        return isOnline && isNotUsed; 
+            return isNotUsed; 
         });
         
-        debug(`Cone ${coneNum}: ${onlineDevices.length} available devices`);
+        debug(`Cone ${coneNum}: ${availableForSelection.length} available devices`);
         
         // Rebuild dropdown options
         dropdown.innerHTML = '<option value="">Select device...</option>';
-        onlineDevices.forEach(d => {
+        availableForSelection.forEach(d => {
             const option = document.createElement('option');
             option.value = d.device_id;
-            option.textContent = d.display_name;
+            // Show offline status in dropdown
+            option.textContent = d.online ? d.display_name : `${d.display_name} (offline)`;
             if (d.device_id === currentValue) {
                 option.selected = true;
             }
@@ -805,6 +879,11 @@ function toggleLabelMode() {
 }
 
 function generateDiagram() {
+    // For duplicate/edit mode: Regenerate diagram from device data instead of using saved SVG
+    // This ensures full interactivity (dragging, rotating) works correctly
+    // The saved diagram is just a visual reference - we'll rebuild it
+    debug('Regenerating diagram from device data');
+    
     const configuredDevices = devices.filter(s => s.device_id && s.device_id !== '');
     console.log('Generating diagram for', configuredDevices.length, 'devices');
 
@@ -997,7 +1076,9 @@ function populateReview() {
         const row = tbody.insertRow();
         const isStart = idx === 0;
         const label = isStart ? 'Start' : `Cone ${idx}`;
-        const distance = isStart ? '-' : (document.getElementById(`distance-${idx}`)?.value || '5') + ' ' + distanceUnit;
+        // Always show distance, including for Start (sequence 0)
+        const distValue = document.getElementById(`distance-${idx}`)?.value || (isStart ? '0' : '5');
+        const distance = distValue + ' ' + distanceUnit;
         const action = device.action || '-';
         const instruction = device.instruction || '-';
         
@@ -1018,7 +1099,7 @@ async function saveCourse() {
     debug('Saving course...');
     
     // Gather all course data
-    const courseData = {
+    const saveCourseData = {
         course_name: document.getElementById('courseName').value,
         description: document.getElementById('courseDescription').value,
         category: document.getElementById('courseCategory').value,
@@ -1026,6 +1107,8 @@ async function saveCourse() {
         distance_unit: document.getElementById('distanceUnit')?.value || 'yards',
         num_devices: devices.length,
         diagram_svg: courseDiagram,
+        mode: courseMode,  // Include mode ('edit', 'duplicate', or 'new')
+        course_id: courseData?.course_id || null,  // Include course_id if editing
         stations: devices.map((device, idx) => ({
             sequence: idx,
             device_id: device.device_id,
@@ -1036,7 +1119,7 @@ async function saveCourse() {
         }))
     };
     
-    debug('Course data to save:', courseData);
+    debug('Course data to save:', saveCourseData);
     
     // Validate
     if (!courseData.course_name) {
@@ -1055,7 +1138,7 @@ async function saveCourse() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(courseData)
+            body: JSON.stringify(saveCourseData)
         });
         
         const result = await response.json();
@@ -1072,8 +1155,71 @@ async function saveCourse() {
     }
 }
 
-// Initialize
+// Initialize course data from server
+const courseData = {{ course | tojson | safe if course else 'null' }};
+const courseMode = '{{ mode }}';
+
 debug('=== COURSE DESIGN INITIALIZED ===');
+debug('Course mode:', courseMode);
+debug('Course data:', courseData);
+
+// Populate form fields if editing or duplicating
+if (courseData && (courseMode === 'edit' || courseMode === 'duplicate')) {
+    debug('Initializing form with existing course data...');
+    
+    // Step 1: Basic Info
+    if (courseData.course_name) {
+        document.getElementById('courseName').value = courseData.course_name;
+    }
+    if (courseData.description) {
+        document.getElementById('courseDescription').value = courseData.description;
+    }
+    if (courseData.category) {
+        const categoryEl = document.getElementById('courseCategory');
+        if (categoryEl) {
+            categoryEl.value = courseData.category;
+        }
+    }
+    if (courseData.layout_instructions) {
+        const instructionEl = document.getElementById('courseInstruction');
+        if (instructionEl) {
+            instructionEl.value = courseData.layout_instructions;
+        }
+    }
+    if (courseData.distance_unit) {
+        const unitEl = document.getElementById('distanceUnit');
+        if (unitEl) {
+            unitEl.value = courseData.distance_unit;
+        }
+    }
+    
+    // Step 2 & 3: Load devices from actions
+    if (courseData.actions && courseData.actions.length > 0) {
+        debug('Loading', courseData.actions.length, 'actions into devices...');
+        devices = courseData.actions.map(action => ({
+            device_id: action.device_id,
+            device_name: action.device_name || action.device_id,
+            action: action.action || '',
+            instruction: action.instruction || '',
+            distance: action.distance || 0
+        }));
+        debug('Devices initialized:', devices);
+        
+        // Mark devices as used
+        devices.forEach(dev => {
+            if (dev.device_id) {
+                usedDevices.add(dev.device_id);
+            }
+        });
+    }
+    
+    // Step 3: Load diagram if available
+    if (courseData.diagram_svg) {
+        courseDiagram = courseData.diagram_svg;
+        debug('Course diagram loaded, length:', courseDiagram.length);
+    }
+}
+
 updateWizard();
 
 setTimeout(() => {

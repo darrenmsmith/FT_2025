@@ -18,11 +18,11 @@ from field_trainer.ft_registry import REGISTRY
 sys.path.insert(0, '/opt/field_trainer/athletic_platform')
 from bridge_layer import initialize_bridge
 sys.path.insert(0, "/opt/field_trainer")
-from routes.dashboard import dashboard_bp
+# from routes.dashboard import dashboard_bp
 
 app = Flask(__name__, template_folder='/opt/field_trainer/templates', static_folder='/opt/field_trainer/static')
 # Register dashboard blueprint
-app.register_blueprint(dashboard_bp)
+# app.register_blueprint(dashboard_bp)
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
 
 # Initialize database
@@ -136,16 +136,39 @@ def mark_skipped_segments(run_id: str, current_position: int, skipped_count: int
                 db.mark_segment_missed(seg['segment_id'])
                 print(f"      ❌ {from_device} → {to_device} marked as missed")
                 break
+# @app.route("/teams")
+
 @app.route("/")
-@app.route("/teams")
-
-
-
 def index():
-    """Team list homepage"""
+    """Redirect to dashboard"""
+    return redirect(url_for('dashboard'))
+
+@app.route('/dashboard')
+def dashboard():
+    """Coach dashboard with stats and recent activity"""
+    try:
+        stats = db.get_dashboard_stats()
+        recent_activity = db.get_recent_activity(limit=10)
+        return render_template('dashboard/index.html',
+                             stats=stats,
+                             recent_activity=recent_activity)
+    except Exception as e:
+        print(f"Error loading dashboard: {e}")
+        return render_template('dashboard/index.html',
+                             stats={
+                                 'total_athletes': 0,
+                                 'total_teams': 0,
+                                 'sessions_today': 0,
+                                 'runs_today': 0,
+                                 'prs_this_week': 0
+                             },
+                             recent_activity=[])
+
+@app.route("/teams")
+def teams_list():
+    """Team list page"""
     teams = db.get_all_teams()
     return render_template('team_list.html', teams=teams)
-
 
 @app.route('/team/create', methods=['GET', 'POST'])
 def create_team():
@@ -1023,6 +1046,98 @@ def course_design():
     
     return render_template('course_design.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
 
+@app.route('/api/courses', methods=['POST'])
+def save_course():
+    """Create new course from design wizard (or update existing in edit mode)"""
+    try:
+        data = request.get_json()
+        
+        mode = data.get('mode', 'new')
+        course_id = data.get('course_id')
+
+        # Check if course name exists (skip if editing the same course)
+        existing = db.get_course_by_name(data['course_name'])
+        if existing:
+            # Allow saving if we're editing the same course
+            if mode == 'edit' and course_id and existing['course_id'] == course_id:
+                # This is fine - editing the same course, can keep the same name
+                pass
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f"Course '{data['course_name']}' already exists. Please use a different name."
+                }), 400
+
+        # Transform stations to actions format
+        actions = []
+        for station in data.get('stations', []):
+            seq = station['sequence']
+
+            # Determine action_type
+            if seq == 0:
+                action_type = 'audio_start'
+            else:
+                action_type = 'touch_checkpoint'
+
+            # Determine triggers and completion flags
+            triggers_next = (seq == 1)  # Second device triggers next athlete
+            marks_complete = (seq == len(data['stations']) - 1)  # Last device marks completion
+
+            # Build action
+            action = {
+                'sequence': seq,
+                'device_id': station['device_id'],
+                'device_name': station.get('device_name', station['device_id']),
+                'action': station.get('action', 'default_beep'),
+                'action_type': action_type,
+                'audio_file': station.get('action', 'default_beep') + '.mp3',
+                'instruction': station.get('instruction', ''),
+                'min_time': 0.1 if seq == 0 else 1.0,
+                'max_time': 30.0,
+                'triggers_next_athlete': triggers_next,
+                'marks_run_complete': marks_complete,
+                'distance': station.get('distance', 0)
+            }
+            actions.append(action)
+
+        # Calculate total distance
+        total_distance = sum(a.get('distance', 0) for a in actions)
+
+        # Prepare course data for import
+        course_data = {
+            'course_name': data['course_name'],
+            'description': data.get('description', ''),
+            'category': data.get('category', 'Custom'),
+            'mode': 'sequential',
+            'num_devices': data.get('num_devices', len(actions)),
+            'distance_unit': data.get('distance_unit', 'yards'),
+            'total_distance': total_distance,
+            'diagram_svg': data.get('diagram_svg'),
+            'layout_instructions': data.get('instruction', ''),
+            'version': '2.0',
+            'actions': actions
+        }
+
+        # If editing, delete the old course first
+        if mode == 'edit' and course_id:
+            # Verify the course exists and is not built-in
+            old_course = db.get_course(course_id)
+            if old_course and old_course.get('is_builtin'):
+                return jsonify({
+                    'success': False,
+                    'error': 'Cannot edit built-in courses'
+                }), 400
+            
+            # Delete the old course (actions will cascade delete)
+            db.delete_course(course_id)
+        
+        # Create course using import method (works for both new and edit)
+        new_course_id = db.create_course_from_import(course_data)
+
+        return jsonify({'success': True, 'course_id': new_course_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
 @app.route('/api/courses/<int:course_id>', methods=['DELETE'])
 def delete_course(course_id):
     """Delete a custom course"""
@@ -1030,7 +1145,7 @@ def delete_course(course_id):
         course = db.get_course(course_id)
         if course and course.get('is_builtin'):
             return jsonify({'success': False, 'error': 'Cannot delete built-in courses'}), 400
-        
+
         db.delete_course(course_id)
         return jsonify({'success': True})
     except Exception as e:
@@ -1122,3 +1237,7 @@ def get_available_devices():
     except Exception as e:
         print(f"Error getting devices: {e}")
         return jsonify({'success': False, 'error': str(e)}), 400
+
+if __name__ == '__main__':
+    print("Starting Flask app on port 5001...")
+    app.run(host='0.0.0.0', port=5001, debug=False)
