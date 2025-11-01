@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Course Design - Field Trainer{% endblock %}
 
+{% block head %}
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+{% endblock %}
+
 {% block extra_css %}
 <style>
     /* Chevron Progress Bar */
@@ -911,6 +917,8 @@ function generateDiagram() {
     }
     
     let svg = `<svg id="courseSvg" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%; cursor:default;">`;
+    // Embed cone positions as comment for persistence
+    svg += `<!-- CONE_POSITIONS:${JSON.stringify(conePositions)} -->`;
     svg += `<rect width="${width}" height="${height}" fill="white"/>`;
     svg += `<defs><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">`;
     svg += `<path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" stroke-width="1"/></pattern></defs>`;
@@ -1096,8 +1104,12 @@ function populateReview() {
 }
 
 async function saveCourse() {
+    // FILE TIMESTAMP: {{ "NOW" }} - VERSION 3.0
+    const fileTimestamp = '{{ "2025-11-01 11:30:00" }}';
+    console.log('🔥🔥🔥 SAVE FUNCTION VERSION 3.0 - FILE TIMESTAMP:', fileTimestamp, '🔥🔥🔥');
+    console.log('If you see VERSION 3.0, the new code is loaded!');
     debug('Saving course...');
-    
+
     // Gather all course data
     const saveCourseData = {
         course_name: document.getElementById('courseName').value,
@@ -1115,23 +1127,32 @@ async function saveCourse() {
             device_name: device.device_name || device.device_id,
             action: device.action || '',
             instruction: device.instruction || '',
-            distance: idx === 0 ? 0 : (parseFloat(document.getElementById(`distance-${idx}`)?.value) || 5)
+            distance: parseFloat(document.getElementById(`distance-${idx}`)?.value) || 0
         }))
     };
     
     debug('Course data to save:', saveCourseData);
-    
+    console.log('📋 Save data keys:', Object.keys(saveCourseData));
+    console.log('📋 Stations count:', saveCourseData.stations?.length);
+
     // Validate
-    if (!courseData.course_name) {
+    if (!saveCourseData.course_name) {
+        console.error('❌ Validation failed: No course name');
         alert('Please enter a course name');
         return;
     }
-    
+
+    console.log('✅ Course name validation passed:', saveCourseData.course_name);
+
     if (devices.length < 2) {
+        console.error('❌ Validation failed: Need at least 2 devices');
         alert('Please add at least one cone');
         return;
     }
-    
+
+    console.log('✅ Device count validation passed:', devices.length);
+    console.log('🌐 About to send POST to /api/courses...');
+
     try {
         const response = await fetch('/api/courses', {
             method: 'POST',
@@ -1141,16 +1162,20 @@ async function saveCourse() {
             body: JSON.stringify(saveCourseData)
         });
         
+        console.log('📡 Response received, status:', response.status);
         const result = await response.json();
-        
+        console.log('📦 Response JSON:', result);
+
         if (result.success) {
+            console.log('✅ Save successful!');
             alert('Course saved successfully!');
             window.location.href = '/courses';
         } else {
+            console.error('❌ Save failed:', result.error);
             alert('Error saving course: ' + (result.error || 'Unknown error'));
         }
     } catch (error) {
-        console.error('Save error:', error);
+        console.error('💥 Save error:', error);
         alert('Failed to save course: ' + error.message);
     }
 }
@@ -1217,6 +1242,20 @@ if (courseData && (courseMode === 'edit' || courseMode === 'duplicate')) {
     if (courseData.diagram_svg) {
         courseDiagram = courseData.diagram_svg;
         debug('Course diagram loaded, length:', courseDiagram.length);
+
+        // Extract cone positions from SVG comment if they exist
+        const posMatch = courseDiagram.match(/<!-- CONE_POSITIONS:(.*?) -->/);
+        if (posMatch && posMatch[1]) {
+            try {
+                const savedPositions = JSON.parse(posMatch[1]);
+                if (savedPositions && savedPositions.length > 0) {
+                    conePositions = savedPositions;
+                    debug('Restored cone positions from saved diagram:', conePositions);
+                }
+            } catch (e) {
+                debug('Could not parse saved cone positions:', e);
+            }
+        }
     }
 }
 

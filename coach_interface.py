@@ -1051,9 +1051,14 @@ def save_course():
     """Create new course from design wizard (or update existing in edit mode)"""
     try:
         data = request.get_json()
-        
+
         mode = data.get('mode', 'new')
         course_id = data.get('course_id')
+
+        print(f"💾 SAVE COURSE REQUEST: mode={mode}, course_id={course_id}, name={data.get('course_name')}")
+        print(f"   Stations count: {len(data.get('stations', []))}")
+        if data.get('stations'):
+            print(f"   First station distance: {data['stations'][0].get('distance')}")
 
         # Check if course name exists (skip if editing the same course)
         existing = db.get_course_by_name(data['course_name'])
@@ -1118,20 +1123,83 @@ def save_course():
             'actions': actions
         }
 
-        # If editing, delete the old course first
+        # If editing, update the existing course in place
         if mode == 'edit' and course_id:
             # Verify the course exists and is not built-in
             old_course = db.get_course(course_id)
-            if old_course and old_course.get('is_builtin'):
+            if not old_course:
+                return jsonify({
+                    'success': False,
+                    'error': f'Course {course_id} not found'
+                }), 404
+            if old_course.get('is_builtin'):
                 return jsonify({
                     'success': False,
                     'error': 'Cannot edit built-in courses'
                 }), 400
-            
-            # Delete the old course (actions will cascade delete)
-            db.delete_course(course_id)
-        
-        # Create course using import method (works for both new and edit)
+
+            # Update the course in place (preserving course_id)
+            with db.get_connection() as conn:
+                # Update main course record
+                conn.execute('''
+                    UPDATE courses
+                    SET course_name = ?,
+                        description = ?,
+                        category = ?,
+                        mode = ?,
+                        num_devices = ?,
+                        distance_unit = ?,
+                        total_distance = ?,
+                        diagram_svg = ?,
+                        layout_instructions = ?,
+                        version = ?,
+                        updated_at = ?
+                    WHERE course_id = ?
+                ''', (
+                    course_data['course_name'],
+                    course_data['description'],
+                    course_data['category'],
+                    course_data['mode'],
+                    course_data['num_devices'],
+                    course_data['distance_unit'],
+                    course_data['total_distance'],
+                    course_data['diagram_svg'],
+                    course_data['layout_instructions'],
+                    course_data['version'],
+                    datetime.utcnow().isoformat(),
+                    course_id
+                ))
+
+                # Delete existing actions
+                conn.execute('DELETE FROM course_actions WHERE course_id = ?', (course_id,))
+
+                # Insert updated actions
+                for action in actions:
+                    conn.execute('''
+                        INSERT INTO course_actions (
+                            course_id, sequence, device_id, device_name, action, action_type,
+                            audio_file, instruction, min_time, max_time,
+                            triggers_next_athlete, marks_run_complete, distance
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        course_id,
+                        action['sequence'],
+                        action['device_id'],
+                        action['device_name'],
+                        action['action'],
+                        action['action_type'],
+                        action['audio_file'],
+                        action['instruction'],
+                        action['min_time'],
+                        action['max_time'],
+                        action['triggers_next_athlete'],
+                        action['marks_run_complete'],
+                        action['distance']
+                    ))
+
+            return jsonify({'success': True, 'course_id': course_id})
+
+        # For new courses, create using import method
         new_course_id = db.create_course_from_import(course_data)
 
         return jsonify({'success': True, 'course_id': new_course_id})
