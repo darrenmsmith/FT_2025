@@ -89,6 +89,7 @@
                             <th>Order</th>
                             <th>Device</th>
                             <th>Action</th>
+                            <th>Distance</th>
                             <th>Instruction</th>
                             <th>Time Range</th>
                         </tr>
@@ -101,6 +102,7 @@
                             <td>
                                 <span class="badge bg-primary">{{ action.action }}</span>
                             </td>
+                            <td>{{ (action.distance or 0)|int }} {{ course.distance_unit }}</td>
                             <td>{{ action.instruction or '-' }}</td>
                             <td>{{ action.min_time }}s - {{ action.max_time }}s</td>
                         </tr>

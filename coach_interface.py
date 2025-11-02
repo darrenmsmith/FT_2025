@@ -15,6 +15,7 @@ sys.path.insert(0, '/opt')
 
 from field_trainer.db_manager import DatabaseManager
 from field_trainer.ft_registry import REGISTRY
+from field_trainer.ft_version import VERSION
 sys.path.insert(0, '/opt/field_trainer/athletic_platform')
 from bridge_layer import initialize_bridge
 sys.path.insert(0, "/opt/field_trainer")
@@ -24,6 +25,9 @@ app = Flask(__name__, template_folder='/opt/field_trainer/templates', static_fol
 # Register dashboard blueprint
 # app.register_blueprint(dashboard_bp)
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
+
+# Track when this process started
+START_TIME = datetime.utcnow().isoformat()
 
 # Initialize database
 db = DatabaseManager('/opt/data/field_trainer.db')
@@ -36,6 +40,11 @@ active_session_state = {
     'device_sequence': [],  # Ordered list of device_ids in course
     'total_queued': 0  # Total athletes in queue at session start
 }
+
+# Context processor to add version to all templates
+@app.context_processor
+def inject_version():
+    return {'version': VERSION}
 
 # Helper function to find which athlete should receive a touch
 def find_athlete_for_touch(device_id: str, timestamp: datetime) -> Optional[str]:
@@ -142,6 +151,51 @@ def mark_skipped_segments(run_id: str, current_position: int, skipped_count: int
 def index():
     """Redirect to dashboard"""
     return redirect(url_for('dashboard'))
+
+@app.route("/health")
+def health():
+    """Health check endpoint - shows version and service status"""
+    # If JSON requested, return JSON
+    if request.args.get('format') == 'json':
+        return jsonify({
+            'service': 'field-trainer-coach',
+            'version': VERSION,
+            'pid': os.getpid(),
+            'started_at': START_TIME,
+            'port': 5001,
+            'courses_loaded': len(REGISTRY.courses.get('courses', [])),
+            'registry_id': id(REGISTRY),
+            'active_session': active_session_state.get('session_id'),
+            'status': 'healthy'
+        })
+
+    # Otherwise return HTML page
+    def calculate_uptime(start_time_iso):
+        try:
+            start = datetime.fromisoformat(start_time_iso)
+            now = datetime.utcnow()
+            delta = now - start
+            hours, remainder = divmod(int(delta.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            return f"{hours}h {minutes}m {seconds}s"
+        except:
+            return "Unknown"
+
+    health_data = {
+        'service_name': 'Coach Interface',
+        'version': VERSION,
+        'pid': os.getpid(),
+        'started_at': START_TIME,
+        'port': 5001,
+        'courses_loaded': len(REGISTRY.courses.get('courses', [])),
+        'registry_id': id(REGISTRY),
+        'course_status': REGISTRY.course_status,
+        'nodes_connected': len(REGISTRY.nodes),
+        'active_session': active_session_state.get('session_id'),
+        'active_runs': len(active_session_state.get('active_runs', {})),
+        'uptime': calculate_uptime(START_TIME)
+    }
+    return render_template('health.html', **health_data)
 
 @app.route('/dashboard')
 def dashboard():
@@ -1030,10 +1084,10 @@ def view_course(course_id):
 
 @app.route('/courses/design')
 def course_design():
-    """Course design wizard"""
+    """Course design accordion interface (v5)"""
     edit_id = request.args.get('edit')
     duplicate_id = request.args.get('duplicate')
-    
+
     course = None
     if edit_id:
         course = db.get_course(int(edit_id))
@@ -1043,8 +1097,62 @@ def course_design():
         course['actions'] = db.get_course_actions(int(duplicate_id))
         course['course_name'] = f"{course['course_name']} (Copy)"
         course['is_builtin'] = 0
-    
-    return render_template('course_design.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
+
+    return render_template('course_design_v5.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
+
+@app.route('/courses/design/v2')
+def course_design_v2():
+    """Course design accordion prototype"""
+    edit_id = request.args.get('edit')
+    duplicate_id = request.args.get('duplicate')
+
+    course = None
+    if edit_id:
+        course = db.get_course(int(edit_id))
+        course['actions'] = db.get_course_actions(int(edit_id))
+    elif duplicate_id:
+        course = db.get_course(int(duplicate_id))
+        course['actions'] = db.get_course_actions(int(duplicate_id))
+        course['course_name'] = f"{course['course_name']} (Copy)"
+        course['is_builtin'] = 0
+
+    return render_template('course_design_v2.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
+
+@app.route('/courses/design/v3')
+def course_design_v3():
+    """Course design accordion v3 - side-by-side layout"""
+    edit_id = request.args.get('edit')
+    duplicate_id = request.args.get('duplicate')
+
+    course = None
+    if edit_id:
+        course = db.get_course(int(edit_id))
+        course['actions'] = db.get_course_actions(int(edit_id))
+    elif duplicate_id:
+        course = db.get_course(int(duplicate_id))
+        course['actions'] = db.get_course_actions(int(duplicate_id))
+        course['course_name'] = f"{course['course_name']} (Copy)"
+        course['is_builtin'] = 0
+
+    return render_template('course_design_v3.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
+
+@app.route('/courses/design/v4')
+def course_design_v4():
+    """Course design accordion v4 - reorganized sections"""
+    edit_id = request.args.get('edit')
+    duplicate_id = request.args.get('duplicate')
+
+    course = None
+    if edit_id:
+        course = db.get_course(int(edit_id))
+        course['actions'] = db.get_course_actions(int(edit_id))
+    elif duplicate_id:
+        course = db.get_course(int(duplicate_id))
+        course['actions'] = db.get_course_actions(int(duplicate_id))
+        course['course_name'] = f"{course['course_name']} (Copy)"
+        course['is_builtin'] = 0
+
+    return render_template('course_design_v4.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
 
 @app.route('/api/courses', methods=['POST'])
 def save_course():
@@ -1305,6 +1413,24 @@ def get_available_devices():
     except Exception as e:
         print(f"Error getting devices: {e}")
         return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.route('/courses/design/v5')
+def course_design_v5():
+    """Course design accordion v5 - final layout with colorful dividers"""
+    edit_id = request.args.get('edit')
+    duplicate_id = request.args.get('duplicate')
+
+    course = None
+    if edit_id:
+        course = db.get_course(int(edit_id))
+        course['actions'] = db.get_course_actions(int(edit_id))
+    elif duplicate_id:
+        course = db.get_course(int(duplicate_id))
+        course['actions'] = db.get_course_actions(int(duplicate_id))
+        course['course_name'] = f"{course['course_name']} (Copy)"
+        course['is_builtin'] = 0
+
+    return render_template('course_design_v5.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
 
 if __name__ == '__main__':
     print("Starting Flask app on port 5001...")
