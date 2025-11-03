@@ -399,11 +399,13 @@ class Registry:
                         success += 1
 
             # Mark unassigned devices as inactive
-            with self.nodes_lock:
-                for node_id in self.nodes.keys():
-                    if node_id not in self.assignments and node_id != "192.168.99.100":
-                        self.send_to_node(node_id, {"deploy": True, "action": None, "course": course_name, "status": "inactive"})
-                        self.log(f"Set {node_id} to inactive (not in course)")
+            # DISABLED: This can cause TCP blocking on partial deployments
+            # TODO: Make this async or add proper timeout handling
+            # with self.nodes_lock:
+            #     for node_id in self.nodes.keys():
+            #         if node_id not in self.assignments and node_id != "192.168.99.100":
+            #             self.send_to_node(node_id, {"deploy": True, "action": None, "course": course_name, "status": "inactive"})
+            #             self.log(f"Set {node_id} to inactive (not in course)")
 
             self.log(f"Deployment sent to {success}/{max(0, len(self.assignments)-1)} client devices")
             print(f"📊 DEPLOY SUMMARY:")
