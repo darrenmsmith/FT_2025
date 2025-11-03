@@ -209,10 +209,10 @@ class DatabaseManager:
     def get_recent_activity(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent completed runs for dashboard"""
         from datetime import datetime
-        
+
         with self.get_connection() as conn:
             rows = conn.execute('''
-                SELECT 
+                SELECT
                     r.run_id,
                     r.total_time,
                     r.completed_at,
@@ -226,13 +226,13 @@ class DatabaseManager:
                 ORDER BY r.completed_at DESC
                 LIMIT ?
             ''', (limit,)).fetchall()
-            
+
             activity = []
-            now = datetime.now()
-            
+            now = datetime.utcnow()  # Use UTC to match database timestamps
+
             for row in rows:
                 item = dict(row)
-                
+
                 # Calculate "time ago"
                 completed = datetime.fromisoformat(item['completed_at'])
                 delta = now - completed
@@ -251,6 +251,71 @@ class DatabaseManager:
                 activity.append(item)
             
             return activity
+
+    def get_course_rankings(self, team_id: Optional[str] = None, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get course rankings showing each athlete's PR for each course"""
+        with self.get_connection() as conn:
+            # Build WHERE clause for filters
+            where_clauses = ["r.status = 'completed'", "r.total_time IS NOT NULL"]
+            params = []
+
+            if team_id:
+                where_clauses.append("a.team_id = ?")
+                params.append(team_id)
+
+            if category:
+                where_clauses.append("c.category = ?")
+                params.append(category)
+
+            where_clause = " AND ".join(where_clauses)
+
+            # Get best time for each athlete on each course
+            rows = conn.execute(f'''
+                SELECT
+                    c.course_id,
+                    c.course_name,
+                    c.category,
+                    a.athlete_id,
+                    a.name as athlete_name,
+                    t.name as team_name,
+                    MIN(r.total_time) as best_time,
+                    MAX(CASE WHEN r.total_time = (
+                        SELECT MIN(total_time)
+                        FROM runs
+                        WHERE athlete_id = a.athlete_id
+                        AND course_id = c.course_id
+                        AND status = 'completed'
+                    ) THEN r.completed_at END) as pr_date
+                FROM runs r
+                JOIN athletes a ON r.athlete_id = a.athlete_id
+                JOIN teams t ON a.team_id = t.team_id
+                JOIN courses c ON r.course_id = c.course_id
+                WHERE {where_clause}
+                GROUP BY c.course_id, c.course_name, c.category, a.athlete_id, a.name, t.name
+                ORDER BY c.course_name, best_time ASC
+            ''', params).fetchall()
+
+            # Organize by course
+            courses = {}
+            for row in rows:
+                course_id = row['course_id']
+                if course_id not in courses:
+                    courses[course_id] = {
+                        'course_id': course_id,
+                        'course_name': row['course_name'],
+                        'category': row['category'],
+                        'rankings': []
+                    }
+
+                courses[course_id]['rankings'].append({
+                    'athlete_id': row['athlete_id'],
+                    'athlete_name': row['athlete_name'],
+                    'team_name': row['team_name'],
+                    'best_time': row['best_time'],
+                    'pr_date': row['pr_date']
+                })
+
+            return list(courses.values())
 
     def check_and_mark_pr(self, run_id: str) -> bool:
         """Check if a completed run is a PR and mark it"""

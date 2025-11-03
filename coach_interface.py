@@ -201,13 +201,32 @@ def health():
 def dashboard():
     """Coach dashboard with stats and recent activity"""
     try:
+        # Get filter parameters
+        team_id = request.args.get('team')
+        category = request.args.get('category')
+
         stats = db.get_dashboard_stats()
-        recent_activity = db.get_recent_activity(limit=10)
+        recent_activity = db.get_recent_activity(limit=5)  # Limited to 5 as requested
+        course_rankings = db.get_course_rankings(team_id=team_id, category=category)
+
+        # Get filter options
+        teams = db.get_all_teams()
+        with db.get_connection() as conn:
+            categories = conn.execute('SELECT DISTINCT category FROM courses WHERE category IS NOT NULL ORDER BY category').fetchall()
+        categories = [row['category'] for row in categories]
+
         return render_template('dashboard/index.html',
                              stats=stats,
-                             recent_activity=recent_activity)
+                             recent_activity=recent_activity,
+                             course_rankings=course_rankings,
+                             teams=teams,
+                             categories=categories,
+                             selected_team=team_id,
+                             selected_category=category)
     except Exception as e:
         print(f"Error loading dashboard: {e}")
+        import traceback
+        traceback.print_exc()
         return render_template('dashboard/index.html',
                              stats={
                                  'total_athletes': 0,
@@ -216,7 +235,12 @@ def dashboard():
                                  'runs_today': 0,
                                  'prs_this_week': 0
                              },
-                             recent_activity=[])
+                             recent_activity=[],
+                             course_rankings=[],
+                             teams=[],
+                             categories=[],
+                             selected_team=None,
+                             selected_category=None)
 
 @app.route("/teams")
 def teams_list():
