@@ -993,7 +993,85 @@ def start_session(session_id):
         REGISTRY.log(f"Session start error: {e}", level="error")
         return jsonify({'success': False, 'error': str(e)}), 400
 
+@app.route('/session/<session_id>/stop', methods=['POST'])
+def stop_session(session_id):
+    """Stop Session button - deactivate course and mark session incomplete"""
+    try:
+        data = request.get_json() or {}
+        reason = data.get('reason', 'Stopped by coach')
 
+        print(f"\n{'='*80}")
+        print(f"🛑 STOP_SESSION CALLED - Session ID: {session_id}")
+        print(f"   Reason: {reason}")
+        print(f"{'='*80}\n")
+
+        # Get session to verify it exists
+        session = db.get_session(session_id)
+        if not session:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+        # Mark all active runs as incomplete
+        with db.get_connection() as conn:
+            for run in session.get('runs', []):
+                if run['status'] == 'running':
+                    conn.execute('''
+                        UPDATE runs
+                        SET status = 'incomplete',
+                            completed_at = ?
+                        WHERE run_id = ?
+                    ''', (datetime.utcnow().isoformat(), run['run_id']))
+
+        # Mark session as incomplete
+        with db.get_connection() as conn:
+            conn.execute('''
+                UPDATE sessions
+                SET status = 'incomplete',
+                    completed_at = ?,
+                    notes = ?
+                WHERE session_id = ?
+            ''', (datetime.utcnow().isoformat(), reason, session_id))
+
+        # Deactivate course in REGISTRY
+        print("Deactivating course and resetting devices...")
+        REGISTRY.course_status = "Inactive"
+        REGISTRY.selected_course = None
+
+        # Clear assignments and send stop command to all devices
+        for node_id in list(REGISTRY.assignments.keys()):
+            if node_id != "192.168.99.100":
+                REGISTRY.send_to_node(node_id, {"cmd": "stop", "action": None, "course_status": "Inactive"})
+
+        REGISTRY.assignments.clear()
+
+        # Set all devices to OFF/Standby
+        course = db.get_course(session['course_id'])
+        for action in course['actions']:
+            device_id = action['device_id']
+            if device_id != "192.168.99.100":
+                REGISTRY.set_led(device_id, pattern='off')
+
+        # Clear Device 0 LED
+        if REGISTRY._server_led:
+            from field_trainer.ft_led import LEDState
+            REGISTRY._server_led.set_state(LEDState.OFF)
+
+        # Clear active session state
+        active_session_state.clear()
+
+        REGISTRY.log(f"Session {session_id} stopped: {reason}")
+        print(f"✅ Session stopped successfully")
+        print("="*80 + "\n")
+
+        return jsonify({
+            'success': True,
+            'message': 'Session stopped and devices deactivated'
+        })
+
+    except Exception as e:
+        print(f"❌ Stop session error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/api/session/<session_id>/deploy-course', methods=['POST'])
@@ -1305,11 +1383,15 @@ def save_course():
                         action['distance']
                     ))
 
+            # Reload courses in REGISTRY so new/edited course is immediately available
+            REGISTRY.reload_courses()
             return jsonify({'success': True, 'course_id': course_id})
 
         # For new courses, create using import method
         new_course_id = db.create_course_from_import(course_data)
 
+        # Reload courses in REGISTRY so new course is immediately available
+        REGISTRY.reload_courses()
         return jsonify({'success': True, 'course_id': new_course_id})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -1323,6 +1405,9 @@ def delete_course(course_id):
             return jsonify({'success': False, 'error': 'Cannot delete built-in courses'}), 400
 
         db.delete_course(course_id)
+
+        # Reload courses in REGISTRY so deleted course is removed
+        REGISTRY.reload_courses()
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400

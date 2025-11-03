@@ -122,6 +122,16 @@ class Registry:
             self.log(f"Failed to load courses from database: {e}", level="error")
             return {"courses": []}
 
+    def reload_courses(self) -> bool:
+        """Reload courses from database (call after creating/editing courses)"""
+        try:
+            self.courses = self._load_courses_from_db() if self.db else load_courses()
+            self.log(f"Courses reloaded - {len(self.courses.get('courses', []))} courses available")
+            return True
+        except Exception as e:
+            self.log(f"Failed to reload courses: {e}", level="error")
+            return False
+
 	# ---------------- Utilities ----------------
 
     def log(self, msg: str, level: str = "info", source: str = "controller", node_id: Optional[str] = None) -> None:

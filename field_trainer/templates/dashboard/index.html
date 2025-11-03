@@ -1,26 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}Dashboard - Field Trainer{% endblock %}
 {% block content %}
 <h1>Welcome, Coach!</h1>
+
 <div class="row mt-4">
+    <!-- Total Athletes -->
     <div class="col-md-3">
         <div class="card">
             <div class="card-body">
                 <h6 class="text-muted">Total Athletes</h6>
                 <h2 class="text-primary">{{ stats.total_athletes }}</h2>
-                <small>Across {{ stats.total_teams }} teams</small>
+                <small>Across {{ stats.total_teams }} team{{ 's' if stats.total_teams != 1 else '' }}</small>
             </div>
         </div>
     </div>
+    
+    <!-- Sessions Today -->
     <div class="col-md-3">
         <div class="card">
             <div class="card-body">
                 <h6 class="text-muted">Sessions Today</h6>
                 <h2 class="text-success">{{ stats.sessions_today }}</h2>
-                <small>{{ stats.runs_today }} runs</small>
+                <small>{{ stats.runs_today }} run{{ 's' if stats.runs_today != 1 else '' }}</small>
             </div>
         </div>
     </div>
+    
+    <!-- New PRs This Week -->
     <div class="col-md-3">
         <div class="card">
             <div class="card-body">
@@ -30,39 +36,78 @@
             </div>
         </div>
     </div>
+    
+    <!-- Quick Actions -->
     <div class="col-md-3">
         <div class="card">
             <div class="card-body">
-                <h6 class="text-muted">Devices</h6>
-                <h2 class="text-info">{{ stats.devices_online }}/{{ stats.total_devices }}</h2>
-                <small>Online</small>
+                <h6 class="text-muted">Quick Actions</h6>
+                <div class="d-grid gap-2">
+                    <a href="/session/setup" class="btn btn-sm btn-primary">
+                        <i class="bi bi-plus-circle"></i> New Session
+                    </a>
+                    <a href="/courses/design" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-pencil"></i> Design Course
+                    </a>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
+<!-- Recent Activity -->
 <div class="row mt-4">
     <div class="col-12">
         <div class="card">
-            <div class="card-header">
-                <h5>Recent Activity</h5>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-activity"></i> Recent Activity
+                </h5>
+                <a href="/sessions" class="btn btn-sm btn-outline-secondary">View All</a>
             </div>
             <div class="card-body">
                 {% if recent_activity %}
-                    {% for activity in recent_activity %}
-                    <div class="mb-2">
-                        <strong>{{ activity.athlete_name }}</strong> completed 
-                        <strong>{{ activity.course_name }}</strong>
-                        {% if activity.is_pr %}<span class="badge bg-warning">🏆 PR!</span>{% endif %}
-                        <br>
-                        <small class="text-muted">Time: {{ "%.3f"|format(activity.total_time) }}s - {{ activity.time_ago }}</small>
+                    <div class="list-group list-group-flush">
+                        {% for activity in recent_activity %}
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-1">
+                                        <strong>{{ activity.athlete_name }}</strong>
+                                        {% if activity.is_pr %}
+                                        <span class="badge bg-warning text-dark">🏆 PR!</span>
+                                        {% endif %}
+                                    </h6>
+                                    <p class="mb-1">
+                                        <small class="text-muted">
+                                            <i class="bi bi-journal-code"></i> {{ activity.course_name }}
+                                        </small>
+                                    </p>
+                                </div>
+                                <div class="text-end">
+                                    <div class="badge bg-info fs-6">
+                                        {{ "%.2f"|format(activity.total_time) }}s
+                                    </div>
+                                    <div>
+                                        <small class="text-muted">{{ activity.time_ago }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
                     </div>
-                    {% endfor %}
                 {% else %}
-                    <p class="text-muted">No recent activity</p>
+                    <div class="text-center py-5">
+                        <i class="bi bi-inbox" style="font-size: 3rem; color: #ccc;"></i>
+                        <p class="text-muted mt-3">No recent activity</p>
+                        <a href="/session/setup" class="btn btn-primary">
+                            <i class="bi bi-plus-circle"></i> Start Your First Session
+                        </a>
+                    </div>
                 {% endif %}
             </div>
         </div>
     </div>
 </div>
+
 {% endblock %}
