@@ -173,7 +173,41 @@ class DatabaseManager:
                 )
             ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_segments_run ON segments(run_id)')
-    
+
+            # Settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    setting_key TEXT UNIQUE NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(setting_key)')
+
+            # Initialize default settings if table is empty
+            settings_count = conn.execute('SELECT COUNT(*) FROM settings').fetchone()[0]
+            if settings_count == 0:
+                default_settings = {
+                    'distance_unit': 'yards',
+                    'voice_gender': 'male',
+                    'system_volume': '60',
+                    'ready_audio_file': 'default.mp3',
+                    'min_travel_time': '1',
+                    'max_travel_time': '15',
+                    'ready_led_color': 'orange',
+                    'ready_audio_target': 'all',
+                    'wifi_ssid': '',
+                    'wifi_password': ''
+                }
+                for key, value in default_settings.items():
+                    conn.execute('''
+                        INSERT INTO settings (setting_key, setting_value)
+                        VALUES (?, ?)
+                    ''', (key, value))
+
     # ==================== DASHBOARD QUERIES ====================
     
     def get_dashboard_stats(self) -> Dict[str, Any]:

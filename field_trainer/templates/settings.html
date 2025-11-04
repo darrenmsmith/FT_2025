@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Settings - Field Trainer{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-gear"></i> System Settings</h1>
+    <a href="/dashboard" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Dashboard
+    </a>
+</div>
+
+<!-- Action Buttons (hidden until changes detected) -->
+<div id="action-buttons" class="mb-4" style="display: none;">
+    <button id="save-btn" class="btn btn-success me-2">
+        <i class="bi bi-check-circle"></i> Save Settings
+    </button>
+    <button id="reset-btn" class="btn btn-danger">
+        <i class="bi bi-arrow-counterclockwise"></i> Reset to Defaults
+    </button>
+</div>
+
+<!-- Display & Units Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-display"></i> Display & Units</h5>
+    </div>
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label fw-bold">Distance Unit</label>
+            <div class="d-flex gap-4">
+                <div class="form-check">
+                    <input class="form-check-input setting-input" type="radio" name="distance_unit" id="unit_yards" value="yards" data-setting="distance_unit">
+                    <label class="form-check-label" for="unit_yards">Yards</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input setting-input" type="radio" name="distance_unit" id="unit_meters" value="meters" data-setting="distance_unit">
+                    <label class="form-check-label" for="unit_meters">Meters</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input setting-input" type="radio" name="distance_unit" id="unit_feet" value="feet" data-setting="distance_unit">
+                    <label class="form-check-label" for="unit_feet">Feet</label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Audio Settings Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-volume-up"></i> Audio Settings</h5>
+    </div>
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label fw-bold">Voice Gender</label>
+            <div class="d-flex gap-4">
+                <div class="form-check">
+                    <input class="form-check-input setting-input" type="radio" name="voice_gender" id="voice_male" value="male" data-setting="voice_gender">
+                    <label class="form-check-label" for="voice_male">Male</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input setting-input" type="radio" name="voice_gender" id="voice_female" value="female" data-setting="voice_gender">
+                    <label class="form-check-label" for="voice_female">Female</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label for="system_volume" class="form-label fw-bold">System Volume: <span id="volume-display">60</span>%</label>
+            <div style="width: 33%;">
+                <input type="range" class="form-range setting-input" min="0" max="100" step="5" id="system_volume" data-setting="system_volume">
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label for="ready_audio_file" class="form-label fw-bold">Ready Notification Sound</label>
+            <div class="input-group">
+                <select class="form-select setting-input" id="ready_audio_file" data-setting="ready_audio_file">
+                    <option value="">-- Select Audio File --</option>
+                </select>
+                <button class="btn btn-outline-primary" type="button" id="play-audio-btn" title="Play selected audio">
+                    <i class="bi bi-play-fill"></i> Play
+                </button>
+            </div>
+            <small class="form-text text-muted">Audio files from /opt/field_trainer/audio/</small>
+        </div>
+    </div>
+</div>
+
+<!-- Timing Defaults Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-clock"></i> Timing Defaults</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="min_travel_time" class="form-label fw-bold">Minimum Travel Time (seconds)</label>
+                <input type="number" class="form-control setting-input" id="min_travel_time" min="0.1" step="0.1" data-setting="min_travel_time">
+                <small class="form-text text-muted">Minimum expected time between devices</small>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="max_travel_time" class="form-label fw-bold">Maximum Travel Time (seconds)</label>
+                <input type="number" class="form-control setting-input" id="max_travel_time" min="1" step="1" data-setting="max_travel_time">
+                <small class="form-text text-muted">Maximum expected time between devices</small>
+            </div>
+        </div>
+        <small class="form-text text-muted"><i class="bi bi-info-circle"></i> Note: Action-specific timing will be available in a future update</small>
+    </div>
+</div>
+
+<!-- LED Settings Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-lightbulb"></i> LED Settings</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="ready_led_color" class="form-label fw-bold">Ready LED Color</label>
+                <div class="input-group">
+                    <select class="form-select setting-input" id="ready_led_color" data-setting="ready_led_color">
+                        <option value="orange">Orange</option>
+                        <option value="blue">Blue</option>
+                        <option value="green">Green</option>
+                        <option value="yellow">Yellow</option>
+                        <option value="red">Red</option>
+                    </select>
+                    <button class="btn btn-outline-primary" type="button" id="test-led-btn" title="Test LED color on all devices">
+                        <i class="bi bi-lightbulb"></i> Test
+                    </button>
+                </div>
+                <small class="form-text text-muted">Test will flash all device LEDs for 3 seconds</small>
+            </div>
+
+            <div class="col-md-6 mb-3">
+                <label for="ready_audio_target" class="form-label fw-bold">Ready Audio Target</label>
+                <select class="form-select setting-input" id="ready_audio_target" data-setting="ready_audio_target">
+                    <option value="all">All Devices</option>
+                    <option value="start">Start Only</option>
+                    <option value="specific">Specific Device</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Network Configuration Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-wifi"></i> Network Configuration</h5>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info mb-3">
+            <i class="bi bi-info-circle"></i>
+            <strong>Current Network:</strong> <span id="current-ssid">Loading...</span>
+        </div>
+
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle"></i>
+            <strong>Warning:</strong> Changing WiFi settings may disconnect the system. Only modify if you know what you're doing.
+        </div>
+
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="wifi_ssid" class="form-label fw-bold">WiFi SSID</label>
+                <input type="text" class="form-control setting-input" id="wifi_ssid" data-setting="wifi_ssid" placeholder="Enter new SSID">
+            </div>
+
+            <div class="col-md-6 mb-3">
+                <label for="wifi_password" class="form-label fw-bold">WiFi Password</label>
+                <div class="input-group">
+                    <input type="password" class="form-control setting-input" id="wifi_password" data-setting="wifi_password" placeholder="Enter new password">
+                    <button class="btn btn-outline-secondary" type="button" id="toggle-password">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status Messages -->
+<div id="status-message" class="alert" style="display: none;"></div>
+
+<script src="/static/js/settings.js"></script>
+
+{% endblock %}

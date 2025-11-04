@@ -4,11 +4,12 @@ Coach Interface for Field Trainer - Port 5001
 Separate from admin interface, focused on team/athlete/session management
 """
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory
 from datetime import datetime
 from typing import Optional
 import sys
 import os
+import subprocess
 
 # Add field_trainer to path
 sys.path.insert(0, '/opt')
@@ -16,6 +17,7 @@ sys.path.insert(0, '/opt')
 from field_trainer.db_manager import DatabaseManager
 from field_trainer.ft_registry import REGISTRY
 from field_trainer.ft_version import VERSION
+from field_trainer.settings_manager import SettingsManager
 sys.path.insert(0, '/opt/field_trainer/athletic_platform')
 from bridge_layer import initialize_bridge
 sys.path.insert(0, "/opt/field_trainer")
@@ -32,6 +34,9 @@ START_TIME = datetime.utcnow().isoformat()
 # Initialize database
 db = DatabaseManager('/opt/data/field_trainer.db')
 perf_bridge, touch_bridge = initialize_bridge(db)
+
+# Initialize settings manager
+settings_mgr = SettingsManager(db)
 
 # Store active session state - supports multiple simultaneous athletes
 active_session_state = {
@@ -825,17 +830,6 @@ def profile():
         {% endblock %}
     ''')
 
-@app.route('/settings')
-def settings():
-    return render_template_string('''
-        {% extends "base.html" %}
-        {% block content %}
-        <h1>Settings</h1>
-        <p>Settings coming soon in Phase 2</p>
-        <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
-        {% endblock %}
-    ''')
-
 # ============================================================================
 # PHASE 2: CONE VERIFICATION & DEPLOYMENT
 # ============================================================================
@@ -1540,6 +1534,234 @@ def course_design_v5():
         course['is_builtin'] = 0
 
     return render_template('course_design_v5.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
+
+
+# ==================== SETTINGS ROUTES ====================
+
+@app.route('/settings')
+def settings_page():
+    """Settings management page"""
+    return render_template('settings.html')
+
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    """Get all current settings"""
+    try:
+        settings = settings_mgr.load_settings()
+        audio_files = settings_mgr.get_audio_files()
+
+        return jsonify({
+            'success': True,
+            'settings': settings,
+            'audio_files': audio_files
+        })
+    except Exception as e:
+        print(f"Error loading settings: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    """Save individual setting"""
+    try:
+        data = request.get_json()
+        key = data.get('key')
+        value = data.get('value')
+
+        if not key:
+            return jsonify({'success': False, 'error': 'Missing key'}), 400
+
+        success = settings_mgr.save_setting(key, str(value))
+        return jsonify({'success': success})
+    except Exception as e:
+        print(f"Error saving setting: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/settings/reset', methods=['POST'])
+def reset_settings():
+    """Reset all settings to defaults"""
+    try:
+        success = settings_mgr.reset_to_defaults()
+        return jsonify({'success': success})
+    except Exception as e:
+        print(f"Error resetting settings: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/settings/audio-files', methods=['GET'])
+def get_audio_files():
+    """Get list of audio files"""
+    try:
+        files = settings_mgr.get_audio_files()
+        return jsonify({'success': True, 'files': files})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/audio/<path:filename>')
+def serve_audio(filename):
+    """Serve audio files"""
+    return send_from_directory('/opt/field_trainer/audio', filename)
+
+
+@app.route('/api/settings/network-info', methods=['GET'])
+def get_network_info():
+    """Get current network SSID"""
+    try:
+        # Try to get current SSID from iwgetid command
+        result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True, timeout=2)
+        if result.returncode == 0 and result.stdout.strip():
+            ssid = result.stdout.strip()
+            return jsonify({'success': True, 'ssid': ssid})
+        else:
+            return jsonify({'success': True, 'ssid': 'Not connected'})
+    except Exception as e:
+        print(f"Error getting network info: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/settings/test-led', methods=['POST'])
+def test_led():
+    """Test LED color on all devices"""
+    import threading
+    import time
+
+    try:
+        data = request.get_json()
+        color = data.get('color', 'orange')
+
+        print(f"\n{'='*60}")
+        print(f"🔦 LED TEST STARTED - Color: {color}")
+        print(f"{'='*60}")
+
+        # Map color names to LED patterns
+        color_map = {
+            'orange': 'solid_amber',
+            'red': 'solid_red',
+            'green': 'solid_green',
+            'blue': 'rainbow',  # No solid blue, use rainbow
+            'yellow': 'blink_amber'  # No yellow, use blink amber
+        }
+
+        pattern = color_map.get(color, 'solid_amber')
+        print(f"LED Pattern: {pattern}")
+
+        device_ips = [f'192.168.99.{100 + i}' for i in range(6)]
+
+        # Track results
+        results = {'success': [], 'failed': []}
+
+        # Turn on LEDs with detailed logging
+        for device_ip in device_ips:
+            try:
+                print(f"\n--- Testing device {device_ip} ---")
+
+                # Check device status first
+                with REGISTRY.nodes_lock:
+                    node = REGISTRY.nodes.get(device_ip)
+                    if node:
+                        print(f"Device status: {node.status}")
+                        print(f"Has writer: {node._writer is not None}")
+                    else:
+                        print(f"Device not found in REGISTRY.nodes")
+
+                # Send LED command
+                success = REGISTRY.set_led(device_ip, pattern)
+
+                if success:
+                    results['success'].append(device_ip)
+                    print(f"✅ LED command sent successfully to {device_ip}")
+                else:
+                    results['failed'].append(device_ip)
+                    print(f"❌ LED command failed for {device_ip}")
+
+            except Exception as e:
+                results['failed'].append(device_ip)
+                print(f"❌ Exception setting LED for {device_ip}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Summary
+        print(f"\n{'='*60}")
+        print(f"LED TEST SUMMARY:")
+        print(f"  Success: {len(results['success'])} devices - {results['success']}")
+        print(f"  Failed:  {len(results['failed'])} devices - {results['failed']}")
+        print(f"{'='*60}\n")
+
+        # Schedule LEDs to turn off after 3 seconds
+        def turn_off_leds():
+            time.sleep(3)
+            print(f"\n🔦 Turning off LEDs...")
+            for device_ip in device_ips:
+                try:
+                    REGISTRY.set_led(device_ip, 'off')
+                except Exception as e:
+                    print(f"Error turning off LED for {device_ip}: {e}")
+            print(f"🔦 LED test complete\n")
+
+        threading.Thread(target=turn_off_leds, daemon=True).start()
+
+        return jsonify({
+            'success': True,
+            'message': f'LED test started with color {color}',
+            'results': results
+        })
+    except Exception as e:
+        print(f"❌ Error testing LED: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/settings/apply-volume', methods=['POST'])
+def apply_volume():
+    """Apply volume setting to system"""
+    try:
+        data = request.get_json()
+        volume = int(data.get('volume', 60))
+
+        # Clamp volume to 0-100
+        volume = max(0, min(100, volume))
+
+        # Try to find an available mixer control
+        # Common names: PCM, Master, Headphone, Speaker
+        mixer_controls = ['PCM', 'Master', 'Headphone', 'Speaker']
+        volume_set = False
+
+        for control in mixer_controls:
+            result = subprocess.run(
+                ['amixer', 'sset', control, f'{volume}%'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                volume_set = True
+                print(f"Volume set to {volume}% using {control} control")
+                break
+
+        # Even if hardware volume failed, return success
+        # (settings are still saved to database)
+        return jsonify({
+            'success': True,
+            'volume': volume,
+            'hardware_applied': volume_set
+        })
+
+    except Exception as e:
+        print(f"Error setting volume: {e}")
+        # Return success anyway - don't block UI
+        return jsonify({
+            'success': True,
+            'volume': volume,
+            'hardware_applied': False,
+            'note': 'Volume saved but hardware control unavailable'
+        })
+
 
 if __name__ == '__main__':
     print("Starting Flask app on port 5001...")
