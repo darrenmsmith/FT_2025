@@ -1,23 +1,98 @@
 {% extends "base.html" %}
 {% block title %}Create Team - Field Trainer{% endblock %}
 {% block content %}
-<h2>Create New Team</h2>
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2><i class="fas fa-plus-circle"></i> Create New Team</h2>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-body">
         {% if error %}
-        <div class="alert alert-danger">{{ error }}</div>
+        <div class="alert alert-danger alert-dismissible fade show">
+            <i class="fas fa-exclamation-triangle"></i> {{ error }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
         {% endif %}
+
         <form method="post">
-            <div class="mb-3">
-                <label class="form-label">Team Name *</label>
-                <input type="text" class="form-control" name="name" required>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Team Name *</label>
+                    <input type="text" class="form-control" name="name" required maxlength="100">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Age Group</label>
+                    <input type="text" class="form-control" name="age_group"
+                           placeholder="e.g., U12, U15, Varsity" maxlength="50">
+                </div>
             </div>
-            <div class="mb-3">
-                <label class="form-label">Age Group</label>
-                <input type="text" class="form-control" name="age_group" placeholder="e.g., U12, U15, Varsity">
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Sport</label>
+                    <select class="form-select" name="sport">
+                        <option value="">Select Sport...</option>
+                        <option value="Baseball">Baseball</option>
+                        <option value="Basketball">Basketball</option>
+                        <option value="Football">Football</option>
+                        <option value="Hockey">Hockey</option>
+                        <option value="Lacrosse">Lacrosse</option>
+                        <option value="Soccer">Soccer</option>
+                        <option value="Track">Track</option>
+                        <option value="General">General</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Gender</label>
+                    <select class="form-select" name="gender">
+                        <option value="">Select Gender...</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Coed">Coed</option>
+                    </select>
+                </div>
             </div>
-            <button type="submit" class="btn btn-primary">Create Team</button>
-            <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancel</a>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Season</label>
+                    <input type="text" class="form-control" name="season"
+                           placeholder="e.g., Fall 2025, 2025-2026" maxlength="50">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Coach Name</label>
+                    <input type="text" class="form-control" name="coach_name" maxlength="100">
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-bold">Notes</label>
+                <textarea class="form-control" name="notes" rows="3" maxlength="1000"
+                          placeholder="Additional information about this team..."></textarea>
+            </div>
+
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="active" id="active" checked>
+                    <label class="form-check-label" for="active">
+                        Active Team
+                    </label>
+                </div>
+            </div>
+
+            <hr class="my-4">
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Create Team
+                </button>
+                <a href="{{ url_for('teams_list') }}" class="btn btn-secondary">
+                    <i class="fas fa-times"></i> Cancel
+                </a>
+            </div>
         </form>
     </div>
 </div>

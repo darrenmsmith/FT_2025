@@ -6,25 +6,109 @@
         <h2><i class="fas fa-users"></i> Teams</h2>
     </div>
     <div class="col-md-4 text-end">
+        <a href="{{ url_for('export_all_teams_csv_route') }}" class="btn btn-outline-success btn-sm me-2">
+            <i class="fas fa-download"></i> Export All
+        </a>
         <a href="{{ url_for('create_team') }}" class="btn btn-primary">
             <i class="fas fa-plus"></i> New Team
         </a>
     </div>
 </div>
 
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="get" id="filterForm">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">Search</label>
+                    <input type="text" class="form-control form-control-sm" name="search"
+                           placeholder="Team name or age group..." value="{{ request.args.get('search', '') }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold">Sport</label>
+                    <select class="form-select form-select-sm" name="sport">
+                        <option value="">All Sports</option>
+                        <option value="Baseball" {% if request.args.get('sport') == 'Baseball' %}selected{% endif %}>Baseball</option>
+                        <option value="Basketball" {% if request.args.get('sport') == 'Basketball' %}selected{% endif %}>Basketball</option>
+                        <option value="Football" {% if request.args.get('sport') == 'Football' %}selected{% endif %}>Football</option>
+                        <option value="Hockey" {% if request.args.get('sport') == 'Hockey' %}selected{% endif %}>Hockey</option>
+                        <option value="Lacrosse" {% if request.args.get('sport') == 'Lacrosse' %}selected{% endif %}>Lacrosse</option>
+                        <option value="Soccer" {% if request.args.get('sport') == 'Soccer' %}selected{% endif %}>Soccer</option>
+                        <option value="Track" {% if request.args.get('sport') == 'Track' %}selected{% endif %}>Track</option>
+                        <option value="General" {% if request.args.get('sport') == 'General' %}selected{% endif %}>General</option>
+                        <option value="Other" {% if request.args.get('sport') == 'Other' %}selected{% endif %}>Other</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold">Gender</label>
+                    <select class="form-select form-select-sm" name="gender">
+                        <option value="">All</option>
+                        <option value="Male" {% if request.args.get('gender') == 'Male' %}selected{% endif %}>Male</option>
+                        <option value="Female" {% if request.args.get('gender') == 'Female' %}selected{% endif %}>Female</option>
+                        <option value="Coed" {% if request.args.get('gender') == 'Coed' %}selected{% endif %}>Coed</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">Coach</label>
+                    <input type="text" class="form-control form-control-sm" name="coach"
+                           placeholder="Coach name..." value="{{ request.args.get('coach', '') }}">
+                </div>
+                <div class="col-md-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="active_only" id="active_only" value="1"
+                               {% if not request.args.get('show_archived') %}checked{% endif %}>
+                        <label class="form-check-label small" for="active_only">
+                            Active Only
+                        </label>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm w-100 mt-1">
+                        <i class="fas fa-search"></i> Filter
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Teams Grid -->
 <div class="row">
     {% if teams %}
         {% for team in teams %}
         <div class="col-md-6 col-lg-4 mb-3">
-            <div class="card">
+            <div class="card h-100 {% if not team.active %}bg-light{% endif %}">
                 <div class="card-body">
-                    <h5 class="card-title">{{ team.name }}</h5>
-                    <p class="card-text text-muted">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h5 class="card-title mb-0">{{ team.name }}</h5>
+                        {% if not team.active %}
+                            <span class="badge bg-secondary">Archived</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="d-flex gap-1 flex-wrap mb-2">
                         {% if team.age_group %}
                             <span class="badge bg-secondary">{{ team.age_group }}</span>
                         {% endif %}
-                    </p>
-                    <a href="{{ url_for('team_detail', team_id=team.team_id) }}" class="btn btn-sm btn-primary">
+                        {% if team.sport %}
+                            <span class="badge bg-info">{{ team.sport }}</span>
+                        {% endif %}
+                        {% if team.gender %}
+                            <span class="badge bg-primary">{{ team.gender }}</span>
+                        {% endif %}
+                    </div>
+
+                    {% if team.season %}
+                        <p class="card-text text-muted small mb-1">
+                            <i class="fas fa-calendar"></i> {{ team.season }}
+                        </p>
+                    {% endif %}
+                    {% if team.coach_name %}
+                        <p class="card-text text-muted small mb-2">
+                            <i class="fas fa-user"></i> {{ team.coach_name }}
+                        </p>
+                    {% endif %}
+
+                    <a href="{{ url_for('team_detail', team_id=team.team_id) }}" class="btn btn-sm btn-primary w-100">
                         View Roster <i class="fas fa-arrow-right"></i>
                     </a>
                 </div>
@@ -34,7 +118,7 @@
     {% else %}
         <div class="col-12">
             <div class="alert alert-info">
-                <i class="fas fa-info-circle"></i> No teams yet. Create your first team to get started!
+                <i class="fas fa-info-circle"></i> No teams found. {% if request.args %}Try different filters or{% endif %} create your first team to get started!
             </div>
         </div>
     {% endif %}

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ team.name }} - Field Trainer{% endblock %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2><i class="fas fa-edit"></i> Edit Team: {{ team.name }}</h2>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if error %}
+        <div class="alert alert-danger alert-dismissible fade show">
+            <i class="fas fa-exclamation-triangle"></i> {{ error }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
+
+        <form method="post">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Team Name *</label>
+                    <input type="text" class="form-control" name="name" value="{{ team.name }}" required maxlength="100">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Age Group</label>
+                    <input type="text" class="form-control" name="age_group" value="{{ team.age_group or '' }}"
+                           placeholder="e.g., U12, U15, Varsity" maxlength="50">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Sport</label>
+                    <select class="form-select" name="sport">
+                        <option value="">Select Sport...</option>
+                        <option value="Baseball" {% if team.sport == 'Baseball' %}selected{% endif %}>Baseball</option>
+                        <option value="Basketball" {% if team.sport == 'Basketball' %}selected{% endif %}>Basketball</option>
+                        <option value="Football" {% if team.sport == 'Football' %}selected{% endif %}>Football</option>
+                        <option value="Hockey" {% if team.sport == 'Hockey' %}selected{% endif %}>Hockey</option>
+                        <option value="Lacrosse" {% if team.sport == 'Lacrosse' %}selected{% endif %}>Lacrosse</option>
+                        <option value="Soccer" {% if team.sport == 'Soccer' %}selected{% endif %}>Soccer</option>
+                        <option value="Track" {% if team.sport == 'Track' %}selected{% endif %}>Track</option>
+                        <option value="General" {% if team.sport == 'General' %}selected{% endif %}>General</option>
+                        <option value="Other" {% if team.sport == 'Other' %}selected{% endif %}>Other</option>
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Gender</label>
+                    <select class="form-select" name="gender">
+                        <option value="">Select Gender...</option>
+                        <option value="Male" {% if team.gender == 'Male' %}selected{% endif %}>Male</option>
+                        <option value="Female" {% if team.gender == 'Female' %}selected{% endif %}>Female</option>
+                        <option value="Coed" {% if team.gender == 'Coed' %}selected{% endif %}>Coed</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Season</label>
+                    <input type="text" class="form-control" name="season" value="{{ team.season or '' }}"
+                           placeholder="e.g., Fall 2025, 2025-2026" maxlength="50">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Coach Name</label>
+                    <input type="text" class="form-control" name="coach_name" value="{{ team.coach_name or '' }}" maxlength="100">
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-bold">Notes</label>
+                <textarea class="form-control" name="notes" rows="3" maxlength="1000"
+                          placeholder="Additional information about this team...">{{ team.notes or '' }}</textarea>
+            </div>
+
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="active" id="active" {% if team.active %}checked{% endif %}>
+                    <label class="form-check-label" for="active">
+                        Active Team
+                    </label>
+                </div>
+            </div>
+
+            <hr class="my-4">
+
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save Changes
+                    </button>
+                    <a href="{{ url_for('team_detail', team_id=team.team_id) }}" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> Cancel
+                    </a>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="{{ url_for('export_team_csv_route', team_id=team.team_id) }}" class="btn btn-success btn-sm">
+                        <i class="fas fa-download"></i> Export CSV
+                    </a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Roster Management Section -->
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fas fa-list"></i> Manage Roster</h5>
+        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addAthleteModal">
+            <i class="fas fa-plus"></i> Add Athlete
+        </button>
+    </div>
+    <div class="card-body">
+        {% set athletes = team.get('athletes', []) %}
+        {% if not athletes %}
+            {% set athletes_list = [] %}
+            <!-- Fetch athletes using a workaround -->
+        {% endif %}
+
+        <p class="text-muted">To manage the roster, please save your changes and return to the <a href="{{ url_for('team_detail', team_id=team.team_id) }}">team detail page</a>.</p>
+        <p class="text-muted small"><i class="fas fa-info-circle"></i> You can add, edit, and remove athletes from the team detail page.</p>
+    </div>
+</div>
+
+<!-- Add Athlete Modal -->
+<div class="modal fade" id="addAthleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{{ url_for('add_athlete', team_id=team.team_id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Athlete</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Name *</label>
+                        <input type="text" class="form-control" name="name" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Jersey #</label>
+                            <input type="number" class="form-control" name="jersey_number">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Age</label>
+                            <input type="number" class="form-control" name="age">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Position</label>
+                        <input type="text" class="form-control" name="position">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Athlete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

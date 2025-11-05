@@ -2,19 +2,70 @@
 {% block title %}{{ team.name }} - Field Trainer{% endblock %}
 {% block content %}
 <div class="row mb-4">
-    <div class="col-md-6">
+    <div class="col-md-8">
         <h2>{{ team.name }}</h2>
-        {% if team.age_group %}
-            <span class="badge bg-secondary">{{ team.age_group }}</span>
+        <div class="d-flex gap-2 flex-wrap mt-2">
+            {% if team.active %}
+                <span class="badge bg-success">Active</span>
+            {% else %}
+                <span class="badge bg-secondary">Archived</span>
+            {% endif %}
+            {% if team.age_group %}
+                <span class="badge bg-secondary">{{ team.age_group }}</span>
+            {% endif %}
+            {% if team.sport %}
+                <span class="badge bg-info">{{ team.sport }}</span>
+            {% endif %}
+            {% if team.gender %}
+                <span class="badge bg-primary">{{ team.gender }}</span>
+            {% endif %}
+            {% if team.season %}
+                <span class="badge bg-warning text-dark">{{ team.season }}</span>
+            {% endif %}
+        </div>
+        {% if team.coach_name %}
+            <p class="text-muted mt-2 mb-0"><i class="fas fa-user"></i> Coach: {{ team.coach_name }}</p>
+        {% endif %}
+        {% if team.notes %}
+            <p class="text-muted mt-1"><i class="fas fa-sticky-note"></i> {{ team.notes }}</p>
         {% endif %}
     </div>
-    <div class="col-md-6 text-end">
-        <a href="{{ url_for('session_setup') }}" class="btn btn-success">
-            <i class="fas fa-play"></i> Start Session
-        </a>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addAthleteModal">
-            <i class="fas fa-plus"></i> Add Athlete
-        </button>
+    <div class="col-md-4 text-end">
+        <div class="btn-group mb-2" role="group">
+            <a href="{{ url_for('edit_team', team_id=team.team_id) }}" class="btn btn-outline-primary btn-sm">
+                <i class="fas fa-edit"></i> Edit
+            </a>
+            <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#duplicateModal">
+                <i class="fas fa-copy"></i> Duplicate
+            </button>
+            <a href="{{ url_for('export_team_csv_route', team_id=team.team_id) }}" class="btn btn-outline-success btn-sm">
+                <i class="fas fa-download"></i> Export
+            </a>
+        </div>
+        <div class="d-block">
+            <a href="{{ url_for('session_setup') }}" class="btn btn-success btn-sm me-1">
+                <i class="fas fa-play"></i> Start Session
+            </a>
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addAthleteModal">
+                <i class="fas fa-plus"></i> Add Athlete
+            </button>
+        </div>
+        <div class="d-block mt-2">
+            {% if team.active %}
+            <form method="post" action="{{ url_for('archive_team_route', team_id=team.team_id) }}"
+                  style="display:inline;" onsubmit="return confirm('Archive this team?');">
+                <button type="submit" class="btn btn-outline-danger btn-sm">
+                    <i class="fas fa-archive"></i> Archive Team
+                </button>
+            </form>
+            {% else %}
+            <form method="post" action="{{ url_for('reactivate_team_route', team_id=team.team_id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-outline-success btn-sm">
+                    <i class="fas fa-undo"></i> Reactivate Team
+                </button>
+            </form>
+            {% endif %}
+        </div>
     </div>
 </div>
 
@@ -32,7 +83,7 @@
                             <th>Name</th>
                             <th>Age</th>
                             <th>Position</th>
-                            <th>Actions</th>
+                            <th style="width: 100px;"></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -42,11 +93,11 @@
                             <td>{{ athlete.name }}</td>
                             <td>{{ athlete.age or '-' }}</td>
                             <td>{{ athlete.position or '-' }}</td>
-                            <td>
-                                <form method="post" action="{{ url_for('delete_athlete', athlete_id=athlete.athlete_id) }}" 
+                            <td class="text-end">
+                                <form method="post" action="{{ url_for('delete_athlete', athlete_id=athlete.athlete_id) }}"
                                       style="display:inline;" onsubmit="return confirm('Delete this athlete?');">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">
-                                        <i class="fas fa-trash"></i>
+                                    <button type="submit" class="btn btn-sm btn-danger">
+                                        <i class="fas fa-trash-alt"></i> Delete
                                     </button>
                                 </form>
                             </td>
@@ -93,6 +144,39 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-primary">Add Athlete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Duplicate Team Modal -->
+<div class="modal fade" id="duplicateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{{ url_for('duplicate_team_route', team_id=team.team_id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">Duplicate Team</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">New Team Name *</label>
+                        <input type="text" class="form-control" name="new_name"
+                               value="{{ team.name }} (Copy)" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Season (optional)</label>
+                        <input type="text" class="form-control" name="new_season"
+                               placeholder="e.g., Fall 2025">
+                    </div>
+                    <p class="text-muted small">This will create a copy of the team with the same settings, including all athletes.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-copy"></i> Duplicate Team
+                    </button>
                 </div>
             </form>
         </div>

@@ -4,7 +4,7 @@ Coach Interface for Field Trainer - Port 5001
 Separate from admin interface, focused on team/athlete/session management
 """
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, Response
 from datetime import datetime
 from typing import Optional
 import sys
@@ -262,23 +262,47 @@ def dashboard():
 
 @app.route("/teams")
 def teams_list():
-    """Team list page"""
-    teams = db.get_all_teams()
+    """Team list page with filtering"""
+    # Get filter parameters from query string
+    search = request.args.get('search')
+    sport = request.args.get('sport')
+    gender = request.args.get('gender')
+    coach = request.args.get('coach')
+    active_only = request.args.get('active_only', '1') == '1'  # Default to active only
+
+    # Use search if any filters are present, otherwise get all teams
+    if any([search, sport, gender, coach]) or not active_only:
+        teams = db.search_teams(
+            search_term=search,
+            sport=sport,
+            gender=gender,
+            coach_name=coach,
+            active_only=active_only
+        )
+    else:
+        teams = db.get_all_teams(active_only=active_only)
+
     return render_template('team_list.html', teams=teams)
 
 @app.route('/team/create', methods=['GET', 'POST'])
 def create_team():
-    """Create new team"""
+    """Create new team with enhanced fields"""
     if request.method == 'POST':
-        name = request.form.get('name')
-        age_group = request.form.get('age_group')
-        
         try:
-            team_id = db.create_team(name=name, age_group=age_group)
+            team_id = db.create_team(
+                name=request.form.get('name'),
+                age_group=request.form.get('age_group'),
+                sport=request.form.get('sport') or None,
+                gender=request.form.get('gender') or None,
+                season=request.form.get('season') or None,
+                coach_name=request.form.get('coach_name') or None,
+                notes=request.form.get('notes') or None,
+                active=request.form.get('active', 'on') == 'on'
+            )
             return redirect(url_for('team_detail', team_id=team_id))
         except Exception as e:
             return render_template('team_create.html', error=str(e))
-    
+
     return render_template('team_create.html')
 
 
@@ -288,9 +312,131 @@ def team_detail(team_id):
     team = db.get_team(team_id)
     if not team:
         return "Team not found", 404
-    
+
     athletes = db.get_athletes_by_team(team_id)
     return render_template('team_detail.html', team=team, athletes=athletes)
+
+
+@app.route('/team/<team_id>/edit', methods=['GET', 'POST'])
+def edit_team(team_id):
+    """Edit team details"""
+    team = db.get_team(team_id)
+    if not team:
+        return "Team not found", 404
+
+    if request.method == 'POST':
+        try:
+            db.update_team(
+                team_id,
+                name=request.form.get('name'),
+                age_group=request.form.get('age_group'),
+                sport=request.form.get('sport') or None,
+                gender=request.form.get('gender') or None,
+                season=request.form.get('season') or None,
+                coach_name=request.form.get('coach_name') or None,
+                notes=request.form.get('notes') or None,
+                active=request.form.get('active', 'on') == 'on'
+            )
+            return redirect(url_for('team_detail', team_id=team_id))
+        except Exception as e:
+            return render_template('team_edit.html', team=team, error=str(e))
+
+    return render_template('team_edit.html', team=team)
+
+
+@app.route('/team/<team_id>/archive', methods=['POST'])
+def archive_team_route(team_id):
+    """Archive a team"""
+    try:
+        db.archive_team(team_id)
+        return redirect(url_for('teams_list'))
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/team/<team_id>/reactivate', methods=['POST'])
+def reactivate_team_route(team_id):
+    """Reactivate an archived team"""
+    try:
+        db.reactivate_team(team_id)
+        return redirect(url_for('teams_list'))
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/team/<team_id>/duplicate', methods=['POST'])
+def duplicate_team_route(team_id):
+    """Duplicate a team"""
+    try:
+        new_name = request.form.get('new_name')
+        new_season = request.form.get('new_season')
+        new_team_id = db.duplicate_team(team_id, new_name, new_season)
+        if new_team_id:
+            return redirect(url_for('team_detail', team_id=new_team_id))
+        else:
+            return "Failed to duplicate team", 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/team/<team_id>/export/csv')
+def export_team_csv_route(team_id):
+    """Export single team as CSV"""
+    try:
+        csv_data = db.export_team_csv(team_id)
+        if not csv_data:
+            return "Team not found", 404
+
+        team = db.get_team(team_id)
+        safe_name = "".join(c for c in team['name'] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        filename = f"team_{safe_name}_{datetime.now().strftime('%Y%m%d')}.csv"
+
+        return Response(
+            csv_data,
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/teams/export/csv')
+def export_all_teams_csv_route():
+    """Export all teams as CSV"""
+    try:
+        csv_data = db.export_all_teams_csv()
+        filename = f"all_teams_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        return Response(
+            csv_data,
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/teams/search')
+def search_teams_api():
+    """API: Search and filter teams"""
+    try:
+        search_term = request.args.get('search')
+        sport = request.args.get('sport')
+        gender = request.args.get('gender')
+        coach = request.args.get('coach')
+        active_only = request.args.get('active', 'true').lower() == 'true'
+
+        teams = db.search_teams(
+            search_term=search_term,
+            sport=sport,
+            gender=gender,
+            coach_name=coach,
+            active_only=active_only
+        )
+
+        return jsonify(teams)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/team/<team_id>/athlete/add', methods=['POST'])

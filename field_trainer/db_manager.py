@@ -391,13 +391,18 @@ class DatabaseManager:
 
     # ==================== TEAM OPERATIONS ====================
     
-    def create_team(self, name: str, age_group: Optional[str] = None) -> str:
-        """Create a new team, return team_id"""
+    def create_team(self, name: str, age_group: Optional[str] = None,
+                   sport: Optional[str] = None, gender: Optional[str] = None,
+                   season: Optional[str] = None, coach_name: Optional[str] = None,
+                   notes: Optional[str] = None, active: bool = True) -> str:
+        """Create a new team with enhanced fields, return team_id"""
         team_id = str(uuid.uuid4())
         with self.get_connection() as conn:
             conn.execute(
-                'INSERT INTO teams (team_id, name, age_group) VALUES (?, ?, ?)',
-                (team_id, name, age_group)
+                '''INSERT INTO teams (team_id, name, age_group, sport, gender,
+                   season, coach_name, notes, active)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (team_id, name, age_group, sport, gender, season, coach_name, notes, active)
             )
         return team_id
     
@@ -407,22 +412,28 @@ class DatabaseManager:
             row = conn.execute('SELECT * FROM teams WHERE team_id = ?', (team_id,)).fetchone()
             return dict(row) if row else None
     
-    def get_all_teams(self) -> List[Dict[str, Any]]:
-        """Get all teams"""
+    def get_all_teams(self, active_only: bool = False) -> List[Dict[str, Any]]:
+        """Get all teams, optionally filtering by active status"""
         with self.get_connection() as conn:
-            rows = conn.execute('SELECT * FROM teams ORDER BY name').fetchall()
+            if active_only:
+                rows = conn.execute(
+                    'SELECT * FROM teams WHERE active = 1 ORDER BY name'
+                ).fetchall()
+            else:
+                rows = conn.execute('SELECT * FROM teams ORDER BY name').fetchall()
             return [dict(row) for row in rows]
     
     def update_team(self, team_id: str, **kwargs):
         """Update team fields"""
-        allowed_fields = {'name', 'age_group'}
+        allowed_fields = {'name', 'age_group', 'sport', 'gender', 'season',
+                         'coach_name', 'notes', 'active'}
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         if not updates:
             return
-        
+
         updates['updated_at'] = datetime.utcnow().isoformat()
         set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
-        
+
         with self.get_connection() as conn:
             conn.execute(
                 f'UPDATE teams SET {set_clause} WHERE team_id = ?',
@@ -433,6 +444,161 @@ class DatabaseManager:
         """Delete team (cascades to athletes)"""
         with self.get_connection() as conn:
             conn.execute('DELETE FROM teams WHERE team_id = ?', (team_id,))
+
+    def archive_team(self, team_id: str):
+        """Archive team (soft delete by setting active=0)"""
+        self.update_team(team_id, active=False)
+
+    def reactivate_team(self, team_id: str):
+        """Reactivate an archived team"""
+        self.update_team(team_id, active=True)
+
+    def duplicate_team(self, team_id: str, new_name: Optional[str] = None,
+                      new_season: Optional[str] = None) -> Optional[str]:
+        """Create a copy of a team (useful for new seasons), including athletes"""
+        original = self.get_team(team_id)
+        if not original:
+            return None
+
+        # Prepare new team data
+        new_team_name = new_name or f"{original['name']} (Copy)"
+        new_team_season = new_season or original.get('season')
+
+        new_team_id = self.create_team(
+            name=new_team_name,
+            age_group=original.get('age_group'),
+            sport=original.get('sport'),
+            gender=original.get('gender'),
+            season=new_team_season,
+            coach_name=original.get('coach_name'),
+            notes=f"Duplicated from team {original['name']}. {original.get('notes', '')}",
+            active=True
+        )
+
+        # Copy athletes from original team to new team
+        if new_team_id:
+            original_athletes = self.get_athletes_by_team(team_id)
+            for athlete in original_athletes:
+                self.create_athlete(
+                    team_id=new_team_id,
+                    name=athlete['name'],
+                    jersey_number=athlete.get('jersey_number'),
+                    age=athlete.get('age'),
+                    position=athlete.get('position')
+                )
+
+        return new_team_id
+
+    def search_teams(self, search_term: Optional[str] = None,
+                    sport: Optional[str] = None, gender: Optional[str] = None,
+                    coach_name: Optional[str] = None,
+                    active_only: bool = False) -> List[Dict[str, Any]]:
+        """Search and filter teams"""
+        with self.get_connection() as conn:
+            query = 'SELECT * FROM teams WHERE 1=1'
+            params = []
+
+            if active_only:
+                query += ' AND active = 1'
+
+            if search_term:
+                query += ' AND (name LIKE ? OR age_group LIKE ?)'
+                search_pattern = f'%{search_term}%'
+                params.extend([search_pattern, search_pattern])
+
+            if sport:
+                query += ' AND sport = ?'
+                params.append(sport)
+
+            if gender:
+                query += ' AND gender = ?'
+                params.append(gender)
+
+            if coach_name:
+                query += ' AND coach_name LIKE ?'
+                params.append(f'%{coach_name}%')
+
+            query += ' ORDER BY name'
+
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
+
+    def export_team_csv(self, team_id: str) -> Optional[str]:
+        """Export team data as CSV string"""
+        import csv
+        from io import StringIO
+
+        team = self.get_team(team_id)
+        if not team:
+            return None
+
+        # Get athlete count
+        athletes = self.get_athletes_by_team(team_id)
+        team['athlete_count'] = len(athletes)
+
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Header
+        writer.writerow(['Field', 'Value'])
+
+        # Data
+        fields = [
+            ('Team ID', 'team_id'),
+            ('Team Name', 'name'),
+            ('Age Group', 'age_group'),
+            ('Sport', 'sport'),
+            ('Gender', 'gender'),
+            ('Season', 'season'),
+            ('Status', lambda t: 'Active' if t.get('active') else 'Archived'),
+            ('Coach Name', 'coach_name'),
+            ('Athlete Count', 'athlete_count'),
+            ('Notes', 'notes'),
+            ('Created Date', 'created_at'),
+            ('Last Modified', 'updated_at')
+        ]
+
+        for label, key in fields:
+            if callable(key):
+                value = key(team)
+            else:
+                value = team.get(key, '')
+            writer.writerow([label, value or ''])
+
+        return output.getvalue()
+
+    def export_all_teams_csv(self) -> str:
+        """Export all teams as CSV"""
+        import csv
+        from io import StringIO
+
+        teams = self.get_all_teams(active_only=False)
+
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Header
+        headers = ['ID', 'Name', 'Age Group', 'Sport', 'Gender', 'Season',
+                  'Status', 'Coach', 'Created', 'Modified']
+        writer.writerow(headers)
+
+        # Data rows
+        for team in teams:
+            row = [
+                team.get('team_id'),
+                team.get('name'),
+                team.get('age_group', ''),
+                team.get('sport', ''),
+                team.get('gender', ''),
+                team.get('season', ''),
+                'Active' if team.get('active') else 'Archived',
+                team.get('coach_name', ''),
+                team.get('created_at', ''),
+                team.get('updated_at', '')
+            ]
+            writer.writerow(row)
+
+        return output.getvalue()
     
     # ==================== ATHLETE OPERATIONS ====================
     
