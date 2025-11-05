@@ -87,14 +87,30 @@ class SettingsManager:
             return False
 
     def get_audio_files(self) -> List[str]:
-        """Scan audio directory for .mp3/.wav files"""
+        """Scan audio directory for .mp3/.wav files from voice subdirectories"""
         if not os.path.exists(self.audio_dir):
             return []
 
         files = []
+
+        # Scan male and female subdirectories (where actual audio files live)
+        for gender in ['male', 'female']:
+            gender_dir = os.path.join(self.audio_dir, gender)
+            if os.path.exists(gender_dir):
+                for filename in os.listdir(gender_dir):
+                    if filename.endswith(('.mp3', '.wav')):
+                        # Only add if not already in list (avoid duplicates)
+                        if filename not in files:
+                            files.append(filename)
+
+        # Also scan root directory for any standalone files (like default_beep.mp3)
         for filename in os.listdir(self.audio_dir):
-            if filename.endswith(('.mp3', '.wav')):
-                files.append(filename)
+            filepath = os.path.join(self.audio_dir, filename)
+            if os.path.isfile(filepath) and filename.endswith(('.mp3', '.wav')):
+                # Only include if file has content (not empty)
+                if os.path.getsize(filepath) > 0 and filename not in files:
+                    files.append(filename)
+
         return sorted(files)
 
     def get_device_threshold(self, device_id: str) -> Dict:

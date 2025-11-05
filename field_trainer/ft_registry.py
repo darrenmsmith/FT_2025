@@ -295,6 +295,8 @@ class Registry:
                     "off": LEDState.OFF,
                     "solid_green": LEDState.SOLID_GREEN,
                     "solid_red": LEDState.SOLID_RED,
+                    "solid_blue": LEDState.SOLID_BLUE,
+                    "solid_amber": LEDState.SOLID_ORANGE,
                     "blink_amber": LEDState.BLINK_ORANGE,
                     "rainbow": LEDState.RAINBOW,
                 }

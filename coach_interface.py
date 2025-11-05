@@ -38,6 +38,19 @@ perf_bridge, touch_bridge = initialize_bridge(db)
 # Initialize settings manager
 settings_mgr = SettingsManager(db)
 
+# Sync audio settings from database to AudioManager on startup
+try:
+    if REGISTRY._audio:
+        settings = settings_mgr.load_settings()
+        voice_gender = settings.get('voice_gender', 'male')
+        system_volume = int(settings.get('system_volume', '60'))
+
+        REGISTRY._audio.set_voice_gender(voice_gender)
+        REGISTRY._audio.set_volume(system_volume)
+        print(f"✓ AudioManager initialized from settings: {voice_gender} voice, {system_volume}% volume")
+except Exception as e:
+    print(f"⚠ Failed to sync settings to AudioManager on startup: {e}")
+
 # Store active session state - supports multiple simultaneous athletes
 active_session_state = {
     'session_id': None,
@@ -1575,6 +1588,19 @@ def save_settings():
             return jsonify({'success': False, 'error': 'Missing key'}), 400
 
         success = settings_mgr.save_setting(key, str(value))
+
+        # Sync audio settings to AudioManager (for MAX98357A)
+        if success and REGISTRY._audio:
+            try:
+                if key == 'voice_gender' and value in ('male', 'female'):
+                    REGISTRY._audio.set_voice_gender(value)
+                    print(f"✓ Voice gender set to '{value}' via AudioManager")
+                elif key == 'system_volume':
+                    REGISTRY._audio.set_volume(int(value))
+                    print(f"✓ Volume set to {value}% via AudioManager")
+            except Exception as audio_err:
+                print(f"⚠ Failed to sync {key} to AudioManager: {audio_err}")
+
         return jsonify({'success': success})
     except Exception as e:
         print(f"Error saving setting: {e}")
@@ -1586,6 +1612,16 @@ def reset_settings():
     """Reset all settings to defaults"""
     try:
         success = settings_mgr.reset_to_defaults()
+
+        # Sync default audio settings to AudioManager
+        if success and REGISTRY._audio:
+            try:
+                REGISTRY._audio.set_voice_gender('male')  # Default from SettingsManager
+                REGISTRY._audio.set_volume(60)  # Default from SettingsManager
+                print(f"✓ AudioManager reset to defaults (male voice, 60% volume)")
+            except Exception as audio_err:
+                print(f"⚠ Failed to reset AudioManager: {audio_err}")
+
         return jsonify({'success': success})
     except Exception as e:
         print(f"Error resetting settings: {e}")
@@ -1602,10 +1638,245 @@ def get_audio_files():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
+@app.route('/api/settings/test-audio', methods=['POST'])
+def test_audio():
+    """Play audio file through selected device speaker (server-side playback)"""
+    try:
+        data = request.get_json()
+        filename = data.get('filename', '')
+        device_id = data.get('device_id', '192.168.99.100')  # Default to Device 0
+
+        if not filename:
+            return jsonify({'success': False, 'error': 'No filename provided'}), 400
+
+        # Remove .mp3 extension if present (AudioManager/devices add it)
+        clip_name = filename.replace('.mp3', '').replace('.wav', '')
+
+        print(f"\n{'='*60}")
+        print(f"🔊 AUDIO TEST REQUEST")
+        print(f"   Device: {device_id}")
+        print(f"   Clip: {clip_name}")
+        print(f"{'='*60}")
+
+        # Handle "ALL" - play sequentially on all devices
+        if device_id == 'ALL':
+            import threading
+            import time as time_module
+
+            print(f"   Playing on ALL devices sequentially...")
+
+            all_devices = [
+                ('192.168.99.100', 'Start'),
+                ('192.168.99.101', 'Cone 1'),
+                ('192.168.99.102', 'Cone 2'),
+                ('192.168.99.103', 'Cone 3'),
+                ('192.168.99.104', 'Cone 4'),
+                ('192.168.99.105', 'Cone 5'),
+            ]
+
+            results = {'success': [], 'failed': []}
+
+            def play_sequential():
+                """Play audio on each device with delay between"""
+                print(f"\n   🎵 Starting sequential playback thread...")
+                print(f"   Clip: {clip_name}")
+                print(f"   Devices: Start → Cone 1 → Cone 2 → Cone 3 → Cone 4 → Cone 5")
+
+                for dev_id, dev_name in all_devices:
+                    try:
+                        print(f"\n   → Playing on {dev_name}...")
+
+                        # Play on device
+                        if dev_id == '192.168.99.100':
+                            # Device 0 - local AudioManager
+                            if REGISTRY._audio:
+                                success = REGISTRY._audio.play(clip_name)
+                                if success:
+                                    results['success'].append(dev_name)
+                                    print(f"   ✓ {dev_name} - audio playing")
+                                else:
+                                    results['failed'].append(dev_name)
+                                    print(f"   ✗ {dev_name} - audio file not found")
+                            else:
+                                results['failed'].append(dev_name)
+                                print(f"   ✗ {dev_name} - AudioManager not available")
+                        else:
+                            # Remote cones - check status first, then send command
+                            # IMPORTANT: Check status outside of play_audio to avoid deadlock
+                            is_online = False
+                            with REGISTRY.nodes_lock:
+                                node = REGISTRY.nodes.get(dev_id)
+                                if node and node.status not in ('Offline', 'Unknown') and node._writer:
+                                    is_online = True
+
+                            # Release lock before calling play_audio (which also needs the lock)
+                            if is_online:
+                                success = REGISTRY.play_audio(dev_id, clip_name)
+                                if success:
+                                    results['success'].append(dev_name)
+                                    print(f"   ✓ {dev_name} - command sent")
+                                else:
+                                    results['failed'].append(dev_name)
+                                    print(f"   ✗ {dev_name} - send failed")
+                            else:
+                                results['failed'].append(dev_name)
+                                print(f"   ⊘ {dev_name} - offline/not connected")
+
+                        # Wait 3 seconds before next device (typical audio clip length)
+                        time_module.sleep(3)
+
+                    except Exception as e:
+                        results['failed'].append(dev_name)
+                        print(f"   ✗ {dev_name} - error: {e}")
+                        import traceback
+                        traceback.print_exc()
+
+                print(f"\n   Sequential playback complete:")
+                print(f"   Success: {len(results['success'])} devices")
+                print(f"   Failed: {len(results['failed'])} devices")
+
+            # Start sequential playback in background thread
+            thread = threading.Thread(target=play_sequential, daemon=True)
+            thread.start()
+
+            # Return immediately
+            return jsonify({
+                'success': True,
+                'message': f'Playing {filename} sequentially on all devices (Start → Cone 5)',
+                'mode': 'sequential'
+            })
+
+        # Handle single device (original code)
+
+        # Route based on device
+        if device_id == '192.168.99.100':
+            # Device 0 (Start) - Play through local AudioManager
+            if REGISTRY._audio:
+                success = REGISTRY._audio.play(clip_name)
+                if success:
+                    print(f"✓ Playing '{clip_name}' on Start (local AudioManager)")
+                    return jsonify({'success': True, 'message': f'Playing {filename} on Start'})
+                else:
+                    print(f"✗ Audio file not found: {clip_name}")
+                    return jsonify({'success': False, 'error': f'Audio file not found: {filename}'}), 404
+            else:
+                print(f"✗ AudioManager not available")
+                return jsonify({'success': False, 'error': 'AudioManager not available on Start'}), 503
+        else:
+            # Remote device (Cones 1-5) - Send command via REGISTRY
+            cone_num = int(device_id.split('.')[-1]) - 100
+
+            # Check if device is online and connected
+            with REGISTRY.nodes_lock:
+                node = REGISTRY.nodes.get(device_id)
+                if not node:
+                    print(f"✗ Cone {cone_num} not found in registry")
+                    return jsonify({
+                        'success': False,
+                        'error': f'Cone {cone_num} is not connected to the heartbeat server. Make sure cone is powered on and running client software.'
+                    }), 404
+
+                if node.status in ('Offline', 'Unknown'):
+                    print(f"✗ Cone {cone_num} is {node.status}")
+                    return jsonify({
+                        'success': False,
+                        'error': f'Cone {cone_num} is {node.status}. Check power and network connection.'
+                    }), 503
+
+                if not node._writer:
+                    print(f"✗ Cone {cone_num} has no TCP writer (connection lost)")
+                    return jsonify({
+                        'success': False,
+                        'error': f'Cone {cone_num} lost TCP connection. Try restarting the cone.'
+                    }), 503
+
+            # Send audio command to remote device
+            print(f"   Sending audio command to Cone {cone_num} via TCP...")
+            success = REGISTRY.play_audio(device_id, clip_name)
+            if success:
+                print(f"✓ Audio command sent to Cone {cone_num}")
+                return jsonify({'success': True, 'message': f'Playing {filename} on Cone {cone_num}'})
+            else:
+                print(f"✗ Failed to send audio command to Cone {cone_num}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to send command to Cone {cone_num}. Check TCP connection and cone client logs.'
+                }), 500
+
+    except Exception as e:
+        print(f"Error playing test audio: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/audio/<path:filename>')
 def serve_audio(filename):
-    """Serve audio files"""
-    return send_from_directory('/opt/field_trainer/audio', filename)
+    """Serve audio files from voice-specific subdirectories or root"""
+    import os
+    from flask import send_file, abort
+
+    audio_dir = '/opt/field_trainer/audio'
+
+    # Get user's voice gender preference
+    try:
+        voice_gender = settings_mgr.get_setting('voice_gender') or 'male'
+    except:
+        voice_gender = 'male'
+
+    # Try voice-specific directory first (male/female)
+    gender_path = os.path.join(audio_dir, voice_gender, filename)
+    if os.path.exists(gender_path) and os.path.getsize(gender_path) > 0:
+        return send_file(gender_path, mimetype='audio/mpeg')
+
+    # Try opposite gender as fallback
+    other_gender = 'female' if voice_gender == 'male' else 'male'
+    other_path = os.path.join(audio_dir, other_gender, filename)
+    if os.path.exists(other_path) and os.path.getsize(other_path) > 0:
+        return send_file(other_path, mimetype='audio/mpeg')
+
+    # Try root directory as last resort
+    root_path = os.path.join(audio_dir, filename)
+    if os.path.exists(root_path) and os.path.getsize(root_path) > 0:
+        return send_file(root_path, mimetype='audio/mpeg')
+
+    # File not found or empty
+    abort(404)
+
+
+@app.route('/api/settings/devices', methods=['GET'])
+def get_devices():
+    """Get list of devices and their status"""
+    try:
+        devices = []
+
+        # Always include Device 0 (controller) as online
+        devices.append({
+            'device_id': '192.168.99.100',
+            'name': 'Start',
+            'status': 'online'
+        })
+
+        # Check status of Cones 1-5
+        for i in range(1, 6):
+            device_id = f'192.168.99.{100 + i}'
+            status = 'offline'
+
+            with REGISTRY.nodes_lock:
+                node = REGISTRY.nodes.get(device_id)
+                if node and node.status not in ('Offline', 'Unknown'):
+                    status = 'online'
+
+            devices.append({
+                'device_id': device_id,
+                'name': f'Cone {i}',
+                'status': status
+            })
+
+        return jsonify({'success': True, 'devices': devices})
+    except Exception as e:
+        print(f"Error getting devices: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/settings/network-info', methods=['GET'])
@@ -1626,16 +1897,17 @@ def get_network_info():
 
 @app.route('/api/settings/test-led', methods=['POST'])
 def test_led():
-    """Test LED color on all devices"""
+    """Test LED color on selected device(s)"""
     import threading
     import time
 
     try:
         data = request.get_json()
         color = data.get('color', 'orange')
+        device = data.get('device', 'ALL')  # Get device parameter
 
         print(f"\n{'='*60}")
-        print(f"🔦 LED TEST STARTED - Color: {color}")
+        print(f"🔦 LED TEST STARTED - Device: {device}, Color: {color}")
         print(f"{'='*60}")
 
         # Map color names to LED patterns
@@ -1643,14 +1915,21 @@ def test_led():
             'orange': 'solid_amber',
             'red': 'solid_red',
             'green': 'solid_green',
-            'blue': 'rainbow',  # No solid blue, use rainbow
+            'blue': 'solid_blue',  # True blue (deployment color)
             'yellow': 'blink_amber'  # No yellow, use blink amber
         }
 
         pattern = color_map.get(color, 'solid_amber')
         print(f"LED Pattern: {pattern}")
 
-        device_ips = [f'192.168.99.{100 + i}' for i in range(6)]
+        # Determine which devices to test
+        if device == 'ALL':
+            device_ips = [f'192.168.99.{100 + i}' for i in range(6)]
+            print(f"Testing ALL devices")
+        else:
+            device_ips = [device]
+            device_name = "Start" if device == "192.168.99.100" else f"Cone {int(device.split('.')[-1]) - 100}"
+            print(f"Testing single device: {device_name}")
 
         # Track results
         results = {'success': [], 'failed': []}
@@ -1692,9 +1971,9 @@ def test_led():
         print(f"  Failed:  {len(results['failed'])} devices - {results['failed']}")
         print(f"{'='*60}\n")
 
-        # Schedule LEDs to turn off after 3 seconds
+        # Schedule LEDs to turn off after 5 seconds
         def turn_off_leds():
-            time.sleep(3)
+            time.sleep(5)
             print(f"\n🔦 Turning off LEDs...")
             for device_ip in device_ips:
                 try:
@@ -1719,7 +1998,7 @@ def test_led():
 
 @app.route('/api/settings/apply-volume', methods=['POST'])
 def apply_volume():
-    """Apply volume setting to system"""
+    """Apply volume setting to system (MAX98357A I2S amplifier)"""
     try:
         data = request.get_json()
         volume = int(data.get('volume', 60))
@@ -1727,25 +2006,22 @@ def apply_volume():
         # Clamp volume to 0-100
         volume = max(0, min(100, volume))
 
-        # Try to find an available mixer control
-        # Common names: PCM, Master, Headphone, Speaker
-        mixer_controls = ['PCM', 'Master', 'Headphone', 'Speaker']
+        # Update AudioManager volume (controls mpg123 -f parameter)
+        # MAX98357A uses software volume control via mpg123, not ALSA mixer
         volume_set = False
-
-        for control in mixer_controls:
-            result = subprocess.run(
-                ['amixer', 'sset', control, f'{volume}%'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            if result.returncode == 0:
+        if REGISTRY._audio:
+            try:
+                REGISTRY._audio.set_volume(volume)
                 volume_set = True
-                print(f"Volume set to {volume}% using {control} control")
-                break
+                print(f"✓ Volume set to {volume}% via AudioManager (mpg123 -f parameter)")
+            except Exception as audio_err:
+                print(f"⚠ AudioManager volume update failed: {audio_err}")
+        else:
+            print(f"⚠ No AudioManager available - volume not applied to hardware")
 
-        # Even if hardware volume failed, return success
-        # (settings are still saved to database)
+        # Also save to settings database for persistence
+        settings_mgr.save_setting('system_volume', str(volume))
+
         return jsonify({
             'success': True,
             'volume': volume,
@@ -1754,10 +2030,12 @@ def apply_volume():
 
     except Exception as e:
         print(f"Error setting volume: {e}")
+        import traceback
+        traceback.print_exc()
         # Return success anyway - don't block UI
         return jsonify({
             'success': True,
-            'volume': volume,
+            'volume': volume if 'volume' in locals() else 60,
             'hardware_applied': False,
             'note': 'Volume saved but hardware control unavailable'
         })

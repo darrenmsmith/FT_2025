@@ -20,6 +20,7 @@ class LEDState(str, Enum):
     OFF = "off"
     SOLID_GREEN = "solid_green"
     SOLID_RED = "solid_red"
+    SOLID_BLUE = "solid_blue"
     SOLID_ORANGE = "solid_orange"
     BLINK_AMBER = "blink_amber"
     BLINK_ORANGE = "blink_orange"
@@ -76,6 +77,9 @@ class LEDManager:
                 time.sleep(0.2)
             elif state == LEDState.SOLID_RED:
                 self._fill(128, 0, 0)
+                time.sleep(0.2)
+            elif state == LEDState.SOLID_BLUE:
+                self._fill(0, 0, 255)
                 time.sleep(0.2)
             elif state == LEDState.SOLID_ORANGE:
                 self.fill(self.Color(255, 165, 0))

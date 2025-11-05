@@ -4,19 +4,14 @@
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1><i class="bi bi-gear"></i> System Settings</h1>
-    <a href="/dashboard" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> Back to Dashboard
-    </a>
-</div>
-
-<!-- Action Buttons (hidden until changes detected) -->
-<div id="action-buttons" class="mb-4" style="display: none;">
-    <button id="save-btn" class="btn btn-success me-2">
-        <i class="bi bi-check-circle"></i> Save Settings
-    </button>
-    <button id="reset-btn" class="btn btn-danger">
-        <i class="bi bi-arrow-counterclockwise"></i> Reset to Defaults
-    </button>
+    <div>
+        <button id="reset-btn" class="btn btn-outline-danger me-2">
+            <i class="bi bi-arrow-counterclockwise"></i> Reset to Defaults
+        </button>
+        <a href="/dashboard" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
 </div>
 
 <!-- Display & Units Section -->
@@ -25,20 +20,24 @@
         <h5 class="mb-0"><i class="bi bi-display"></i> Display & Units</h5>
     </div>
     <div class="card-body">
-        <div class="mb-3">
-            <label class="form-label fw-bold">Distance Unit</label>
-            <div class="d-flex gap-4">
-                <div class="form-check">
-                    <input class="form-check-input setting-input" type="radio" name="distance_unit" id="unit_yards" value="yards" data-setting="distance_unit">
-                    <label class="form-check-label" for="unit_yards">Yards</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input setting-input" type="radio" name="distance_unit" id="unit_meters" value="meters" data-setting="distance_unit">
-                    <label class="form-check-label" for="unit_meters">Meters</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input setting-input" type="radio" name="distance_unit" id="unit_feet" value="feet" data-setting="distance_unit">
-                    <label class="form-check-label" for="unit_feet">Feet</label>
+        <div class="row align-items-center">
+            <div class="col-auto">
+                <label class="form-label fw-bold mb-0">Distance Unit:</label>
+            </div>
+            <div class="col-auto">
+                <div class="d-flex gap-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="distance_unit" id="unit_yards" value="yards">
+                        <label class="form-check-label" for="unit_yards">Yards</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="distance_unit" id="unit_meters" value="meters">
+                        <label class="form-check-label" for="unit_meters">Meters</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="distance_unit" id="unit_feet" value="feet">
+                        <label class="form-check-label" for="unit_feet">Feet</label>
+                    </div>
                 </div>
             </div>
         </div>
@@ -55,11 +54,11 @@
             <label class="form-label fw-bold">Voice Gender</label>
             <div class="d-flex gap-4">
                 <div class="form-check">
-                    <input class="form-check-input setting-input" type="radio" name="voice_gender" id="voice_male" value="male" data-setting="voice_gender">
+                    <input class="form-check-input" type="radio" name="voice_gender" id="voice_male" value="male">
                     <label class="form-check-label" for="voice_male">Male</label>
                 </div>
                 <div class="form-check">
-                    <input class="form-check-input setting-input" type="radio" name="voice_gender" id="voice_female" value="female" data-setting="voice_gender">
+                    <input class="form-check-input" type="radio" name="voice_gender" id="voice_female" value="female">
                     <label class="form-check-label" for="voice_female">Female</label>
                 </div>
             </div>
@@ -68,21 +67,47 @@
         <div class="mb-3">
             <label for="system_volume" class="form-label fw-bold">System Volume: <span id="volume-display">60</span>%</label>
             <div style="width: 33%;">
-                <input type="range" class="form-range setting-input" min="0" max="100" step="5" id="system_volume" data-setting="system_volume">
+                <input type="range" class="form-range" min="0" max="100" step="5" id="system_volume">
             </div>
+            <small class="form-text text-muted"><i class="bi bi-info-circle"></i> Volume slider affects Device 0 (Start) only. Remote devices use their local volume settings.</small>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold">Test Audio Playback</label>
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label for="test_device" class="form-label">Device</label>
+                    <select class="form-select" id="test_device">
+                        <option value="ALL">ALL (Sequential)</option>
+                        <option value="192.168.99.100">Start</option>
+                        <option value="192.168.99.101">Cone 1</option>
+                        <option value="192.168.99.102">Cone 2</option>
+                        <option value="192.168.99.103">Cone 3</option>
+                        <option value="192.168.99.104">Cone 4</option>
+                        <option value="192.168.99.105">Cone 5</option>
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <label for="test_audio_file" class="form-label">Audio File</label>
+                    <div class="input-group">
+                        <select class="form-select" id="test_audio_file">
+                            <option value="">-- Select Audio File --</option>
+                        </select>
+                        <button class="btn btn-outline-primary" type="button" id="play-audio-btn" title="Play on selected device">
+                            <i class="bi bi-play-fill"></i> Play
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <small class="form-text text-muted">Test audio playback on any device. Device status will be checked before playing.</small>
         </div>
 
         <div class="mb-3">
             <label for="ready_audio_file" class="form-label fw-bold">Ready Notification Sound</label>
-            <div class="input-group">
-                <select class="form-select setting-input" id="ready_audio_file" data-setting="ready_audio_file">
-                    <option value="">-- Select Audio File --</option>
-                </select>
-                <button class="btn btn-outline-primary" type="button" id="play-audio-btn" title="Play selected audio">
-                    <i class="bi bi-play-fill"></i> Play
-                </button>
-            </div>
-            <small class="form-text text-muted">Audio files from /opt/field_trainer/audio/</small>
+            <select class="form-select" id="ready_audio_file">
+                <option value="">-- Select Audio File --</option>
+            </select>
+            <small class="form-text text-muted">Audio file played when system is ready for athlete</small>
         </div>
     </div>
 </div>
@@ -96,12 +121,12 @@
         <div class="row">
             <div class="col-md-6 mb-3">
                 <label for="min_travel_time" class="form-label fw-bold">Minimum Travel Time (seconds)</label>
-                <input type="number" class="form-control setting-input" id="min_travel_time" min="0.1" step="0.1" data-setting="min_travel_time">
+                <input type="number" class="form-control" id="min_travel_time" min="0.1" step="0.1">
                 <small class="form-text text-muted">Minimum expected time between devices</small>
             </div>
             <div class="col-md-6 mb-3">
                 <label for="max_travel_time" class="form-label fw-bold">Maximum Travel Time (seconds)</label>
-                <input type="number" class="form-control setting-input" id="max_travel_time" min="1" step="1" data-setting="max_travel_time">
+                <input type="number" class="form-control" id="max_travel_time" min="1" step="1">
                 <small class="form-text text-muted">Maximum expected time between devices</small>
             </div>
         </div>
@@ -115,32 +140,52 @@
         <h5 class="mb-0"><i class="bi bi-lightbulb"></i> LED Settings</h5>
     </div>
     <div class="card-body">
-        <div class="row">
-            <div class="col-md-6 mb-3">
-                <label for="ready_led_color" class="form-label fw-bold">Ready LED Color</label>
-                <div class="input-group">
-                    <select class="form-select setting-input" id="ready_led_color" data-setting="ready_led_color">
+        <div class="mb-3">
+            <label class="form-label fw-bold">Test LED</label>
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label for="test_led_device" class="form-label">Device</label>
+                    <select class="form-select" id="test_led_device">
+                        <option value="ALL">ALL</option>
+                        <option value="192.168.99.100">Start</option>
+                        <option value="192.168.99.101">Cone 1</option>
+                        <option value="192.168.99.102">Cone 2</option>
+                        <option value="192.168.99.103">Cone 3</option>
+                        <option value="192.168.99.104">Cone 4</option>
+                        <option value="192.168.99.105">Cone 5</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="test_led_color" class="form-label">LED Color</label>
+                    <select class="form-select" id="test_led_color">
                         <option value="orange">Orange</option>
                         <option value="blue">Blue</option>
                         <option value="green">Green</option>
                         <option value="yellow">Yellow</option>
                         <option value="red">Red</option>
                     </select>
-                    <button class="btn btn-outline-primary" type="button" id="test-led-btn" title="Test LED color on all devices">
-                        <i class="bi bi-lightbulb"></i> Test
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-outline-primary w-100" type="button" id="test-led-btn" title="Test LED on selected device">
+                        <i class="bi bi-lightbulb"></i> Test LED
                     </button>
                 </div>
-                <small class="form-text text-muted">Test will flash all device LEDs for 3 seconds</small>
             </div>
+            <small class="form-text text-muted">Test will flash selected device LEDs for 5 seconds</small>
+        </div>
 
-            <div class="col-md-6 mb-3">
-                <label for="ready_audio_target" class="form-label fw-bold">Ready Audio Target</label>
-                <select class="form-select setting-input" id="ready_audio_target" data-setting="ready_audio_target">
-                    <option value="all">All Devices</option>
-                    <option value="start">Start Only</option>
-                    <option value="specific">Specific Device</option>
+        <div class="mb-3">
+            <label for="ready_led_color" class="form-label fw-bold">Ready LED Color (Default)</label>
+            <div style="width: 33%;">
+                <select class="form-select" id="ready_led_color">
+                    <option value="orange">Orange</option>
+                    <option value="blue">Blue</option>
+                    <option value="green">Green</option>
+                    <option value="yellow">Yellow</option>
+                    <option value="red">Red</option>
                 </select>
             </div>
+            <small class="form-text text-muted">Default LED color when ready</small>
         </div>
     </div>
 </div>
@@ -164,13 +209,13 @@
         <div class="row">
             <div class="col-md-6 mb-3">
                 <label for="wifi_ssid" class="form-label fw-bold">WiFi SSID</label>
-                <input type="text" class="form-control setting-input" id="wifi_ssid" data-setting="wifi_ssid" placeholder="Enter new SSID">
+                <input type="text" class="form-control" id="wifi_ssid" placeholder="Enter new SSID">
             </div>
 
             <div class="col-md-6 mb-3">
                 <label for="wifi_password" class="form-label fw-bold">WiFi Password</label>
                 <div class="input-group">
-                    <input type="password" class="form-control setting-input" id="wifi_password" data-setting="wifi_password" placeholder="Enter new password">
+                    <input type="password" class="form-control" id="wifi_password" placeholder="Enter new password">
                     <button class="btn btn-outline-secondary" type="button" id="toggle-password">
                         <i class="bi bi-eye"></i>
                     </button>
