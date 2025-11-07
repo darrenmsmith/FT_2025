@@ -1,0 +1,3 @@
+first_name,last_name,birthdate,gender,parent1_name,parent1_phone,parent1_email,parent2_name,parent2_phone,parent2_email,allergies,medical_conditions
+John,Smith,2010-05-15,male,Jane Smith,555-1234,jane@email.com,Bob Smith,555-5678,bob@email.com,Peanuts (severe),Asthma
+Sarah,Johnson,2011-03-22,female,Mary Johnson,555-9999,mary@email.com,,,,,

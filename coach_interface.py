@@ -26,6 +26,11 @@ sys.path.insert(0, "/opt/field_trainer")
 app = Flask(__name__, template_folder='/opt/field_trainer/templates', static_folder='/opt/field_trainer/static')
 # Register dashboard blueprint
 # app.register_blueprint(dashboard_bp)
+
+# Register athlete management blueprint
+from athlete_routes import athlete_bp
+app.register_blueprint(athlete_bp)
+
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
 
 # Track when this process started

@@ -1,0 +1,798 @@
+{% extends "base.html" %}
+{% block title %}Athlete Details - Field Trainer{% endblock %}
+
+{% block extra_css %}
+<style>
+    #videoPreview {
+        max-width: 100%;
+        border-radius: 8px;
+        background: #000;
+        display: block;
+    }
+    .photo-controls {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 10px;
+    }
+    #cameraSection {
+        margin-top: 15px;
+    }
+    #switchCameraBtn {
+        font-size: 12px;
+    }
+    /* Mobile optimizations */
+    @media (max-width: 768px) {
+        #videoPreview {
+            max-height: 400px;
+            object-fit: cover;
+        }
+        .modal-dialog {
+            margin: 0.5rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 id="athleteName">Loading...</h2>
+        <div>
+            <button id="editBtn" class="btn btn-primary" onclick="toggleEditMode()" style="display:none;">
+                <i class="bi bi-pencil"></i> Edit
+            </button>
+            <button id="saveBtn" class="btn btn-success" onclick="saveChanges()" style="display:none;">
+                <i class="bi bi-check-lg"></i> Save
+            </button>
+            <button id="cancelBtn" class="btn btn-secondary" onclick="cancelEdit()" style="display:none;">
+                <i class="bi bi-x-lg"></i> Cancel
+            </button>
+            <a href="/athletes" class="btn btn-secondary">← Back to Athletes</a>
+        </div>
+    </div>
+
+    <div id="athleteDetails">
+        <div class="text-center py-5">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Photo Upload Modal -->
+<div class="modal fade" id="photoModal" tabindex="-1" aria-labelledby="photoModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="photoModalLabel">Update Photo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-grid gap-2 mb-3">
+                    <button class="btn btn-primary" onclick="openCamera()">
+                        <i class="bi bi-camera"></i> Take Photo with Camera
+                    </button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">
+                        <i class="bi bi-upload"></i> Upload from File
+                    </button>
+                    <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="uploadFile()">
+                    <!-- Mobile-optimized camera input (uses native camera app) -->
+                    <button class="btn btn-info d-md-none" onclick="document.getElementById('mobileCamera').click()">
+                        <i class="bi bi-phone"></i> Use Device Camera
+                    </button>
+                    <input type="file" id="mobileCamera" accept="image/*" capture="environment" style="display:none" onchange="uploadFile('mobileCamera')">
+                </div>
+
+                <div id="cameraSection" style="display:none;">
+                    <div class="d-flex justify-content-between mb-2">
+                        <button class="btn btn-sm btn-outline-secondary" id="switchCameraBtn" onclick="switchCamera()" style="display:none;">
+                            <i class="bi bi-arrow-repeat"></i> Switch Camera
+                        </button>
+                        <div>
+                            <span class="badge bg-info" id="cameraMode">Front Camera</span>
+                        </div>
+                    </div>
+                    <video id="videoPreview" autoplay playsinline style="width: 100%; border-radius: 8px;"></video>
+                    <canvas id="photoCanvas" style="display:none;"></canvas>
+                    <div class="photo-controls">
+                        <button class="btn btn-success" onclick="capturePhoto()">
+                            <i class="bi bi-camera-fill"></i> Capture
+                        </button>
+                        <button class="btn btn-danger" onclick="closeCamera()">
+                            <i class="bi bi-x-circle"></i> Cancel
+                        </button>
+                    </div>
+                </div>
+
+                <div id="uploadStatus" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const athleteId = {{ athlete_id }};
+
+    async function loadAthlete() {
+        try {
+            const response = await fetch('/api/athletes/' + athleteId);
+            const data = await response.json();
+
+            if (data.success) {
+                displayAthlete(data.athlete);
+            } else {
+                document.getElementById('athleteDetails').innerHTML =
+                    '<div class="alert alert-danger">Athlete not found</div>';
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            document.getElementById('athleteDetails').innerHTML =
+                '<div class="alert alert-danger">Error loading athlete</div>';
+        }
+    }
+
+    let currentAthlete = null;
+    let editMode = false;
+
+    function displayAthlete(athlete) {
+        currentAthlete = athlete;
+        document.getElementById('athleteName').textContent =
+            athlete.first_name + ' ' + athlete.last_name + ' (' + athlete.athlete_number + ')';
+
+        // Show edit button
+        document.getElementById('editBtn').style.display = 'inline-block';
+
+        const age = athlete.age_info ? athlete.age_info.age : '?';
+        const ageGroup = athlete.age_info ? athlete.age_info.age_group : '';
+
+        let medicalAlert = '';
+        const hasMedicalData = athlete.medical && (athlete.medical.allergies || athlete.medical.medical_conditions);
+        const severity = athlete.medical?.allergy_severity || '';
+
+        // Always show medical card (allows editing even when empty)
+        const headerClass = hasMedicalData ? 'card-header bg-warning text-white' : 'card-header';
+        const headerIcon = hasMedicalData ? '<i class="bi bi-exclamation-triangle"></i> ' : '';
+
+        medicalAlert = '<div class="card mb-3">' +
+            `<div class="${headerClass}">` +
+            headerIcon + 'Medical Information</div>' +
+            '<div class="card-body" id="medicalSection">';
+
+        if (hasMedicalData) {
+            if (athlete.medical.allergies) {
+                medicalAlert += '<p><strong>Allergies:</strong> <span id="allergiesView">' + athlete.medical.allergies + '</span></p>';
+            }
+            if (severity) {
+                const badgeClass = severity === 'life-threatening' || severity === 'severe' ? 'bg-danger' : 'bg-warning';
+                medicalAlert += '<p><strong>Severity:</strong> <span class="badge ' + badgeClass + '" id="severityView">' + severity + '</span></p>';
+            }
+            if (athlete.medical.medical_conditions) {
+                medicalAlert += '<p><strong>Conditions:</strong> <span id="conditionsView">' + athlete.medical.medical_conditions + '</span></p>';
+            }
+        } else {
+            medicalAlert += '<p class="text-muted">No medical information on file</p>';
+        }
+
+        medicalAlert += '</div></div>';
+
+        let contactsHtml = '';
+        if (athlete.contacts && athlete.contacts.length > 0) {
+            contactsHtml = '<div class="card mb-3"><div class="card-header">Emergency Contacts</div><div class="card-body" id="contactsSection">';
+            athlete.contacts.forEach(function(contact, idx) {
+                if (idx > 0) contactsHtml += '<hr>';
+                contactsHtml += '<div class="mb-2">' +
+                    '<strong>' + contact.name + '</strong> (' + contact.relationship + ')<br>' +
+                    'Phone: ' + contact.phone;
+                if (contact.email) contactsHtml += '<br>Email: ' + contact.email;
+                if (contact.is_primary) contactsHtml += ' <span class="badge bg-primary">Primary</span>';
+                contactsHtml += '</div>';
+            });
+            contactsHtml += '</div></div>';
+        } else {
+            contactsHtml = '<div class="card mb-3"><div class="card-header">Emergency Contacts</div><div class="card-body" id="contactsSection">' +
+                '<p class="text-muted">No contacts added</p></div></div>';
+        }
+
+        let teamsHtml = '';
+        if (athlete.team_list && athlete.team_list.length > 0) {
+            teamsHtml = '<div class="card mb-3"><div class="card-header">Teams</div><div class="card-body">';
+            athlete.team_list.forEach(function(team) {
+                teamsHtml += '<div class="mb-2">' +
+                    '<a href="/team/' + team.team_id + '">' + team.name + '</a>';
+                if (team.jersey_number) teamsHtml += ' - #' + team.jersey_number;
+                if (team.position) teamsHtml += ' (' + team.position + ')';
+                teamsHtml += '</div>';
+            });
+            teamsHtml += '</div></div>';
+        }
+
+        document.getElementById('athleteDetails').innerHTML =
+            '<div class="row">' +
+            '<div class="col-md-4">' +
+            '<div class="card mb-3">' +
+            '<div class="card-body text-center">' +
+            '<img src="/api/athletes/' + athleteId + '/photo?t=' + Date.now() + '" ' +
+            'id="athletePhoto" ' +
+            'class="img-fluid rounded-circle mb-3" ' +
+            'style="max-width: 200px; max-height: 200px; cursor: pointer;" ' +
+            'alt="' + athlete.first_name + '" ' +
+            'onclick="showPhotoModal()">' +
+            '<h4>' + athlete.first_name + ' ' + athlete.last_name + '</h4>' +
+            '<p class="text-muted">' + athlete.athlete_number + '</p>' +
+            '<button class="btn btn-sm btn-primary" onclick="showPhotoModal()">' +
+            '<i class="bi bi-camera"></i> Update Photo' +
+            '</button>' +
+            '</div></div>' +
+            '<div class="card">' +
+            '<div class="card-header">Basic Information</div>' +
+            '<div class="card-body" id="basicInfoSection">' +
+            '<p><strong>First Name:</strong> <span id="firstNameView">' + athlete.first_name + '</span></p>' +
+            '<p><strong>Last Name:</strong> <span id="lastNameView">' + athlete.last_name + '</span></p>' +
+            '<p><strong>Age:</strong> ' + age + ' years (' + ageGroup + ')</p>' +
+            '<p><strong>Gender:</strong> <span id="genderView">' + (athlete.gender || 'Not specified') + '</span></p>' +
+            '<p><strong>Birth Date:</strong> <span id="birthdateView">' + (athlete.birthdate || 'Not specified') + '</span></p>' +
+            '<p><strong>Display Name:</strong> <span id="displayNameView">' + (athlete.display_name || 'Not specified') + '</span></p>' +
+            '</div></div></div>' +
+            '<div class="col-md-8">' +
+            medicalAlert + contactsHtml + teamsHtml +
+            '</div></div>';
+    }
+
+    function toggleEditMode() {
+        editMode = true;
+        document.getElementById('editBtn').style.display = 'none';
+        document.getElementById('saveBtn').style.display = 'inline-block';
+        document.getElementById('cancelBtn').style.display = 'inline-block';
+
+        // Make basic info editable
+        const basicInfo = document.getElementById('basicInfoSection');
+        basicInfo.innerHTML = `
+            <div class="mb-3">
+                <label class="form-label"><strong>First Name:</strong></label>
+                <input type="text" class="form-control" id="firstNameEdit" value="${currentAthlete.first_name}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label"><strong>Last Name:</strong></label>
+                <input type="text" class="form-control" id="lastNameEdit" value="${currentAthlete.last_name}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label"><strong>Gender:</strong></label>
+                <select class="form-control" id="genderEdit">
+                    <option value="">Not specified</option>
+                    <option value="male" ${currentAthlete.gender === 'male' ? 'selected' : ''}>Male</option>
+                    <option value="female" ${currentAthlete.gender === 'female' ? 'selected' : ''}>Female</option>
+                    <option value="non-binary" ${currentAthlete.gender === 'non-binary' ? 'selected' : ''}>Non-binary</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label"><strong>Birth Date:</strong></label>
+                <input type="date" class="form-control" id="birthdateEdit" value="${currentAthlete.birthdate || ''}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label"><strong>Display Name:</strong></label>
+                <input type="text" class="form-control" id="displayNameEdit" value="${currentAthlete.display_name || ''}">
+            </div>
+        `;
+
+        // Make medical info editable (always present now)
+        const medicalSection = document.getElementById('medicalSection');
+        if (medicalSection) {
+            const allergies = currentAthlete.medical?.allergies || '';
+            const allergySeverity = currentAthlete.medical?.allergy_severity || '';
+            const conditions = currentAthlete.medical?.medical_conditions || '';
+
+            medicalSection.innerHTML = `
+                <div class="mb-3">
+                    <label class="form-label"><strong>Allergies:</strong></label>
+                    <textarea class="form-control" id="allergiesEdit" rows="2" placeholder="List any allergies...">${allergies}</textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label"><strong>Allergy Severity:</strong></label>
+                    <select class="form-control" id="severityEdit">
+                        <option value="">None</option>
+                        <option value="mild" ${allergySeverity === 'mild' ? 'selected' : ''}>Mild</option>
+                        <option value="moderate" ${allergySeverity === 'moderate' ? 'selected' : ''}>Moderate</option>
+                        <option value="severe" ${allergySeverity === 'severe' ? 'selected' : ''}>Severe</option>
+                        <option value="life-threatening" ${allergySeverity === 'life-threatening' ? 'selected' : ''}>Life-Threatening</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label"><strong>Medical Conditions:</strong></label>
+                    <textarea class="form-control" id="conditionsEdit" rows="3" placeholder="List any medical conditions...">${conditions}</textarea>
+                </div>
+            `;
+        }
+
+        // Make contacts editable
+        const contactsSection = document.getElementById('contactsSection');
+        if (contactsSection) {
+            let contactsEditHtml = '<div id="contactsList">';
+
+            if (currentAthlete.contacts && currentAthlete.contacts.length > 0) {
+                currentAthlete.contacts.forEach((contact, idx) => {
+                    contactsEditHtml += `
+                        <div class="border rounded p-3 mb-3" id="contact_${idx}">
+                            <div class="d-flex justify-content-between mb-2">
+                                <strong>Contact ${idx + 1}</strong>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="removeContact(${idx})">
+                                    <i class="bi bi-trash"></i> Remove
+                                </button>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-2">
+                                    <label class="form-label">Name:</label>
+                                    <input type="text" class="form-control form-control-sm" id="contact_${idx}_name" value="${contact.name || ''}">
+                                </div>
+                                <div class="col-md-6 mb-2">
+                                    <label class="form-label">Phone:</label>
+                                    <input type="tel" class="form-control form-control-sm" id="contact_${idx}_phone" value="${contact.phone || ''}">
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-2">
+                                    <label class="form-label">Email:</label>
+                                    <input type="email" class="form-control form-control-sm" id="contact_${idx}_email" value="${contact.email || ''}">
+                                </div>
+                                <div class="col-md-6 mb-2">
+                                    <label class="form-label">Relationship:</label>
+                                    <select class="form-control form-control-sm" id="contact_${idx}_relationship">
+                                        <option value="parent" ${contact.relationship === 'parent' ? 'selected' : ''}>Parent</option>
+                                        <option value="guardian" ${contact.relationship === 'guardian' ? 'selected' : ''}>Guardian</option>
+                                        <option value="emergency" ${contact.relationship === 'emergency' ? 'selected' : ''}>Emergency Contact</option>
+                                        <option value="other" ${contact.relationship === 'other' ? 'selected' : ''}>Other</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="contact_${idx}_primary" ${contact.is_primary ? 'checked' : ''}>
+                                <label class="form-check-label" for="contact_${idx}_primary">Primary Contact</label>
+                            </div>
+                            <input type="hidden" id="contact_${idx}_id" value="${contact.id || ''}">
+                        </div>
+                    `;
+                });
+            } else {
+                contactsEditHtml += '<p class="text-muted">No contacts yet</p>';
+            }
+
+            contactsEditHtml += '</div>';
+            contactsEditHtml += '<button type="button" class="btn btn-sm btn-secondary" onclick="addNewContact()"><i class="bi bi-plus-circle"></i> Add Contact</button>';
+
+            contactsSection.innerHTML = contactsEditHtml;
+        }
+    }
+
+    function removeContact(idx) {
+        const contactDiv = document.getElementById(`contact_${idx}`);
+        if (contactDiv) {
+            contactDiv.style.display = 'none';
+            contactDiv.dataset.removed = 'true';
+        }
+    }
+
+    function addNewContact() {
+        const contactsList = document.getElementById('contactsList');
+        const existingContacts = contactsList.querySelectorAll('[id^="contact_"]');
+        const newIdx = existingContacts.length;
+
+        const newContactHtml = `
+            <div class="border rounded p-3 mb-3" id="contact_${newIdx}">
+                <div class="d-flex justify-content-between mb-2">
+                    <strong>New Contact</strong>
+                    <button type="button" class="btn btn-sm btn-danger" onclick="removeContact(${newIdx})">
+                        <i class="bi bi-trash"></i> Remove
+                    </button>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-2">
+                        <label class="form-label">Name:</label>
+                        <input type="text" class="form-control form-control-sm" id="contact_${newIdx}_name" value="">
+                    </div>
+                    <div class="col-md-6 mb-2">
+                        <label class="form-label">Phone:</label>
+                        <input type="tel" class="form-control form-control-sm" id="contact_${newIdx}_phone" value="">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-2">
+                        <label class="form-label">Email:</label>
+                        <input type="email" class="form-control form-control-sm" id="contact_${newIdx}_email" value="">
+                    </div>
+                    <div class="col-md-6 mb-2">
+                        <label class="form-label">Relationship:</label>
+                        <select class="form-control form-control-sm" id="contact_${newIdx}_relationship">
+                            <option value="parent">Parent</option>
+                            <option value="guardian">Guardian</option>
+                            <option value="emergency">Emergency Contact</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="contact_${newIdx}_primary">
+                    <label class="form-check-label" for="contact_${newIdx}_primary">Primary Contact</label>
+                </div>
+                <input type="hidden" id="contact_${newIdx}_id" value="">
+            </div>
+        `;
+
+        contactsList.insertAdjacentHTML('beforeend', newContactHtml);
+    }
+
+    function cancelEdit() {
+        editMode = false;
+        document.getElementById('editBtn').style.display = 'inline-block';
+        document.getElementById('saveBtn').style.display = 'none';
+        document.getElementById('cancelBtn').style.display = 'none';
+        displayAthlete(currentAthlete);
+    }
+
+    async function saveChanges() {
+        try {
+            const updates = {
+                first_name: document.getElementById('firstNameEdit').value,
+                last_name: document.getElementById('lastNameEdit').value,
+                gender: document.getElementById('genderEdit').value || null,
+                birthdate: document.getElementById('birthdateEdit').value || null,
+                display_name: document.getElementById('displayNameEdit').value || null
+            };
+
+            // Update medical if section exists
+            const medicalSection = document.getElementById('medicalSection');
+            if (medicalSection) {
+                updates.medical = {
+                    allergies: document.getElementById('allergiesEdit').value || null,
+                    allergy_severity: document.getElementById('severityEdit').value || null,
+                    medical_conditions: document.getElementById('conditionsEdit').value || null
+                };
+            }
+
+            // Collect contact information
+            const contactsList = document.getElementById('contactsList');
+            if (contactsList) {
+                const contacts = [];
+                const contactDivs = contactsList.querySelectorAll('[id^="contact_"]');
+
+                contactDivs.forEach((div) => {
+                    // Skip removed contacts
+                    if (div.dataset.removed === 'true') return;
+
+                    const idx = div.id.split('_')[1];
+                    const nameEl = document.getElementById(`contact_${idx}_name`);
+                    const phoneEl = document.getElementById(`contact_${idx}_phone`);
+
+                    // Only include contacts with at least a name and phone
+                    if (nameEl && phoneEl && nameEl.value && phoneEl.value) {
+                        const idEl = document.getElementById(`contact_${idx}_id`);
+                        const contactId = idEl?.value && idEl.value !== '' ? idEl.value : null;
+
+                        const contact = {
+                            id: contactId,
+                            name: nameEl.value,
+                            phone: phoneEl.value,
+                            email: document.getElementById(`contact_${idx}_email`)?.value || null,
+                            relationship: document.getElementById(`contact_${idx}_relationship`)?.value || 'parent',
+                            is_primary: document.getElementById(`contact_${idx}_primary`)?.checked || false
+                        };
+                        contacts.push(contact);
+                    }
+                });
+
+                updates.contacts = contacts;
+            }
+
+            const response = await fetch('/api/athletes/' + athleteId, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Reload athlete data
+                await loadAthlete();
+                editMode = false;
+                document.getElementById('editBtn').style.display = 'inline-block';
+                document.getElementById('saveBtn').style.display = 'none';
+                document.getElementById('cancelBtn').style.display = 'none';
+            } else {
+                alert('Failed to update athlete: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error saving changes:', error);
+            alert('Error saving changes. Please try again.');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadAthlete);
+
+    let videoStream = null;
+    let photoModal = null;
+    let currentFacingMode = 'user'; // 'user' for front, 'environment' for back
+    let availableCameras = [];
+
+    function showPhotoModal() {
+        if (!photoModal) {
+            photoModal = new bootstrap.Modal(document.getElementById('photoModal'));
+
+            // Add event listener for when modal is fully shown
+            document.getElementById('photoModal').addEventListener('shown.bs.modal', function() {
+                checkCameraAvailability();
+            });
+        }
+        photoModal.show();
+    }
+
+    function checkCameraAvailability() {
+        const cameraBtn = document.querySelector('.btn-primary[onclick="openCamera()"]');
+
+        if (!isCameraSupported() || !isSecureContext()) {
+            // Disable camera button and add tooltip
+            if (cameraBtn) {
+                cameraBtn.classList.add('disabled');
+                cameraBtn.setAttribute('disabled', 'true');
+
+                if (!isSecureContext()) {
+                    cameraBtn.innerHTML = '<i class="bi bi-camera"></i> Camera (HTTPS Required)';
+                    cameraBtn.title = 'Camera access requires HTTPS connection';
+                } else {
+                    cameraBtn.innerHTML = '<i class="bi bi-camera"></i> Camera (Not Available)';
+                    cameraBtn.title = 'Camera not supported on this device';
+                }
+            }
+        } else {
+            // Enable camera button
+            if (cameraBtn) {
+                cameraBtn.classList.remove('disabled');
+                cameraBtn.removeAttribute('disabled');
+                cameraBtn.innerHTML = '<i class="bi bi-camera"></i> Take Photo with Camera';
+                cameraBtn.title = '';
+            }
+        }
+    }
+
+    function isCameraSupported() {
+        // Check if mediaDevices API is available
+        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    function isSecureContext() {
+        // Check if we're in a secure context (HTTPS or localhost)
+        return window.isSecureContext || window.location.protocol === 'https:' ||
+               window.location.hostname === 'localhost' ||
+               window.location.hostname === '127.0.0.1';
+    }
+
+    async function detectCameras() {
+        try {
+            if (!isCameraSupported()) {
+                console.warn('Camera API not supported');
+                return;
+            }
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            availableCameras = devices.filter(device => device.kind === 'videoinput');
+            console.log('Available cameras:', availableCameras.length);
+
+            // Show switch button if multiple cameras available
+            if (availableCameras.length > 1) {
+                document.getElementById('switchCameraBtn').style.display = 'block';
+            }
+        } catch (error) {
+            console.error('Error detecting cameras:', error);
+        }
+    }
+
+    async function openCamera(facingMode = 'user') {
+        const cameraSection = document.getElementById('cameraSection');
+        const video = document.getElementById('videoPreview');
+
+        // Check if camera API is supported
+        if (!isCameraSupported()) {
+            let message = 'Camera access is not available. ';
+
+            if (!isSecureContext()) {
+                message += '<strong>HTTPS Required:</strong> For security reasons, camera access requires a secure connection (HTTPS). ' +
+                          '<br><br>Please use one of these options instead:<br>' +
+                          '• Click "Upload from File" below to select an existing photo<br>' +
+                          '• Access via localhost if testing locally';
+            } else {
+                message += 'Your browser may not support camera access. Please use "Upload from File" instead.';
+            }
+
+            showUploadStatus(message, 'warning');
+            return;
+        }
+
+        // Close existing stream if any
+        if (videoStream) {
+            videoStream.getTracks().forEach(track => track.stop());
+        }
+
+        try {
+            // Detect available cameras
+            await detectCameras();
+
+            // Request camera with higher resolution for better quality
+            const constraints = {
+                video: {
+                    facingMode: facingMode,
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+
+            videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = videoStream;
+            cameraSection.style.display = 'block';
+
+            // Update camera mode display
+            currentFacingMode = facingMode;
+            document.getElementById('cameraMode').textContent =
+                facingMode === 'user' ? 'Front Camera' : 'Rear Camera';
+
+            // Hide the initial buttons
+            document.querySelector('.d-grid').style.display = 'none';
+        } catch (error) {
+            console.error('Error accessing camera:', error);
+
+            let errorMessage = 'Camera access error. ';
+            if (error.name === 'NotAllowedError') {
+                errorMessage += '<strong>Permission Denied:</strong> Please allow camera access in your browser settings and try again.';
+            } else if (error.name === 'NotFoundError') {
+                errorMessage += '<strong>No Camera Found:</strong> Please ensure a camera is connected to your device.';
+            } else if (error.name === 'NotReadableError') {
+                errorMessage += '<strong>Camera In Use:</strong> The camera is already being used by another application. Please close other apps and try again.';
+            } else if (error.name === 'NotSupportedError' || error.name === 'TypeError') {
+                if (!isSecureContext()) {
+                    errorMessage += '<strong>HTTPS Required:</strong> Camera access requires a secure connection. Please use "Upload from File" instead.';
+                } else {
+                    errorMessage += 'Camera not supported. Please use "Upload from File" instead.';
+                }
+            } else {
+                errorMessage += 'Please use "Upload from File" instead.';
+            }
+
+            showUploadStatus(errorMessage, 'danger');
+        }
+    }
+
+    async function switchCamera() {
+        // Toggle between front and back camera
+        const newFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+        await openCamera(newFacingMode);
+    }
+
+    function closeCamera() {
+        if (videoStream) {
+            videoStream.getTracks().forEach(track => track.stop());
+            videoStream = null;
+        }
+        document.getElementById('cameraSection').style.display = 'none';
+        document.querySelector('.d-grid').style.display = 'grid';
+    }
+
+    async function capturePhoto() {
+        const video = document.getElementById('videoPreview');
+        const canvas = document.getElementById('photoCanvas');
+        const context = canvas.getContext('2d');
+
+        // Set canvas size to video size
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        // Draw video frame to canvas
+        context.drawImage(video, 0, 0);
+
+        // Convert to base64 with good quality
+        const photoData = canvas.toDataURL('image/jpeg', 0.85);
+
+        // Close camera
+        closeCamera();
+
+        // Upload photo
+        await uploadPhotoData(photoData, 'camera');
+    }
+
+    async function uploadFile(inputId = 'fileInput') {
+        const fileInput = document.getElementById(inputId);
+        const file = fileInput.files[0];
+
+        if (!file) return;
+
+        // Check file size (max 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            showUploadStatus('File too large. Maximum size is 5MB.', 'danger');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('photo', file);
+
+        try {
+            showUploadStatus('Uploading...', 'info');
+
+            const response = await fetch('/api/athletes/' + athleteId + '/photo', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showUploadStatus('Photo uploaded successfully!', 'success');
+                // Reload photo
+                document.getElementById('athletePhoto').src = '/api/athletes/' + athleteId + '/photo?t=' + Date.now();
+                setTimeout(() => {
+                    photoModal.hide();
+                    document.getElementById('uploadStatus').innerHTML = '';
+                    // Reset file input
+                    fileInput.value = '';
+                }, 1500);
+            } else {
+                showUploadStatus('Upload failed: ' + result.error, 'danger');
+            }
+        } catch (error) {
+            console.error('Upload error:', error);
+            showUploadStatus('Upload failed. Please try again.', 'danger');
+        }
+    }
+
+    async function uploadPhotoData(photoData, source) {
+        try {
+            showUploadStatus('Uploading photo...', 'info');
+
+            const response = await fetch('/api/athletes/' + athleteId + '/photo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ photo_data: photoData })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showUploadStatus('Photo captured successfully!', 'success');
+                // Reload photo
+                document.getElementById('athletePhoto').src = '/api/athletes/' + athleteId + '/photo?t=' + Date.now();
+                setTimeout(() => {
+                    photoModal.hide();
+                    document.getElementById('uploadStatus').innerHTML = '';
+                }, 1500);
+            } else {
+                showUploadStatus('Upload failed: ' + result.error, 'danger');
+            }
+        } catch (error) {
+            console.error('Upload error:', error);
+            showUploadStatus('Upload failed. Please try again.', 'danger');
+        }
+    }
+
+    function showUploadStatus(message, type) {
+        const statusDiv = document.getElementById('uploadStatus');
+        statusDiv.innerHTML = '<div class="alert alert-' + type + '">' + message + '</div>';
+    }
+
+    // Clean up camera on modal close
+    document.getElementById('photoModal').addEventListener('hidden.bs.modal', function() {
+        closeCamera();
+        document.getElementById('uploadStatus').innerHTML = '';
+
+        // Reset button display
+        const btnGrid = document.querySelector('.d-grid');
+        if (btnGrid) {
+            btnGrid.style.display = 'grid';
+        }
+    });
+
+    // Prevent focus issues during modal transitions
+    document.getElementById('photoModal').addEventListener('hide.bs.modal', function() {
+        // Blur any focused elements before closing
+        if (document.activeElement && document.activeElement.blur) {
+            document.activeElement.blur();
+        }
+    });
+</script>
+{% endblock %}

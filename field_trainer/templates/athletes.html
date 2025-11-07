@@ -1,0 +1,947 @@
+{% extends "base.html" %}
+{% block title %}Athletes - Field Trainer{% endblock %}
+{% block extra_css %}
+<style>
+    * { box-sizing: border-box; }
+
+        .filter-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .filter-row input, .filter-row select {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .athlete-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+        }
+
+        .athlete-card {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.2s;
+            position: relative;
+        }
+
+        .athlete-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        /* Delete button for card view */
+        .btn-delete-card {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #e74c3c;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 16px;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+
+        .btn-delete-card:hover {
+            opacity: 1;
+        }
+
+        /* Delete button for list view */
+        .btn-delete-list {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            z-index: 10;
+        }
+
+        .btn-delete-list:hover {
+            background: #c0392b;
+        }
+
+        .athlete-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .athlete-photo {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-right: 12px;
+            background: #ecf0f1;
+        }
+
+        .athlete-name {
+            flex: 1;
+        }
+
+        .athlete-name h3 {
+            color: #2c3e50;
+            font-size: 18px;
+            margin-bottom: 4px;
+        }
+
+        .athlete-number {
+            color: #7f8c8d;
+            font-size: 12px;
+        }
+
+        .athlete-meta {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .athlete-meta span {
+            display: inline-block;
+            margin-right: 12px;
+        }
+
+        .medical-alert {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+
+        .medical-alert-severe {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .medical-alert-moderate {
+            background: #f39c12;
+            color: white;
+        }
+
+        .team-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 8px;
+        }
+
+        .team-badge {
+            background: #3498db;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active { display: flex; }
+
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #ecf0f1;
+        }
+
+        .modal-close {
+            font-size: 28px;
+            cursor: pointer;
+            color: #95a5a6;
+            line-height: 1;
+        }
+
+        .modal-close:hover { color: #2c3e50; }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .message-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .hidden { display: none; }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 8px;
+        }
+
+        .empty-state h2 {
+            color: #7f8c8d;
+            margin-bottom: 10px;
+        }
+
+        /* List View Styles */
+        .athlete-grid.list-view {
+            grid-template-columns: 1fr;
+            gap: 5px;
+        }
+
+        .athlete-card.list-style {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            padding: 10px 15px;
+            gap: 15px;
+        }
+
+        .athlete-card.list-style .athlete-header {
+            flex: 0 0 200px;
+            margin-bottom: 0;
+        }
+
+        .athlete-card.list-style .athlete-photo {
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+        }
+
+        .athlete-card.list-style .athlete-name h3 {
+            font-size: 14px;
+        }
+
+        .athlete-card.list-style .athlete-number {
+            font-size: 11px;
+        }
+
+        .athlete-card.list-style .athlete-details {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex: 1;
+        }
+
+        .athlete-card.list-style .athlete-meta {
+            display: none;
+        }
+
+        .athlete-card.list-style .team-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .athlete-card.list-style .team-badge {
+            font-size: 11px;
+            padding: 2px 6px;
+        }
+
+        .athlete-card.list-style .list-contact {
+            color: #7f8c8d;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .athlete-card.list-style .medical-alert {
+            font-size: 11px;
+            padding: 2px 6px;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 992px) {
+            .athlete-grid {
+                grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            }
+            .athlete-card.list-style .athlete-header {
+                flex: 0 0 180px;
+            }
+            .athlete-card.list-style .athlete-details {
+                gap: 15px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .athlete-grid {
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            }
+            .athlete-card.list-style {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            .athlete-card.list-style .athlete-header {
+                flex: none;
+                width: 100%;
+            }
+            .athlete-card.list-style .athlete-details {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+                width: 100%;
+            }
+            .athlete-card.list-style .list-contact {
+                width: 100%;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .filter-row {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .athlete-grid {
+                grid-template-columns: 1fr;
+            }
+            h2 {
+                font-size: 1.5rem;
+            }
+            h2 .fs-6 {
+                font-size: 0.875rem !important;
+            }
+        }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12 col-md-6 mb-2 mb-md-0">
+        <h2><i class="bi bi-person-badge"></i> Athletes <span id="athleteCount" class="text-muted fs-6">Loading...</span></h2>
+    </div>
+    <div class="col-12 col-md-6 d-flex flex-wrap justify-content-md-end gap-2">
+        <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-outline-secondary" id="cardViewBtn" onclick="setView('card')" title="Card View">
+                <i class="bi bi-grid-3x3-gap"></i><span class="d-none d-sm-inline"> Card</span>
+            </button>
+            <button class="btn btn-outline-secondary" id="listViewBtn" onclick="setView('list')" title="List View">
+                <i class="bi bi-list"></i><span class="d-none d-sm-inline"> List</span>
+            </button>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" onclick="downloadTemplate()">
+            <i class="bi bi-download"></i><span class="d-none d-lg-inline"> Template</span>
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="showImportModal()">
+            <i class="bi bi-upload"></i><span class="d-none d-lg-inline"> Import</span>
+        </button>
+        <button class="btn btn-sm btn-outline-success" onclick="exportAll()">
+            <i class="bi bi-download"></i><span class="d-none d-lg-inline"> Export</span>
+        </button>
+        <button class="btn btn-sm btn-primary" onclick="showAddAthleteModal()">
+            <i class="bi bi-plus-circle"></i><span class="d-none d-sm-inline"> Add</span>
+        </button>
+    </div>
+</div>
+
+<div id="messageContainer"></div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="filters">
+        <div class="filter-row">
+            <input type="text" id="searchBox" placeholder="Search by name or athlete number..." onkeyup="filterAthletes()">
+            <select id="teamFilter" onchange="filterAthletes()">
+                <option value="">All Teams</option>
+            </select>
+            <label style="display: flex; align-items: center; padding: 0 10px;">
+                <input type="checkbox" id="activeFilter" checked onchange="filterAthletes()" style="width: auto; margin-right: 5px;">
+                <span>Active Only</span>
+            </label>
+        </div>
+        </div>
+    </div>
+</div>
+
+    <div id="athleteGrid" class="athlete-grid">
+        <div class="loading">Loading athletes...</div>
+    </div>
+
+    <!-- Add/Edit Athlete Modal -->
+    <div id="athleteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Add Athlete</h2>
+                <span class="modal-close" onclick="closeAthleteModal()">&times;</span>
+            </div>
+            <form id="athleteForm" onsubmit="saveAthlete(event)">
+                <input type="hidden" id="athleteId">
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>First Name *</label>
+                        <input type="text" id="firstName" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Last Name *</label>
+                        <input type="text" id="lastName" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Birth Date *</label>
+                        <input type="date" id="birthdate" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Gender</label>
+                        <select id="gender">
+                            <option value="">Select...</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                            <option value="non-binary">Non-Binary</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Display Name (Optional)</label>
+                    <input type="text" id="displayName" placeholder="Nickname or preferred name">
+                </div>
+
+                <h3 style="margin: 20px 0 10px; color: #2c3e50;">Primary Contact (Optional)</h3>
+
+                <div class="form-group">
+                    <label>Parent/Guardian Name</label>
+                    <input type="text" id="contactName">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Phone</label>
+                        <input type="tel" id="contactPhone">
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="contactEmail">
+                    </div>
+                </div>
+
+                <h3 style="margin: 20px 0 10px; color: #2c3e50;">Medical Information</h3>
+
+                <div class="form-group">
+                    <label>Allergies</label>
+                    <textarea id="allergies" placeholder="List any allergies..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Allergy Severity</label>
+                    <select id="allergySeverity">
+                        <option value="">None</option>
+                        <option value="mild">Mild</option>
+                        <option value="moderate">Moderate</option>
+                        <option value="severe">Severe</option>
+                        <option value="life-threatening">Life-Threatening</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Medical Conditions</label>
+                    <textarea id="medicalConditions" placeholder="List any medical conditions..."></textarea>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn">Save Athlete</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeAthleteModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Import CSV Modal -->
+    <div id="importModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Import Athletes from CSV</h2>
+                <span class="modal-close" onclick="closeImportModal()">&times;</span>
+            </div>
+            <form id="importForm" onsubmit="importCSV(event)">
+                <div class="form-group">
+                    <label>Select Team (Optional)</label>
+                    <select id="importTeam">
+                        <option value="">No team assignment</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>CSV File</label>
+                    <input type="file" id="csvFile" accept=".csv" required>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="skipDuplicates" checked style="width: auto; margin-right: 5px;">
+                        Skip duplicates (recommended)
+                    </label>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn">Import</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeImportModal()">Cancel</button>
+                </div>
+
+                <div id="importResults" class="hidden" style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;"></div>
+            </form>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+        let athletes = [];
+        let allTeams = [];
+        let currentEditId = null;
+        let currentView = 'card'; // 'card' or 'list'
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTeams();
+            loadAthletes();
+            // Set initial view button state (card view is default)
+            document.getElementById('cardViewBtn').classList.add('active');
+        });
+
+        function setView(view) {
+            currentView = view;
+            const grid = document.getElementById('athleteGrid');
+            const cardBtn = document.getElementById('cardViewBtn');
+            const listBtn = document.getElementById('listViewBtn');
+
+            if (view === 'list') {
+                grid.classList.add('list-view');
+                // Bootstrap button group active state
+                listBtn.classList.add('active');
+                cardBtn.classList.remove('active');
+            } else {
+                grid.classList.remove('list-view');
+                // Bootstrap button group active state
+                cardBtn.classList.add('active');
+                listBtn.classList.remove('active');
+            }
+
+            // Re-render athletes with new view
+            displayAthletes(athletes);
+        }
+
+        async function loadTeams() {
+            try {
+                const response = await fetch('/api/teams');
+                const data = await response.json();
+                allTeams = data || [];
+
+                // Populate team filters
+                const teamFilter = document.getElementById('teamFilter');
+                const importTeam = document.getElementById('importTeam');
+
+                allTeams.forEach(team => {
+                    const option1 = document.createElement('option');
+                    option1.value = team.team_id;
+                    option1.textContent = team.name;
+                    teamFilter.appendChild(option1);
+
+                    const option2 = document.createElement('option');
+                    option2.value = team.team_id;
+                    option2.textContent = team.name;
+                    importTeam.appendChild(option2);
+                });
+            } catch (error) {
+                console.error('Error loading teams:', error);
+            }
+        }
+
+        async function loadAthletes() {
+            try {
+                const activeOnly = document.getElementById('activeFilter').checked;
+                const response = await fetch(`/api/athletes?active=${activeOnly}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    athletes = data.athletes || [];
+                    displayAthletes(athletes);
+                    updateCount();
+                } else {
+                    showMessage('Failed to load athletes', 'error');
+                }
+            } catch (error) {
+                console.error('Error loading athletes:', error);
+                showMessage('Error loading athletes', 'error');
+            }
+        }
+
+        function displayAthletes(athletesToShow) {
+            const grid = document.getElementById('athleteGrid');
+
+            if (athletesToShow.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <h2>No Athletes Found</h2>
+                        <p>Click "Add Athlete" to get started</p>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = athletesToShow.map(athlete => {
+                const age = athlete.age_info ? athlete.age_info.age : '?';
+                const ageGroup = athlete.age_info ? athlete.age_info.age_group : '';
+
+                let medicalAlert = '';
+                if (athlete.allergy_severity === 'severe' || athlete.allergy_severity === 'life-threatening') {
+                    medicalAlert = '<span class="medical-alert medical-alert-severe">⚠ SEVERE ALLERGY</span>';
+                } else if (athlete.has_medical) {
+                    medicalAlert = '<span class="medical-alert medical-alert-moderate">Medical Info</span>';
+                }
+
+                const teams = athlete.teams ? athlete.teams.split(',').map(t =>
+                    `<span class="team-badge">${t.trim()}</span>`
+                ).join('') : '';
+
+                const cardClass = currentView === 'list' ? 'athlete-card list-style' : 'athlete-card';
+
+                // Contact info for list view
+                const contactInfo = athlete.primary_contact_name
+                    ? `<div class="list-contact">📞 ${athlete.primary_contact_name}${athlete.primary_contact_phone ? ': ' + athlete.primary_contact_phone : ''}</div>`
+                    : '<div class="list-contact">📞 No contact</div>';
+
+                // Delete button - different styles for card vs list
+                const deleteBtn = currentView === 'list'
+                    ? `<button class="btn-delete-list" onclick="event.stopPropagation(); confirmDeleteAthlete(${athlete.id}, '${athlete.first_name} ${athlete.last_name}')" title="Delete athlete">Delete</button>`
+                    : `<button class="btn-delete-card" onclick="event.stopPropagation(); confirmDeleteAthlete(${athlete.id}, '${athlete.first_name} ${athlete.last_name}')" title="Delete athlete">🗑️</button>`;
+
+                return `
+                    <div class="${cardClass}" onclick="viewAthlete(${athlete.id})">
+                        ${deleteBtn}
+                        <div class="athlete-header">
+                            <img src="/api/athletes/${athlete.id}/photo" class="athlete-photo" alt="${athlete.first_name}">
+                            <div class="athlete-name">
+                                <h3>${athlete.first_name} ${athlete.last_name}</h3>
+                                <div class="athlete-number">${athlete.athlete_number}</div>
+                            </div>
+                        </div>
+                        <div class="athlete-details">
+                            <div class="athlete-meta">
+                                <span>Age: ${age}</span>
+                                <span>${ageGroup}</span>
+                                ${athlete.gender ? `<span>${athlete.gender}</span>` : ''}
+                            </div>
+                            ${teams ? `<div class="team-badges">${teams}</div>` : '<div style="color: #95a5a6; font-size: 12px;">No teams</div>'}
+                            ${contactInfo}
+                            ${medicalAlert}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterAthletes() {
+            const search = document.getElementById('searchBox').value.toLowerCase();
+            const teamFilter = document.getElementById('teamFilter').value;
+
+            let filtered = athletes;
+
+            if (search) {
+                filtered = filtered.filter(a =>
+                    a.first_name.toLowerCase().includes(search) ||
+                    a.last_name.toLowerCase().includes(search) ||
+                    a.athlete_number.toLowerCase().includes(search)
+                );
+            }
+
+            if (teamFilter) {
+                filtered = filtered.filter(a =>
+                    a.teams && a.teams.includes(teamFilter)
+                );
+            }
+
+            displayAthletes(filtered);
+            updateCount(filtered.length);
+        }
+
+        function updateCount(count = null) {
+            const total = count !== null ? count : athletes.length;
+            document.getElementById('athleteCount').textContent = `${total} athlete${total !== 1 ? 's' : ''}`;
+        }
+
+        function showAddAthleteModal() {
+            currentEditId = null;
+            document.getElementById('modalTitle').textContent = 'Add Athlete';
+            document.getElementById('athleteForm').reset();
+            document.getElementById('athleteId').value = '';
+            document.getElementById('athleteModal').classList.add('active');
+        }
+
+        function closeAthleteModal() {
+            document.getElementById('athleteModal').classList.remove('active');
+        }
+
+        async function saveAthlete(event) {
+            event.preventDefault();
+
+            const contactName = document.getElementById('contactName').value;
+            const contactPhone = document.getElementById('contactPhone').value;
+
+            const data = {
+                first_name: document.getElementById('firstName').value,
+                last_name: document.getElementById('lastName').value,
+                birthdate: document.getElementById('birthdate').value,
+                gender: document.getElementById('gender').value || null,
+                display_name: document.getElementById('displayName').value || null,
+                consent_given_by: contactName || 'Parent/Guardian',
+                contacts: [],
+                medical: {
+                    allergies: document.getElementById('allergies').value || null,
+                    allergy_severity: document.getElementById('allergySeverity').value || null,
+                    medical_conditions: document.getElementById('medicalConditions').value || null
+                }
+            };
+
+            // Only add contact if name and phone provided
+            if (contactName && contactPhone) {
+                data.contacts.push({
+                    name: contactName,
+                    phone: contactPhone,
+                    email: document.getElementById('contactEmail').value || null,
+                    relationship: 'parent',
+                    is_primary: true
+                });
+            }
+
+            try {
+                const response = await fetch('/api/athletes', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showMessage(`Athlete created: ${result.athlete_number}`, 'success');
+                    closeAthleteModal();
+                    loadAthletes();
+                } else {
+                    showMessage(result.error || 'Failed to create athlete', 'error');
+                }
+            } catch (error) {
+                console.error('Error saving athlete:', error);
+                showMessage('Error saving athlete', 'error');
+            }
+        }
+
+        function viewAthlete(athleteId) {
+            window.location.href = `/athlete/${athleteId}`;
+        }
+
+        function confirmDeleteAthlete(athleteId, athleteName) {
+            // Show confirmation dialog
+            if (confirm(`Are you sure you want to delete ${athleteName}?\n\nThis will permanently remove the athlete and all associated data.`)) {
+                deleteAthlete(athleteId);
+            }
+        }
+
+        async function deleteAthlete(athleteId) {
+            try {
+                const response = await fetch(`/api/athletes/${athleteId}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showMessage('Athlete deleted successfully', 'success');
+                    // Remove from local array
+                    athletes = athletes.filter(a => a.id !== athleteId);
+                    // Refresh display
+                    filterAthletes();
+                } else {
+                    showMessage('Failed to delete athlete: ' + result.error, 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting athlete:', error);
+                showMessage('Error deleting athlete. Please try again.', 'error');
+            }
+        }
+
+        function showImportModal() {
+            document.getElementById('importResults').classList.add('hidden');
+            document.getElementById('importModal').classList.add('active');
+        }
+
+        function closeImportModal() {
+            document.getElementById('importModal').classList.remove('active');
+        }
+
+        async function importCSV(event) {
+            event.preventDefault();
+
+            const fileInput = document.getElementById('csvFile');
+            const teamId = document.getElementById('importTeam').value;
+            const skipDuplicates = document.getElementById('skipDuplicates').checked;
+
+            if (!fileInput.files[0]) {
+                showMessage('Please select a file', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            if (teamId) formData.append('team_id', teamId);
+            formData.append('skip_duplicates', skipDuplicates);
+
+            try {
+                const response = await fetch('/api/athletes/import', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                const resultsDiv = document.getElementById('importResults');
+                resultsDiv.classList.remove('hidden');
+
+                if (result.success) {
+                    resultsDiv.innerHTML = `
+                        <strong>Import Complete:</strong><br>
+                        ✓ Imported: ${result.imported}<br>
+                        ⊘ Skipped: ${result.skipped}<br>
+                        ${result.errors.length > 0 ? `✗ Errors: ${result.errors.length}` : ''}
+                        ${result.errors.length > 0 ? `<br><br>${result.errors.join('<br>')}` : ''}
+                    `;
+                    loadAthletes();
+                } else {
+                    resultsDiv.innerHTML = `<strong>Error:</strong> ${result.error}`;
+                }
+            } catch (error) {
+                console.error('Error importing CSV:', error);
+                showMessage('Error importing CSV', 'error');
+            }
+        }
+
+        function exportAll() {
+            // Export all active athletes
+            window.location.href = '/api/athletes/export';
+        }
+
+        function exportTeamRoster() {
+            // Export specific team roster
+            const teamId = document.getElementById('teamFilter').value;
+            if (teamId) {
+                window.location.href = `/api/teams/${teamId}/roster/export`;
+            } else {
+                showMessage('Please select a team to export roster', 'error');
+            }
+        }
+
+        function downloadTemplate() {
+            const csv = 'first_name,last_name,birthdate,gender,parent1_name,parent1_phone,parent1_email,parent2_name,parent2_phone,parent2_email,allergies,medical_conditions\n' +
+                       'John,Smith,2010-05-15,male,Jane Smith,555-1234,jane@email.com,Bob Smith,555-5678,bob@email.com,Peanuts (severe),Asthma\n';
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'athlete_import_template.csv';
+            a.click();
+        }
+
+        function showMessage(message, type) {
+            const container = document.getElementById('messageContainer');
+            const div = document.createElement('div');
+            div.className = `message message-${type}`;
+            div.textContent = message;
+            container.appendChild(div);
+
+            setTimeout(() => div.remove(), 5000);
+        }
+</script>
+{% endblock %}
