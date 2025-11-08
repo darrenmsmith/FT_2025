@@ -113,6 +113,23 @@ class SettingsManager:
 
         return sorted(files)
 
+    def get_root_audio_files(self) -> List[str]:
+        """Get only audio files from root directory (for ready notifications, beeps, etc.)"""
+        if not os.path.exists(self.audio_dir):
+            return []
+
+        files = []
+
+        # Only scan root directory (not subdirectories)
+        for filename in os.listdir(self.audio_dir):
+            filepath = os.path.join(self.audio_dir, filename)
+            if os.path.isfile(filepath) and filename.endswith(('.mp3', '.wav')):
+                # Only include if file has content (not empty)
+                if os.path.getsize(filepath) > 0:
+                    files.append(filename)
+
+        return sorted(files)
+
     def get_device_threshold(self, device_id: str) -> Dict:
         """Read device threshold from config JSON"""
         device_num = device_id.split('.')[-1]

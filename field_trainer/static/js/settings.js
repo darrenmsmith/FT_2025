@@ -38,7 +38,7 @@ async function loadSettings() {
         populateSettings(data.settings);
 
         console.log('[Settings] Calling populateAudioFiles...');
-        populateAudioFiles(data.audio_files);
+        populateAudioFiles(data.audio_files, data.root_audio_files);
 
         // Set ready_audio_file value AFTER dropdown is populated
         const audioFile = data.settings.ready_audio_file || '';
@@ -96,16 +96,16 @@ function populateSettings(settings) {
 /**
  * Populate audio files dropdown
  */
-function populateAudioFiles(files) {
-    console.log('[Settings] Populating audio files, count:', files ? files.length : 0);
+function populateAudioFiles(allFiles, rootFiles) {
+    console.log('[Settings] Populating audio files - all:', allFiles ? allFiles.length : 0, 'root:', rootFiles ? rootFiles.length : 0);
 
-    // Populate both the test audio dropdown and ready audio dropdown
+    // Populate dropdowns with different file lists
     const selects = [
-        { id: 'ready_audio_file', elem: document.getElementById('ready_audio_file') },
-        { id: 'test_audio_file', elem: document.getElementById('test_audio_file') }
+        { id: 'ready_audio_file', elem: document.getElementById('ready_audio_file'), files: rootFiles },  // Only root files for ready notification
+        { id: 'test_audio_file', elem: document.getElementById('test_audio_file'), files: allFiles }       // All files for testing
     ];
 
-    selects.forEach(({ id, elem: select }) => {
+    selects.forEach(({ id, elem: select, files }) => {
         if (!select) {
             console.error(`[Settings] Element not found: ${id}`);
             return;

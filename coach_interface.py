@@ -1902,11 +1902,13 @@ def get_settings():
     try:
         settings = settings_mgr.load_settings()
         audio_files = settings_mgr.get_audio_files()
+        root_audio_files = settings_mgr.get_root_audio_files()
 
         return jsonify({
             'success': True,
             'settings': settings,
-            'audio_files': audio_files
+            'audio_files': audio_files,
+            'root_audio_files': root_audio_files
         })
     except Exception as e:
         print(f"Error loading settings: {e}")
