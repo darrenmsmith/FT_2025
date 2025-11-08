@@ -10,6 +10,9 @@ from typing import Optional
 import sys
 import os
 import subprocess
+import json
+import logging
+import re
 
 # Add field_trainer to path
 sys.path.insert(0, '/opt')
@@ -32,6 +35,9 @@ from athlete_routes import athlete_bp
 app.register_blueprint(athlete_bp)
 
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Track when this process started
 START_TIME = datetime.utcnow().isoformat()
@@ -430,6 +436,178 @@ def api_teams():
         return jsonify(teams)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
+
+# ====== Mesh Network Security ======
+
+# Configuration paths
+MAC_CONFIG = '/etc/field-trainer-macs.conf'
+MAC_STATE = '/etc/field-trainer-mac-filter-state'
+MAC_SCRIPT = '/opt/scripts/manage_mac_filter.sh'
+
+@app.route('/api/mesh/security', methods=['GET', 'POST'])
+def mesh_security():
+    """Manage mesh network MAC filtering"""
+
+    if request.method == 'GET':
+        # Get current filter status
+        try:
+            # Check if ebtables chain exists
+            result = subprocess.run(
+                ['sudo', 'ebtables', '-t', 'filter', '-L', 'FT_MAC_FILTER'],
+                capture_output=True, text=True, timeout=5
+            )
+
+            enabled = result.returncode == 0
+
+            # Count authorized MACs from config
+            mac_count = 0
+            if os.path.exists(MAC_CONFIG):
+                with open(MAC_CONFIG, 'r') as f:
+                    for line in f:
+                        if line.startswith('DEVICE_') and 'MAC=' in line:
+                            mac_count += 1
+
+            # Load saved state
+            saved_state = False
+            if os.path.exists(MAC_STATE):
+                try:
+                    with open(MAC_STATE, 'r') as f:
+                        state_data = json.load(f)
+                        saved_state = state_data.get('mac_filtering', False)
+                except:
+                    pass
+
+            return jsonify({
+                'success': True,
+                'enabled': enabled,
+                'saved_state': saved_state,
+                'mac_count': mac_count,
+                'status': 'Filtered' if enabled else 'Open'
+            })
+
+        except Exception as e:
+            logger.error(f"Error getting mesh security status: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    elif request.method == 'POST':
+        # Toggle MAC filtering
+        data = request.get_json()
+        enabled = data.get('enabled', False)
+
+        try:
+            # Run management script
+            cmd = ['sudo', MAC_SCRIPT, 'enable' if enabled else 'disable']
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            if result.returncode == 0:
+                # Propagate to other devices
+                propagate_mac_filter(enabled)
+
+                return jsonify({
+                    'success': True,
+                    'enabled': enabled,
+                    'message': f"MAC filtering {'enabled' if enabled else 'disabled'}"
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': result.stderr or 'Failed to change MAC filtering'
+                }), 500
+
+        except Exception as e:
+            logger.error(f"Error updating mesh security: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/mesh/devices', methods=['GET'])
+def get_mesh_devices():
+    """Get authorized device MACs"""
+    devices = []
+
+    if os.path.exists(MAC_CONFIG):
+        try:
+            with open(MAC_CONFIG, 'r') as f:
+                for line in f:
+                    if line.startswith('DEVICE_') and '=' in line:
+                        parts = line.strip().split('=')
+                        if len(parts) == 2:
+                            device_num = parts[0].replace('DEVICE_', '').replace('_MAC', '')
+                            mac = parts[1].strip('"').strip("'")
+                            devices.append({
+                                'device_num': device_num,
+                                'device': f'D{device_num}',
+                                'mac': mac,
+                                'ip': f'192.168.99.10{device_num}' if device_num != '0' else '192.168.99.100'
+                            })
+        except Exception as e:
+            logger.error(f"Error reading MAC config: {e}")
+
+    return jsonify({'success': True, 'devices': devices})
+
+@app.route('/api/mesh/devices', methods=['POST'])
+def update_mesh_devices():
+    """Update device MAC addresses (for hardware replacement)"""
+    try:
+        data = request.get_json()
+        devices = data.get('devices', [])
+
+        if not devices or len(devices) != 6:
+            return jsonify({'success': False, 'error': 'Invalid device data - need exactly 6 devices'}), 400
+
+        # Validate MAC addresses
+        mac_pattern = re.compile(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$')
+
+        for device in devices:
+            mac = device.get('mac', '')
+            if not mac_pattern.match(mac):
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid MAC address for Device {device.get("device_num")}: {mac}'
+                }), 400
+
+        # Write new config
+        with open(MAC_CONFIG, 'w') as f:
+            f.write("# Field Trainer Device MAC Addresses\n")
+            f.write(f"# Updated: {datetime.now().isoformat()}\n")
+            f.write("\n")
+            for device in sorted(devices, key=lambda d: int(d['device_num'])):
+                f.write(f"# Device {device['device_num']}\n")
+                f.write(f"DEVICE_{device['device_num']}_MAC=\"{device['mac']}\"\n")
+                f.write("\n")
+            f.write("# Total devices configured: 6\n")
+
+        logger.info(f"Updated MAC configuration with {len(devices)} devices")
+
+        # If filtering is enabled, re-apply
+        result = subprocess.run(
+            ['sudo', 'ebtables', '-t', 'filter', '-L', 'FT_MAC_FILTER'],
+            capture_output=True, text=True, timeout=5
+        )
+
+        if result.returncode == 0:
+            subprocess.run(['sudo', MAC_SCRIPT, 'enable'], timeout=10)
+            logger.info("Re-applied MAC filtering with new addresses")
+
+        return jsonify({'success': True, 'message': 'Device MACs updated successfully'})
+
+    except Exception as e:
+        logger.error(f"Error updating device MACs: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def propagate_mac_filter(enabled):
+    """Propagate MAC filter state to all client devices"""
+    client_ips = ['192.168.99.101', '192.168.99.102', '192.168.99.103',
+                  '192.168.99.104', '192.168.99.105']
+
+    for ip in client_ips:
+        try:
+            action = 'enable' if enabled else 'disable'
+            cmd = f"ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no pi@{ip} 'sudo {MAC_SCRIPT} {action}' 2>/dev/null"
+            subprocess.run(cmd, shell=True, timeout=5)
+            logger.info(f"Updated MAC filter on {ip}: {action}")
+        except Exception as e:
+            logger.warning(f"Could not update MAC filter on {ip}: {e}")
+
+# ====== End Mesh Network Security ======
 
 @app.route('/api/teams/search')
 def search_teams_api():

@@ -196,6 +196,51 @@
         <h5 class="mb-0"><i class="bi bi-wifi"></i> Network Configuration</h5>
     </div>
     <div class="card-body">
+        <!-- Mesh Network Security Subsection -->
+        <h6 class="mb-3"><i class="bi bi-shield-lock"></i> Mesh Network Security</h6>
+
+        <!-- MAC Filtering Toggle -->
+        <div class="d-flex align-items-center justify-content-between mb-3 p-3 bg-light rounded">
+            <div>
+                <label for="macFilterToggle" class="form-label mb-1 fw-bold">
+                    <i class="bi bi-funnel"></i> MAC Address Filtering
+                </label>
+                <p class="text-muted small mb-0">
+                    Only authorized Field Trainer devices can join the mesh network
+                </p>
+            </div>
+
+            <div class="form-check form-switch" style="font-size: 1.5em;">
+                <input class="form-check-input" type="checkbox" id="macFilterToggle" role="switch">
+            </div>
+        </div>
+
+        <!-- Status Display -->
+        <div id="securityStatus" class="mb-3">
+            <span class="badge" id="statusBadge" style="font-size: 0.9em;">
+                <i class="bi bi-hourglass-split"></i> Checking...
+            </span>
+            <span id="deviceCount" class="ms-2 text-muted"></span>
+        </div>
+
+        <!-- Status Messages -->
+        <div id="securityStatusMessage" class="alert" style="display: none;" role="alert"></div>
+
+        <!-- Device Management -->
+        <div class="d-flex gap-2 mb-4">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showAuthorizedDevices()">
+                <i class="bi bi-list-ul"></i> View/Edit Authorized Devices
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshSecurityStatus()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh Status
+            </button>
+        </div>
+
+        <hr class="my-4">
+
+        <!-- WiFi Configuration Subsection -->
+        <h6 class="mb-3"><i class="bi bi-wifi"></i> WiFi Configuration</h6>
+
         <div class="alert alert-info mb-3">
             <i class="bi bi-info-circle"></i>
             <strong>Current Network:</strong> <span id="current-ssid">Loading...</span>
@@ -227,6 +272,291 @@
 
 <!-- Status Messages -->
 <div id="status-message" class="alert" style="display: none;"></div>
+
+<!-- Authorized Devices Modal -->
+<div class="modal fade" id="devicesModal" tabindex="-1" aria-labelledby="devicesModalLabel">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="devicesModalLabel">
+                    <i class="bi bi-hdd-network"></i> Authorized Mesh Devices
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">
+                    <i class="bi bi-info-circle"></i> These MAC addresses are allowed to join the mesh network.
+                    Update MAC addresses when replacing hardware.
+                </p>
+
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Device</th>
+                                <th>Mesh IP</th>
+                                <th>MAC Address (wlan0)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devicesTableBody">
+                            <tr><td colspan="3" class="text-center">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                Loading devices...
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveDeviceMACs()">
+                    <i class="bi bi-save"></i> Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.status-filtered {
+    background-color: #d4edda !important;
+    color: #155724 !important;
+}
+
+.status-open {
+    background-color: #fff3cd !important;
+    color: #856404 !important;
+}
+
+.status-error {
+    background-color: #f8d7da !important;
+    color: #721c24 !important;
+}
+</style>
+
+<script>
+// Mesh Security Management
+let deviceData = [];
+
+// Load security status on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadSecurityStatus();
+
+    // Handle toggle change
+    const toggle = document.getElementById('macFilterToggle');
+    if (toggle) {
+        toggle.addEventListener('change', function() {
+            const enabled = this.checked;
+            updateSecurity(enabled);
+        });
+    }
+});
+
+function loadSecurityStatus() {
+    fetch('/api/mesh/security')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const toggle = document.getElementById('macFilterToggle');
+                if (toggle) toggle.checked = data.enabled;
+                updateStatusDisplay(data);
+            } else {
+                throw new Error(data.error || 'Failed to load security status');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading security status:', error);
+            const statusBadge = document.getElementById('statusBadge');
+            if (statusBadge) {
+                statusBadge.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Error';
+                statusBadge.className = 'badge status-error';
+            }
+        });
+}
+
+function refreshSecurityStatus() {
+    loadSecurityStatus();
+    showSecurityStatusMessage('info', 'Refreshing security status...');
+    setTimeout(() => {
+        showSecurityStatusMessage('success', 'Status refreshed');
+    }, 1000);
+}
+
+function updateSecurity(enabled) {
+    const toggle = document.getElementById('macFilterToggle');
+
+    showSecurityStatusMessage('info', 'Applying security changes to all devices...');
+
+    fetch('/api/mesh/security', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ enabled: enabled })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSecurityStatusMessage('success', data.message + ' on all devices');
+
+            updateStatusDisplay({
+                enabled: enabled,
+                mac_count: 6,
+                status: enabled ? 'Filtered' : 'Open'
+            });
+
+            setTimeout(() => {
+                hideSecurityStatusMessage();
+            }, 5000);
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating security:', error);
+        showSecurityStatusMessage('danger', 'Error: ' + error.message);
+
+        // Revert toggle
+        if (toggle) toggle.checked = !enabled;
+    });
+}
+
+function updateStatusDisplay(data) {
+    const statusBadge = document.getElementById('statusBadge');
+    const deviceCount = document.getElementById('deviceCount');
+
+    if (!statusBadge) return;
+
+    if (data.enabled) {
+        statusBadge.innerHTML = '<i class="bi bi-shield-check"></i> Filtered';
+        statusBadge.className = 'badge status-filtered';
+        if (deviceCount) {
+            deviceCount.textContent = `${data.mac_count || 6} devices authorized`;
+        }
+    } else {
+        statusBadge.innerHTML = '<i class="bi bi-unlock"></i> Open';
+        statusBadge.className = 'badge status-open';
+        if (deviceCount) {
+            deviceCount.textContent = 'All devices can join';
+        }
+    }
+}
+
+function showSecurityStatusMessage(type, message) {
+    const statusMsg = document.getElementById('securityStatusMessage');
+    if (!statusMsg) return;
+
+    statusMsg.className = `alert alert-${type}`;
+    statusMsg.innerHTML = `<i class="bi bi-${type === 'success' ? 'check-circle' : type === 'danger' ? 'exclamation-triangle' : 'info-circle'}"></i> ${message}`;
+    statusMsg.style.display = 'block';
+}
+
+function hideSecurityStatusMessage() {
+    const statusMsg = document.getElementById('securityStatusMessage');
+    if (statusMsg) {
+        statusMsg.style.display = 'none';
+    }
+}
+
+function showAuthorizedDevices() {
+    const modal = new bootstrap.Modal(document.getElementById('devicesModal'));
+    const tbody = document.getElementById('devicesTableBody');
+
+    // Load device list
+    fetch('/api/mesh/devices')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to load devices');
+            }
+
+            deviceData = data.devices || [];
+            tbody.innerHTML = '';
+
+            if (deviceData.length > 0) {
+                deviceData.forEach((device, index) => {
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td><strong>${device.device}</strong></td>
+                        <td><code>${device.ip}</code></td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm font-monospace"
+                                   id="mac_${device.device_num}"
+                                   value="${device.mac}"
+                                   placeholder="00:00:00:00:00:00"
+                                   title="MAC address format: XX:XX:XX:XX:XX:XX">
+                        </td>
+                    `;
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No devices configured</td></tr>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading devices:', error);
+            tbody.innerHTML = `<tr><td colspan="3" class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error loading devices: ${error.message}</td></tr>`;
+        });
+
+    modal.show();
+}
+
+function saveDeviceMACs() {
+    const updatedDevices = [];
+    let hasError = false;
+
+    deviceData.forEach(device => {
+        const macInput = document.getElementById(`mac_${device.device_num}`);
+        if (macInput) {
+            const newMAC = macInput.value.trim();
+
+            // Validate MAC format
+            const macPattern = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+            if (!macPattern.test(newMAC)) {
+                macInput.classList.add('is-invalid');
+                hasError = true;
+            } else {
+                macInput.classList.remove('is-invalid');
+                updatedDevices.push({
+                    device_num: device.device_num,
+                    mac: newMAC,
+                    ip: device.ip
+                });
+            }
+        }
+    });
+
+    if (hasError) {
+        alert('Please fix invalid MAC addresses before saving.');
+        return;
+    }
+
+    // Save to backend
+    fetch('/api/mesh/devices', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ devices: updatedDevices })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('devicesModal'));
+            modal.hide();
+            showSecurityStatusMessage('success', 'Device MAC addresses updated successfully');
+            setTimeout(hideSecurityStatusMessage, 5000);
+        } else {
+            throw new Error(data.error || 'Failed to save changes');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving device MACs:', error);
+        alert('Error saving changes: ' + error.message);
+    });
+}
+</script>
 
 <script src="/static/js/settings.js"></script>
 
