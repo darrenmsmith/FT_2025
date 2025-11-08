@@ -48,7 +48,7 @@
             <button id="cancelBtn" class="btn btn-secondary" onclick="cancelEdit()" style="display:none;">
                 <i class="bi bi-x-lg"></i> Cancel
             </button>
-            <a href="/athletes" class="btn btn-secondary">← Back to Athletes</a>
+            <a href="/athletes" class="btn btn-secondary">← Back</a>
         </div>
     </div>
 
@@ -113,7 +113,7 @@
 </div>
 
 <script>
-    const athleteId = {{ athlete_id }};
+    const athleteId = '{{ athlete_id }}';
 
     async function loadAthlete() {
         try {

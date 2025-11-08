@@ -234,7 +234,7 @@ class DatabaseManager:
             # PRs this week
             week_ago = (datetime.now() - timedelta(days=7)).isoformat()
             stats['prs_this_week'] = conn.execute(
-                "SELECT COUNT(*) FROM runs WHERE completed_at > ? AND is_pr = 1",
+                "SELECT COUNT(*) FROM personal_records WHERE achieved_at > ?",
                 (week_ago,)
             ).fetchone()[0]
             
@@ -250,12 +250,13 @@ class DatabaseManager:
                     r.run_id,
                     r.total_time,
                     r.completed_at,
-                    r.is_pr,
+                    COALESCE(ph.is_personal_record, 0) as is_pr,
                     a.name as athlete_name,
                     c.course_name
                 FROM runs r
                 JOIN athletes a ON r.athlete_id = a.athlete_id
                 JOIN courses c ON r.course_id = c.course_id
+                LEFT JOIN performance_history ph ON r.run_id = ph.run_id
                 WHERE r.status = 'completed'
                 ORDER BY r.completed_at DESC
                 LIMIT ?
@@ -395,14 +396,14 @@ class DatabaseManager:
                    sport: Optional[str] = None, gender: Optional[str] = None,
                    season: Optional[str] = None, coach_name: Optional[str] = None,
                    notes: Optional[str] = None, active: bool = True) -> str:
-        """Create a new team with enhanced fields, return team_id"""
+        """Create a new team - using simple schema (only team_id, name, age_group)"""
         team_id = str(uuid.uuid4())
         with self.get_connection() as conn:
+            # Simple schema: only team_id, name, age_group, created_at, updated_at
             conn.execute(
-                '''INSERT INTO teams (team_id, name, age_group, sport, gender,
-                   season, coach_name, notes, active)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (team_id, name, age_group, sport, gender, season, coach_name, notes, active)
+                '''INSERT INTO teams (team_id, name, age_group, created_at, updated_at)
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)''',
+                (team_id, name, age_group or '')
             )
         return team_id
     
@@ -416,17 +417,15 @@ class DatabaseManager:
         """Get all teams, optionally filtering by active status"""
         with self.get_connection() as conn:
             if active_only:
-                rows = conn.execute(
-                    'SELECT * FROM teams WHERE active = 1 ORDER BY name'
-                ).fetchall()
+                rows = conn.execute('SELECT * FROM teams WHERE active = 1 ORDER BY name').fetchall()
             else:
                 rows = conn.execute('SELECT * FROM teams ORDER BY name').fetchall()
             return [dict(row) for row in rows]
     
     def update_team(self, team_id: str, **kwargs):
-        """Update team fields"""
-        allowed_fields = {'name', 'age_group', 'sport', 'gender', 'season',
-                         'coach_name', 'notes', 'active'}
+        """Update team fields - simple schema (name, age_group, active)"""
+        # Allow fields that exist in the schema
+        allowed_fields = {'name', 'age_group', 'active'}
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         if not updates:
             return
@@ -447,11 +446,11 @@ class DatabaseManager:
 
     def archive_team(self, team_id: str):
         """Archive team (soft delete by setting active=0)"""
-        self.update_team(team_id, active=False)
+        self.update_team(team_id, active=0)
 
     def reactivate_team(self, team_id: str):
         """Reactivate an archived team"""
-        self.update_team(team_id, active=True)
+        self.update_team(team_id, active=1)
 
     def duplicate_team(self, team_id: str, new_name: Optional[str] = None,
                       new_season: Optional[str] = None) -> Optional[str]:
@@ -493,30 +492,18 @@ class DatabaseManager:
                     sport: Optional[str] = None, gender: Optional[str] = None,
                     coach_name: Optional[str] = None,
                     active_only: bool = False) -> List[Dict[str, Any]]:
-        """Search and filter teams"""
+        """Search and filter teams - simple schema (only name, age_group)"""
         with self.get_connection() as conn:
             query = 'SELECT * FROM teams WHERE 1=1'
             params = []
 
-            if active_only:
-                query += ' AND active = 1'
+            # Note: active, sport, gender, coach_name columns don't exist in simple schema
+            # Only search by name and age_group
 
             if search_term:
                 query += ' AND (name LIKE ? OR age_group LIKE ?)'
                 search_pattern = f'%{search_term}%'
                 params.extend([search_pattern, search_pattern])
-
-            if sport:
-                query += ' AND sport = ?'
-                params.append(sport)
-
-            if gender:
-                query += ' AND gender = ?'
-                params.append(gender)
-
-            if coach_name:
-                query += ' AND coach_name LIKE ?'
-                params.append(f'%{coach_name}%')
 
             query += ' ORDER BY name'
 

@@ -31,14 +31,14 @@ def list_athletes():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # Get single athlete
-@athlete_bp.route('/api/athletes/<int:athlete_id>')
+@athlete_bp.route('/api/athletes/<athlete_id>')
 def get_athlete_details(athlete_id):
     try:
         athlete = get_athlete(athlete_id)
         if not athlete:
             return jsonify({'success': False, 'error': 'Athlete not found'}), 404
 
-        # Get contacts
+        # Get contacts from athlete_contacts table
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -52,14 +52,15 @@ def get_athlete_details(athlete_id):
             medical = cursor.fetchone()
             athlete['medical'] = dict(medical) if medical else {}
 
-            # Get teams
-            cursor.execute("""
-                SELECT t.team_id, t.name, ta.jersey_number, ta.position
-                FROM teams t
-                JOIN team_athletes ta ON t.team_id = ta.team_id
-                WHERE ta.athlete_id = ?
-            """, (athlete_id,))
-            athlete['team_list'] = [dict(row) for row in cursor.fetchall()]
+        # Build team list
+        athlete['team_list'] = []
+        if athlete.get('team_id') and athlete.get('team_name'):
+            athlete['team_list'] = [{
+                'team_id': athlete['team_id'],
+                'name': athlete['team_name'],
+                'jersey_number': athlete.get('jersey_number', 0),
+                'position': athlete.get('position', '')
+            }]
 
         return jsonify({'success': True, 'athlete': athlete})
     except Exception as e:
@@ -128,7 +129,7 @@ def create_athlete_route():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # Update athlete
-@athlete_bp.route('/api/athletes/<int:athlete_id>', methods=['PUT', 'PATCH'])
+@athlete_bp.route('/api/athletes/<athlete_id>', methods=['PUT', 'PATCH'])
 def update_athlete_route(athlete_id):
     try:
         data = request.json
@@ -229,7 +230,7 @@ def update_athlete_route(athlete_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # Delete athlete (soft delete)
-@athlete_bp.route('/api/athletes/<int:athlete_id>', methods=['DELETE'])
+@athlete_bp.route('/api/athletes/<athlete_id>', methods=['DELETE'])
 def delete_athlete_route(athlete_id):
     try:
         success = delete_athlete(athlete_id, soft=True)
@@ -243,7 +244,7 @@ def delete_athlete_route(athlete_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # Upload photo
-@athlete_bp.route('/api/athletes/<int:athlete_id>/photo', methods=['POST'])
+@athlete_bp.route('/api/athletes/<athlete_id>/photo', methods=['POST'])
 def upload_photo(athlete_id):
     try:
         if 'photo' in request.files:
@@ -268,14 +269,25 @@ def upload_photo(athlete_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # Get photo
-@athlete_bp.route('/api/athletes/<int:athlete_id>/photo')
+@athlete_bp.route('/api/athletes/<athlete_id>/photo')
 def get_photo(athlete_id):
     try:
         athlete = get_athlete(athlete_id)
-        if athlete and athlete.get('photo_filename'):
-            filepath = os.path.join(PHOTO_DIR, athlete['photo_filename'])
-            if os.path.exists(filepath):
-                return send_file(filepath, mimetype='image/jpeg')
+        if athlete:
+            # Look for photo by athlete_number in year/month directories
+            athlete_number = athlete.get('athlete_number', 0)
+            filename = f"{athlete_number}.jpg"
+
+            # Check current and previous months
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            for months_back in range(12):  # Check last 12 months
+                check_date = now - timedelta(days=months_back * 30)
+                year = check_date.strftime('%Y')
+                month = check_date.strftime('%m')
+                filepath = os.path.join(PHOTO_DIR, year, month, filename)
+                if os.path.exists(filepath):
+                    return send_file(filepath, mimetype='image/jpeg')
 
         # Return default avatar
         default_avatar = '/opt/static/default-avatar.png'
@@ -374,7 +386,7 @@ def add_athlete_to_team_route(team_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # Remove athlete from team
-@athlete_bp.route('/api/teams/<team_id>/athletes/<int:athlete_id>', methods=['DELETE'])
+@athlete_bp.route('/api/teams/<team_id>/athletes/<athlete_id>', methods=['DELETE'])
 def remove_athlete_from_team_route(team_id, athlete_id):
     try:
         success = remove_from_team(athlete_id, team_id)
@@ -394,6 +406,6 @@ def athletes_page():
     return render_template('athletes.html')
 
 # Render athlete detail page
-@athlete_bp.route('/athlete/<int:athlete_id>')
+@athlete_bp.route('/athlete/<athlete_id>')
 def athlete_detail_page(athlete_id):
     return render_template('athlete_detail.html', athlete_id=athlete_id)

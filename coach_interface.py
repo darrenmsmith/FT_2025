@@ -421,6 +421,16 @@ def export_all_teams_csv_route():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
+@app.route('/api/teams')
+def api_teams():
+    """API endpoint to get all teams"""
+    try:
+        active_only = request.args.get('active', 'true').lower() == 'true'
+        teams = db.get_all_teams(active_only=active_only)
+        return jsonify(teams)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
 @app.route('/api/teams/search')
 def search_teams_api():
     """API: Search and filter teams"""

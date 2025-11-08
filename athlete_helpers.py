@@ -103,9 +103,9 @@ def add_contact(athlete_id, name, phone, relationship='parent',
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO athlete_contacts
-            (athlete_id, name, phone, email, relationship, is_primary, can_pickup, emergency_contact)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (athlete_id, name, phone, email, relationship, is_primary, can_pickup, True))
+            (athlete_id, name, phone, email, relationship, is_primary, can_pickup)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (athlete_id, name, phone, email, relationship, is_primary, can_pickup))
 
         contact_id = cursor.lastrowid
         logger.info(f"Added contact for athlete {athlete_id}: {name}")
@@ -118,11 +118,9 @@ def add_medical_info(athlete_id, allergies=None, allergy_severity=None, conditio
         cursor = conn.cursor()
         cursor.execute("""
             INSERT OR REPLACE INTO athlete_medical
-            (athlete_id, allergies, allergy_severity, medical_conditions,
-             physician_name, physician_phone, last_updated)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (athlete_id, allergies, allergy_severity, conditions,
-              physician_name, physician_phone, date.today()))
+            (athlete_id, allergies, allergy_severity, medical_conditions, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (athlete_id, allergies, allergy_severity, conditions))
 
         logger.info(f"Updated medical info for athlete {athlete_id}")
 
@@ -169,85 +167,95 @@ def save_athlete_photo(athlete_id, image_data, source='upload'):
     # Get file size
     file_size_kb = os.path.getsize(filepath) / 1024
 
-    # Update database
+    # Note: Simple schema doesn't have photo columns in athletes table
+    # Photo is stored in file system only, indexed by athlete_number
     photo_path = f"{year}/{month}/{filename}"
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE athletes
-            SET photo_filename = ?, photo_size_kb = ?, photo_upload_date = ?, photo_type = ?
-            WHERE id = ?
-        """, (photo_path, file_size_kb, datetime.now(), source, athlete_id))
 
     logger.info(f"Saved photo for athlete {athlete_id}: {photo_path} ({file_size_kb:.1f} KB)")
-    return filename
+    return photo_path
 
 def get_athlete(athlete_id):
-    """Get athlete with calculated age"""
+    """Get athlete with calculated age - Compatible with simple schema"""
     with get_db() as conn:
         cursor = conn.cursor()
+        # Simple schema: athletes table with athlete_id, team_id, name, athlete_number, jersey_number, age, position
         cursor.execute("""
-            SELECT a.*,
-                   COUNT(DISTINCT ta.team_id) as team_count,
-                   GROUP_CONCAT(DISTINCT t.name) as teams
+            SELECT a.athlete_id as id,
+                   a.name,
+                   a.athlete_number,
+                   a.jersey_number,
+                   a.age,
+                   a.position,
+                   a.team_id,
+                   t.name as team_name,
+                   a.created_at,
+                   a.updated_at
             FROM athletes a
-            LEFT JOIN team_athletes ta ON a.id = ta.athlete_id
-            LEFT JOIN teams t ON ta.team_id = t.team_id
-            WHERE a.id = ? AND a.deleted = 0
-            GROUP BY a.id
+            LEFT JOIN teams t ON a.team_id = t.team_id
+            WHERE a.athlete_id = ?
         """, (athlete_id,))
 
         row = cursor.fetchone()
         if row:
             athlete = dict(row)
-            if athlete['birthdate']:
-                athlete['age_info'] = calculate_age(athlete['birthdate'])
-            else:
-                athlete['age_info'] = {'age': 0, 'is_minor': True, 'requires_coppa': True, 'age_group': 'Unknown'}
+            # Split name into first/last for compatibility
+            name_parts = athlete['name'].split(' ', 1)
+            athlete['first_name'] = name_parts[0] if name_parts else ''
+            athlete['last_name'] = name_parts[1] if len(name_parts) > 1 else ''
+            athlete['display_name'] = athlete['name']
+            athlete['teams'] = athlete.get('team_name', '')
+            athlete['team_count'] = 1 if athlete.get('team_name') else 0
+            athlete['active'] = 1
+            athlete['deleted'] = 0
+            athlete['birthdate'] = None  # Not in simple schema
+            athlete['gender'] = None  # Not in simple schema
             return athlete
         return None
 
 def get_all_athletes(active_only=True, team_id=None):
-    """Get all athletes with basic info"""
+    """Get all athletes with basic info - Compatible with simple schema"""
     with get_db() as conn:
         cursor = conn.cursor()
 
+        # Use simple schema: athletes table has athlete_id, team_id, name, athlete_number, jersey_number, age, position
         query = """
-            SELECT a.*,
-                   COUNT(DISTINCT ta.team_id) as team_count,
-                   GROUP_CONCAT(DISTINCT t.name) as teams,
-                   (SELECT COUNT(*) FROM athlete_medical WHERE athlete_id = a.id
-                    AND (allergies IS NOT NULL OR medical_conditions IS NOT NULL)) as has_medical,
-                   am.allergy_severity,
-                   (SELECT name FROM athlete_contacts WHERE athlete_id = a.id AND is_primary = 1 LIMIT 1) as primary_contact_name,
-                   (SELECT phone FROM athlete_contacts WHERE athlete_id = a.id AND is_primary = 1 LIMIT 1) as primary_contact_phone
+            SELECT a.athlete_id as id,
+                   a.name,
+                   a.athlete_number,
+                   a.jersey_number,
+                   a.age,
+                   a.position,
+                   a.team_id,
+                   t.name as team_name,
+                   a.created_at,
+                   a.updated_at
             FROM athletes a
-            LEFT JOIN team_athletes ta ON a.id = ta.athlete_id
-            LEFT JOIN teams t ON ta.team_id = t.team_id
-            LEFT JOIN athlete_medical am ON a.id = am.athlete_id
-            WHERE a.deleted = 0
+            LEFT JOIN teams t ON a.team_id = t.team_id
+            WHERE 1=1
         """
 
         params = []
 
-        if active_only:
-            query += " AND a.active = 1"
-
         if team_id:
-            query += " AND ta.team_id = ?"
+            query += " AND a.team_id = ?"
             params.append(team_id)
 
-        query += " GROUP BY a.id ORDER BY a.last_name, a.first_name"
+        query += " ORDER BY a.name"
 
         cursor.execute(query, params)
 
         athletes = []
         for row in cursor.fetchall():
             athlete = dict(row)
-            if athlete['birthdate']:
-                athlete['age_info'] = calculate_age(athlete['birthdate'])
-            else:
-                athlete['age_info'] = {'age': 0, 'is_minor': True, 'requires_coppa': True, 'age_group': 'Unknown'}
+            # Split name into first/last for compatibility
+            name_parts = athlete['name'].split(' ', 1)
+            athlete['first_name'] = name_parts[0] if name_parts else ''
+            athlete['last_name'] = name_parts[1] if len(name_parts) > 1 else ''
+            athlete['display_name'] = athlete['name']
+            athlete['teams'] = athlete.get('team_name', '')
+            athlete['team_count'] = 1 if athlete.get('team_name') else 0
+            athlete['active'] = 1  # Default to active
+            athlete['deleted'] = 0
             athletes.append(athlete)
 
         return athletes
@@ -300,7 +308,9 @@ def delete_athlete(athlete_id, soft=True):
         return cursor.rowcount > 0
 
 def import_athletes_csv(csv_file, team_id=None, skip_duplicates=True):
-    """Import athletes from CSV file"""
+    """Import athletes from CSV file - Supports full schema"""
+    import uuid
+    from datetime import datetime
     results = {
         'imported': 0,
         'skipped': 0,
@@ -309,80 +319,213 @@ def import_athletes_csv(csv_file, team_id=None, skip_duplicates=True):
 
     reader = csv.DictReader(csv_file)
 
+    # Check if CSV is malformed (entire row as single field)
+    fieldnames = reader.fieldnames
+    is_malformed = len(fieldnames) == 1 and ',' in fieldnames[0]
+
+    if is_malformed:
+        # Parse the malformed CSV manually
+        logger.info("Detected malformed CSV format, parsing manually")
+        csv_file.seek(0)  # Reset to beginning
+        lines = csv_file.readlines()
+
+        # Parse header from quoted string
+        if lines:
+            header_line = lines[0].strip().strip('"')
+            headers = [h.strip() for h in header_line.split(',')]
+
+            # Parse data rows
+            for row_num, line in enumerate(lines[1:], start=2):
+                try:
+                    # Remove quotes and split by comma
+                    data_line = line.strip().strip('"')
+                    values = [v.strip() for v in data_line.split(',')]
+
+                    # Create row dict
+                    row = dict(zip(headers, values))
+
+                    # Process the row
+                    first_name = row.get('First Name', '').strip()
+                    last_name = row.get('Last Name', '').strip()
+                    full_name = f"{first_name} {last_name}".strip()
+
+                    if not full_name:
+                        results['errors'].append(f"Row {row_num}: Missing name")
+                        continue
+
+                    # Get age
+                    age_str = row.get('Age', '')
+                    age = int(age_str) if age_str and age_str.isdigit() else None
+
+                    # Check for duplicates by name
+                    with get_db() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT athlete_id FROM athletes
+                            WHERE LOWER(name) = LOWER(?)
+                        """, (full_name,))
+
+                        existing = cursor.fetchone()
+
+                        if existing:
+                            if skip_duplicates:
+                                # Update team_id if specified
+                                if team_id:
+                                    cursor.execute("""
+                                        UPDATE athletes SET team_id = ?, updated_at = CURRENT_TIMESTAMP
+                                        WHERE athlete_id = ?
+                                    """, (team_id, existing[0]))
+                                results['skipped'] += 1
+                                continue
+
+                    # Create new athlete
+                    athlete_id = str(uuid.uuid4())
+                    with get_db() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            INSERT INTO athletes (athlete_id, team_id, name, jersey_number, age, position, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """, (
+                            athlete_id,
+                            team_id or '',
+                            full_name,
+                            0,  # Default jersey_number
+                            age,
+                            ''  # Default position
+                        ))
+
+                    results['imported'] += 1
+                    logger.info(f"Imported athlete: {full_name}")
+
+                except Exception as e:
+                    results['errors'].append(f"Row {row_num}: {str(e)}")
+                    logger.error(f"CSV import error on row {row_num}: {e}")
+
+            logger.info(f"CSV import complete: {results['imported']} imported, {results['skipped']} skipped, {len(results['errors'])} errors")
+            return results
+
+    # Normal CSV processing
     for row_num, row in enumerate(reader, start=2):
         try:
-            # Check for duplicates
+            # Get name fields
+            first_name = row.get('First Name', row.get('first_name', '')).strip()
+            last_name = row.get('Last Name', row.get('last_name', '')).strip()
+            full_name = f"{first_name} {last_name}".strip()
+
+            if not full_name:
+                results['errors'].append(f"Row {row_num}: Missing name")
+                continue
+
+            # Get birthdate and calculate age
+            birthdate = row.get('birthdate', row.get('Birthdate', '')).strip()
+            age = None
+            if birthdate:
+                try:
+                    birth_date_obj = datetime.strptime(birthdate, '%Y-%m-%d').date()
+                    age_info = calculate_age(birth_date_obj)
+                    age = age_info['age']
+                except:
+                    pass
+
+            # Get gender
+            gender = row.get('gender', row.get('Gender', '')).strip().lower()
+
+            # Check for duplicates by name and birthdate
             with get_db() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT id FROM athletes
-                    WHERE LOWER(first_name) = LOWER(?)
-                    AND LOWER(last_name) = LOWER(?)
-                    AND birthdate = ?
-                    AND deleted = 0
-                """, (row['first_name'], row['last_name'], row['birthdate']))
+                if birthdate:
+                    cursor.execute("""
+                        SELECT athlete_id FROM athletes
+                        WHERE LOWER(name) = LOWER(?) AND birthdate = ?
+                    """, (full_name, birthdate))
+                else:
+                    cursor.execute("""
+                        SELECT athlete_id FROM athletes
+                        WHERE LOWER(name) = LOWER(?)
+                    """, (full_name,))
 
                 existing = cursor.fetchone()
 
                 if existing:
                     if skip_duplicates:
-                        if team_id:
-                            # Add to team if not already on it
-                            add_to_team(existing[0], team_id)
                         results['skipped'] += 1
                         continue
 
-            # Create athlete
-            athlete_id, athlete_number = create_athlete(
-                first_name=row['first_name'],
-                last_name=row['last_name'],
-                birthdate=row['birthdate'],
-                gender=row.get('gender'),
-                consent_given_by=row.get('parent1_name')
-            )
+            # Generate athlete_number
+            athlete_number = generate_athlete_number()
 
-            # Add primary contact
-            if row.get('parent1_name') and row.get('parent1_phone'):
+            # Create new athlete with full schema
+            athlete_id = str(uuid.uuid4())
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO athletes (athlete_id, team_id, name, athlete_number, jersey_number,
+                                        age, birthdate, gender, position, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (
+                    athlete_id,
+                    team_id or '',
+                    full_name,
+                    athlete_number,
+                    0,  # Default jersey_number
+                    age,
+                    birthdate or None,
+                    gender or None,
+                    ''  # Default position
+                ))
+
+            # Add parent1 contact if provided
+            parent1_name = row.get('parent1_name', '').strip()
+            parent1_phone = row.get('parent1_phone', '').strip()
+            parent1_email = row.get('parent1_email', '').strip()
+            if parent1_name and parent1_phone:
                 add_contact(
                     athlete_id=athlete_id,
-                    name=row['parent1_name'],
-                    phone=row['parent1_phone'],
-                    email=row.get('parent1_email'),
+                    name=parent1_name,
+                    phone=parent1_phone,
+                    email=parent1_email or None,
+                    relationship='parent',
                     is_primary=True
                 )
 
-            # Add secondary contact
-            if row.get('parent2_name') and row.get('parent2_phone'):
+            # Add parent2 contact if provided
+            parent2_name = row.get('parent2_name', '').strip()
+            parent2_phone = row.get('parent2_phone', '').strip()
+            parent2_email = row.get('parent2_email', '').strip()
+            if parent2_name and parent2_phone:
                 add_contact(
                     athlete_id=athlete_id,
-                    name=row['parent2_name'],
-                    phone=row['parent2_phone'],
-                    email=row.get('parent2_email')
+                    name=parent2_name,
+                    phone=parent2_phone,
+                    email=parent2_email or None,
+                    relationship='parent',
+                    is_primary=False
                 )
 
-            # Add medical info
-            if row.get('allergies') or row.get('medical_conditions'):
+            # Add medical info if provided
+            allergies = row.get('allergies', '').strip()
+            medical_conditions = row.get('medical_conditions', '').strip()
+            if allergies or medical_conditions:
                 # Determine severity from allergies text
                 severity = None
-                if row.get('allergies'):
-                    allergies_lower = row['allergies'].lower()
+                if allergies:
+                    allergies_lower = allergies.lower()
                     if 'severe' in allergies_lower or 'life-threatening' in allergies_lower:
                         severity = 'severe'
                     elif 'moderate' in allergies_lower:
                         severity = 'moderate'
+                    else:
+                        severity = 'mild'
 
                 add_medical_info(
                     athlete_id=athlete_id,
-                    allergies=row.get('allergies'),
+                    allergies=allergies or None,
                     allergy_severity=severity,
-                    conditions=row.get('medical_conditions')
+                    conditions=medical_conditions or None
                 )
 
-            # Add to team
-            if team_id:
-                add_to_team(athlete_id, team_id)
-
             results['imported'] += 1
+            logger.info(f"Imported athlete: {full_name} ({athlete_number})")
 
         except Exception as e:
             results['errors'].append(f"Row {row_num}: {str(e)}")
