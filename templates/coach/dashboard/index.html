@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Welcome, Coach!</h1>
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">Total Athletes</h6>
+                <h2 class="text-primary">{{ stats.total_athletes }}</h2>
+                <small>Across {{ stats.total_teams }} teams</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">Sessions Today</h6>
+                <h2 class="text-success">{{ stats.sessions_today }}</h2>
+                <small>{{ stats.runs_today }} runs</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">New PRs</h6>
+                <h2 class="text-warning">{{ stats.prs_this_week }}</h2>
+                <small>This week</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="text-muted">Devices</h6>
+                <h2 class="text-info">{{ stats.devices_online }}/{{ stats.total_devices }}</h2>
+                <small>Online</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>Recent Activity</h5>
+            </div>
+            <div class="card-body">
+                {% if recent_activity %}
+                    {% for activity in recent_activity %}
+                    <div class="mb-2">
+                        <strong>{{ activity.athlete_name }}</strong> completed 
+                        <strong>{{ activity.course_name }}</strong>
+                        {% if activity.is_pr %}<span class="badge bg-warning">🏆 PR!</span>{% endif %}
+                        <br>
+                        <small class="text-muted">Time: {{ "%.3f"|format(activity.total_time) }}s - {{ activity.time_ago }}</small>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-muted">No recent activity</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

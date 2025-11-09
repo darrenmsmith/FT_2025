@@ -1,0 +1,1039 @@
+{% extends "base.html" %}
+{% block title %}Course Design - Field Trainer{% endblock %}
+
+{% block head %}
+<!-- UPDATED: 2025-11-02 15:05 - Fixed media query breakpoints to 480px -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    body { padding-bottom: 100px; background: #f5f6fa; }
+    
+    /* Top Bar */
+    .top-bar {
+        background: white;
+        border-bottom: 3px solid #667eea;
+        padding: 20px;
+        margin-bottom: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    
+    .top-bar h2 {
+        margin: 0 0 20px 0;
+        color: #2c3e50;
+        font-size: 1.8rem;
+    }
+    
+    .top-row {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+
+    .bottom-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    @media (max-width: 480px) {
+        .top-row, .bottom-row { grid-template-columns: 1fr; }
+    }
+    
+    /* Main Container */
+    .course-accordion { max-width: 1200px; margin: 0 auto; padding: 0 20px 20px; }
+    
+    /* Section Divider - WIDER AND MORE COLORFUL */
+    .section-divider {
+        border: 0;
+        height: 8px;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        margin: 32px 0;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    }
+    
+    /* Accordion Section */
+    .accordion-section {
+        background: white;
+        border-radius: 12px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        overflow: hidden;
+        border: 2px solid #e9ecef;
+    }
+    
+    /* Accordion Header */
+    .accordion-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 18px 24px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+        transition: all 0.3s;
+    }
+    
+    .accordion-header:hover {
+        background: linear-gradient(135deg, #5568d3 0%, #653a8b 100%);
+        transform: translateY(-1px);
+    }
+    
+    .accordion-header.complete {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    }
+    
+    .accordion-left {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+    
+    .accordion-number {
+        background: rgba(255,255,255,0.3);
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 1.3rem;
+        border: 2px solid rgba(255,255,255,0.5);
+    }
+    
+    .accordion-info { flex: 1; }
+    
+    .accordion-title {
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin-bottom: 2px;
+    }
+    
+    .accordion-subtitle {
+        font-size: 0.9rem;
+        opacity: 0.95;
+    }
+    
+    .accordion-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    
+    .accordion-check {
+        font-size: 1.5rem;
+        animation: checkPop 0.3s ease;
+    }
+    
+    @keyframes checkPop {
+        0% { transform: scale(0); }
+        50% { transform: scale(1.2); }
+        100% { transform: scale(1); }
+    }
+    
+    .accordion-arrow {
+        font-size: 1.4rem;
+        transition: transform 0.3s;
+    }
+    
+    .accordion-section.expanded .accordion-arrow { transform: rotate(180deg); }
+    
+    /* Accordion Body */
+    .accordion-body {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.4s ease;
+        padding: 0 24px;
+    }
+    
+    .accordion-section.expanded .accordion-body {
+        max-height: 4000px;
+        padding: 24px;
+    }
+    
+    /* Device List */
+    .devices-list {
+        display: grid;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+    
+    /* Device Card */
+    .device-card {
+        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        border: 2px solid #dee2e6;
+        border-radius: 12px;
+        padding: 20px;
+        transition: all 0.3s;
+    }
+    
+    .device-card:hover {
+        border-color: #667eea;
+        box-shadow: 0 4px 12px rgba(102,126,234,0.2);
+        transform: translateY(-2px);
+    }
+    
+    .device-card.start {
+        border-color: #28a745;
+        background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%);
+    }
+    
+    .device-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 2px solid #e9ecef;
+    }
+    
+    .device-label {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: #2c3e50;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .device-badge {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .device-badge.start {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    }
+    
+    /* Device Fields Grid - ALL SIDE BY SIDE */
+    .device-grid {
+        display: grid;
+        grid-template-columns: 2fr 2fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+
+    .device-grid-full { grid-column: 1 / -1; }
+
+    @media (max-width: 480px) {
+        .device-grid { grid-template-columns: 1fr; }
+    }
+    
+    /* Form Controls */
+    .form-group { margin: 0; }
+    
+    label {
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 8px;
+        display: block;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    
+    .form-control, .form-select {
+        width: 100%;
+        padding: 12px 14px;
+        border: 2px solid #ced4da;
+        border-radius: 8px;
+        font-size: 1rem;
+        transition: all 0.2s;
+        background: white;
+    }
+    
+    .form-control:focus, .form-select:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 4px rgba(102,126,234,0.1);
+    }
+    
+    textarea.form-control {
+        resize: vertical;
+        min-height: 60px;
+        font-family: inherit;
+    }
+    
+    /* Buttons */
+    .btn {
+        padding: 14px 28px;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .btn:active { transform: scale(0.98); }
+    
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        box-shadow: 0 4px 12px rgba(102,126,234,0.3);
+    }
+    
+    .btn-primary:hover {
+        box-shadow: 0 6px 16px rgba(102,126,234,0.4);
+        transform: translateY(-2px);
+    }
+    
+    .btn-danger {
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        color: white;
+    }
+    
+    .btn-danger:hover {
+        box-shadow: 0 4px 12px rgba(220,53,69,0.3);
+    }
+    
+    .btn-success {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: white;
+        box-shadow: 0 4px 12px rgba(40,167,69,0.3);
+    }
+    
+    .btn-success:hover {
+        box-shadow: 0 6px 16px rgba(40,167,69,0.4);
+        transform: translateY(-2px);
+    }
+    
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+    
+    .btn-secondary:hover { background: #5a6268; }
+    
+    .btn-block {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .btn-sm {
+        padding: 10px 20px;
+        font-size: 0.9rem;
+    }
+    
+    /* Sticky Footer */
+    .sticky-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: white;
+        border-top: 3px solid #667eea;
+        padding: 16px 20px;
+        box-shadow: 0 -4px 16px rgba(0,0,0,0.1);
+        z-index: 1000;
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+    }
+    
+    .sticky-footer .btn {
+        min-width: 160px;
+        padding: 16px 32px;
+        font-size: 1.1rem;
+    }
+    
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #6c757d;
+        background: #f8f9fa;
+        border-radius: 12px;
+        border: 2px dashed #dee2e6;
+    }
+    
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 16px;
+        opacity: 0.6;
+    }
+    
+    .empty-text {
+        font-size: 1.1rem;
+        margin: 0;
+    }
+    
+    /* Mobile Responsive */
+    @media (max-width: 480px) {
+        .top-bar { padding: 16px; }
+        .top-bar h2 { font-size: 1.5rem; margin-bottom: 16px; }
+
+        .course-accordion { padding: 0 12px 12px; }
+
+        .accordion-header { padding: 14px 16px; }
+        .accordion-title { font-size: 1.1rem; }
+        .accordion-number { width: 36px; height: 36px; font-size: 1.1rem; }
+
+        .accordion-body { padding: 0 16px; }
+        .accordion-section.expanded .accordion-body { padding: 16px; }
+
+        .device-card { padding: 16px; }
+
+        .sticky-footer {
+            flex-direction: column;
+            padding: 12px;
+        }
+
+        .sticky-footer .btn {
+            width: 100%;
+            min-width: auto;
+        }
+
+        body { padding-bottom: 180px; }
+
+        .section-divider { height: 6px; margin: 24px 0; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Top Bar -->
+<div class="top-bar">
+    <h2>
+        {% if mode == 'edit' %}
+            ✏️ Edit Course
+        {% elif mode == 'duplicate' %}
+            📋 Duplicate Course
+        {% else %}
+            ➕ Create New Course
+        {% endif %}
+    </h2>
+    
+    <div class="top-row">
+        <div class="form-group">
+            <label for="courseName">Course Name *</label>
+            <input type="text" class="form-control" id="courseName" placeholder="e.g., Speed Circuit">
+        </div>
+        <div class="form-group">
+            <label for="courseCategory">Category</label>
+            <select class="form-select" id="courseCategory">
+                <option value="conditioning">Conditioning</option>
+                <option value="agility">Agility</option>
+                <option value="speed">Speed</option>
+                <option value="warmup">Warm-up</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="distanceUnit">Distance Unit</label>
+            <select class="form-select" id="distanceUnit">
+                <option value="yards">Yards</option>
+                <option value="meters">Meters</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="bottom-row">
+        <div class="form-group">
+            <label for="courseDescription">Description</label>
+            <input type="text" class="form-control" id="courseDescription" placeholder="Brief description...">
+        </div>
+    </div>
+</div>
+
+<div class="course-accordion">
+    <hr class="section-divider">
+    
+    <!-- Section 1: Devices & Actions -->
+    <div class="accordion-section expanded" id="section-1">
+        <div class="accordion-header" onclick="toggleSection(1)">
+            <div class="accordion-left">
+                <div class="accordion-info">
+                    <div class="accordion-title">Devices & Actions</div>
+                    <div class="accordion-subtitle">Configure your course sequence</div>
+                </div>
+            </div>
+            <div class="accordion-right">
+                <span class="accordion-check" style="display:none;">✓</span>
+                <span class="accordion-arrow">▼</span>
+            </div>
+        </div>
+        <div class="accordion-body">
+            <div class="devices-list" id="devicesList"></div>
+            <button type="button" class="btn btn-primary btn-block" onclick="addDevice()">
+                ➕ Add Device
+            </button>
+        </div>
+    </div>
+    
+    <hr class="section-divider">
+
+    <!-- Section 2: Interactive Diagram -->
+    <div class="accordion-section" id="section-2">
+        <div class="accordion-header" onclick="toggleSection(2)">
+            <div class="accordion-left">
+                <div class="accordion-info">
+                    <div class="accordion-title">Interactive Diagram</div>
+                    <div class="accordion-subtitle">Visualize and arrange your course layout</div>
+                </div>
+            </div>
+            <div class="accordion-right">
+                <span class="accordion-check" style="display:none;">✓</span>
+                <span class="accordion-arrow">▼</span>
+            </div>
+        </div>
+        <div class="accordion-body">
+            <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-primary" onclick="generateDiagram()">
+                    🔄 Generate Diagram
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="toggleRotateMode()">
+                    <span id="rotateModeLabel">↻ Rotate Mode: OFF</span>
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="toggleShowDistance()">
+                    <span id="showDistanceLabel">📏 Show: Distance</span>
+                </button>
+            </div>
+            <div id="diagramPreview" style="min-height: 400px; border: 2px solid #dee2e6; border-radius: 8px; background: #f8f9fa; display: flex; align-items: center; justify-content: center;">
+                <div class="empty-state">
+                    <div class="empty-icon">📍</div>
+                    <p class="empty-text">Add devices and click "Generate Diagram"</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="section-divider">
+
+    <!-- Section 3: Layout Instructions -->
+    <div class="accordion-section" id="section-3">
+        <div class="accordion-header" onclick="toggleSection(3)">
+            <div class="accordion-left">
+                <div class="accordion-info">
+                    <div class="accordion-title">Layout Instructions</div>
+                    <div class="accordion-subtitle">How to arrange cones on the field (optional)</div>
+                </div>
+            </div>
+            <div class="accordion-right">
+                <span class="accordion-check" style="display:none;">✓</span>
+                <span class="accordion-arrow">▼</span>
+            </div>
+        </div>
+        <div class="accordion-body">
+            <div class="form-group">
+                <label for="courseInstruction">Setup Instructions</label>
+                <textarea class="form-control" id="courseInstruction" placeholder="e.g., Place cones in a straight line 30 yards apart..." rows="4"></textarea>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sticky Footer -->
+<div class="sticky-footer">
+    <button type="button" class="btn btn-secondary" onclick="window.location.href='/courses'">
+        ✖️ Cancel
+    </button>
+    <button type="button" class="btn btn-success" onclick="saveCourse()">
+        💾 Save Course
+    </button>
+</div>
+
+<script>
+const DEBUG = true;
+const courseData = {{ course | tojson | safe if course else 'null' }};
+const courseMode = '{{ mode }}';
+let devices = [];
+let availableDevices = [];
+let usedDevices = new Set();
+
+// Diagram variables
+let courseDiagram = '';
+let conePositions = [];
+let rotateMode = false;
+let showActions = false;
+let dragState = null;
+let svgElement = null;
+
+console.log('🎨 ACCORDION v5 LOADED - Final layout with diagram support');
+
+// Initialize from existing data
+if (courseData && (courseMode === 'edit' || courseMode === 'duplicate')) {
+    if (courseData.course_name) document.getElementById('courseName').value = courseData.course_name;
+    if (courseData.description) document.getElementById('courseDescription').value = courseData.description;
+    if (courseData.category) document.getElementById('courseCategory').value = courseData.category;
+    if (courseData.layout_instructions) document.getElementById('courseInstruction').value = courseData.layout_instructions;
+    if (courseData.distance_unit) document.getElementById('distanceUnit').value = courseData.distance_unit;
+
+    if (courseData.actions && courseData.actions.length > 0) {
+        devices = courseData.actions.map(a => ({
+            device_id: a.device_id,
+            device_name: a.device_name || a.device_id,
+            action: a.action || 'default_beep',
+            instruction: a.instruction || '',
+            distance: a.distance || 0
+        }));
+        devices.forEach(d => usedDevices.add(d.device_id));
+    }
+
+    // Restore diagram if available
+    if (courseData.diagram_svg) {
+        courseDiagram = courseData.diagram_svg;
+        document.getElementById('diagramPreview').innerHTML = courseDiagram;
+
+        // Extract cone positions from SVG comment
+        const posMatch = courseDiagram.match(/<!-- CONE_POSITIONS:(.*?) -->/);
+        if (posMatch && posMatch[1]) {
+            try {
+                conePositions = JSON.parse(posMatch[1]);
+                console.log('Restored cone positions from diagram:', conePositions);
+            } catch (e) {
+                console.warn('Failed to parse cone positions:', e);
+            }
+        }
+
+        // Set up interactivity (drag/rotate)
+        // Use setTimeout to ensure DOM is ready
+        setTimeout(() => {
+            setupDragging();
+        }, 100);
+    }
+}
+
+function toggleSection(num) {
+    const section = document.getElementById(`section-${num}`);
+    const isExpanded = section.classList.contains('expanded');
+    
+    if (isExpanded) {
+        section.classList.remove('expanded');
+    } else {
+        section.classList.add('expanded');
+        if (num === 1 && availableDevices.length === 0) {
+            loadAvailableDevices();
+        }
+    }
+}
+
+function markComplete(num, complete) {
+    const section = document.getElementById(`section-${num}`);
+    const check = section.querySelector('.accordion-check');
+    const header = section.querySelector('.accordion-header');
+    
+    if (complete) {
+        header.classList.add('complete');
+        check.style.display = 'inline';
+    } else {
+        header.classList.remove('complete');
+        check.style.display = 'none';
+    }
+}
+
+async function loadAvailableDevices() {
+    try {
+        const res = await fetch('/api/devices/available');
+        const data = await res.json();
+        if (data.success) {
+            availableDevices = data.devices;
+            console.log('Loaded devices:', availableDevices.length);
+            renderDevices();
+        }
+    } catch (e) {
+        console.error('Failed to load devices:', e);
+    }
+}
+
+function renderDevices() {
+    const container = document.getElementById('devicesList');
+    
+    if (devices.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🎯</div><p class="empty-text">No devices added yet. Click "Add Device" to begin.</p></div>';
+        markComplete(1, false);
+        return;
+    }
+    
+    container.innerHTML = '';
+    devices.forEach((dev, idx) => {
+        const card = createDeviceCard(dev, idx);
+        container.appendChild(card);
+    });
+    
+    markComplete(1, true);
+}
+
+function createDeviceCard(dev, idx) {
+    const isStart = idx === 0;
+    const card = document.createElement('div');
+    card.className = 'device-card' + (isStart ? ' start' : '');
+    
+    const deviceOpts = availableDevices
+        .filter(d => !usedDevices.has(d.device_id) || d.device_id === dev.device_id)
+        .map(d => `<option value="${d.device_id}" ${d.device_id === dev.device_id ? 'selected' : ''}>${d.display_name} ${d.online ? '' : '(offline)'}</option>`)
+        .join('');
+    
+    const actionOpts = `
+        <option value="default_beep" ${dev.action === 'default_beep' ? 'selected' : ''}>Beep</option>
+        <option value="backpedal" ${dev.action === 'backpedal' ? 'selected' : ''}>Backpedal</option>
+        <option value="bounds" ${dev.action === 'bounds' ? 'selected' : ''}>Bounds</option>
+        <option value="butt_kicks" ${dev.action === 'butt_kicks' ? 'selected' : ''}>Butt Kicks</option>
+        <option value="carioca_left" ${dev.action === 'carioca_left' ? 'selected' : ''}>Carioca Left</option>
+        <option value="carioca_right" ${dev.action === 'carioca_right' ? 'selected' : ''}>Carioca Right</option>
+        <option value="external_hip" ${dev.action === 'external_hip' ? 'selected' : ''}>External Hip</option>
+        <option value="high_knees" ${dev.action === 'high_knees' ? 'selected' : ''}>High Knees</option>
+        <option value="high_skips" ${dev.action === 'high_skips' ? 'selected' : ''}>High Skips</option>
+        <option value="icky_shuffle" ${dev.action === 'icky_shuffle' ? 'selected' : ''}>Icky Shuffle</option>
+        <option value="internal_hip" ${dev.action === 'internal_hip' ? 'selected' : ''}>Internal Hip</option>
+        <option value="jog" ${dev.action === 'jog' ? 'selected' : ''}>Jog</option>
+        <option value="ladder" ${dev.action === 'ladder' ? 'selected' : ''}>Ladder</option>
+        <option value="side_shuffle_left" ${dev.action === 'side_shuffle_left' ? 'selected' : ''}>Side Shuffle Left</option>
+        <option value="side_shuffle_right" ${dev.action === 'side_shuffle_right' ? 'selected' : ''}>Side Shuffle Right</option>
+        <option value="sprint" ${dev.action === 'sprint' ? 'selected' : ''}>Sprint</option>
+        <option value="two_in_two_out" ${dev.action === 'two_in_two_out' ? 'selected' : ''}>Two In Two Out</option>
+        <option value="walking_lunge" ${dev.action === 'walking_lunge' ? 'selected' : ''}>Walking Lunge</option>
+    `;
+    
+    card.innerHTML = `
+        <div class="device-header">
+            <div class="device-label">
+                ${isStart ? '🟢 Start Device' : '🟠 Cone ' + idx}
+            </div>
+            ${!isStart ? `<button type="button" class="btn btn-danger btn-sm" onclick="removeDevice(${idx})" style="padding: 8px 16px; margin-left: auto;">🗑️ Remove</button>` : ''}
+        </div>
+        <div class="device-grid">
+            <div class="form-group">
+                <label>Device</label>
+                <select class="form-select" onchange="updateDevice(${idx}, 'device_id', this.value)">
+                    ${deviceOpts}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Action</label>
+                <select class="form-select" onchange="updateDevice(${idx}, 'action', this.value)">
+                    ${actionOpts}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Distance (${document.getElementById('distanceUnit')?.value || 'yards'})</label>
+                <input type="number" class="form-control" value="${dev.distance || 0}" min="0" onchange="updateDevice(${idx}, 'distance', this.value)">
+            </div>
+            <div class="form-group device-grid-full">
+                <label>Instruction (Optional)</label>
+                <input type="text" class="form-control" value="${dev.instruction || ''}" placeholder="e.g., Sprint to next cone" onchange="updateDevice(${idx}, 'instruction', this.value)">
+            </div>
+        </div>
+    `;
+    
+    return card;
+}
+
+function addDevice() {
+    if (availableDevices.length === 0) {
+        loadAvailableDevices().then(() => addDevice());
+        return;
+    }
+    
+    const nextDev = availableDevices.find(d => !usedDevices.has(d.device_id));
+    if (!nextDev) {
+        alert('All devices are in use');
+        return;
+    }
+    
+    devices.push({
+        device_id: nextDev.device_id,
+        device_name: nextDev.device_name,
+        action: 'jog',
+        instruction: '',
+        distance: devices.length === 0 ? 0 : 5
+    });
+    
+    usedDevices.add(nextDev.device_id);
+    renderDevices();
+}
+
+function updateDevice(idx, prop, val) {
+    if (prop === 'device_id') {
+        usedDevices.delete(devices[idx].device_id);
+        usedDevices.add(val);
+        const devInfo = availableDevices.find(d => d.device_id === val);
+        devices[idx].device_name = devInfo?.device_name || val;
+    }
+    
+    devices[idx][prop] = prop === 'distance' ? parseFloat(val) || 0 : val;
+    console.log(`Updated device ${idx} ${prop}:`, val);
+}
+
+function removeDevice(idx) {
+    if (idx === 0) return;
+    if (confirm('Remove this device?')) {
+        usedDevices.delete(devices[idx].device_id);
+        devices.splice(idx, 1);
+        renderDevices();
+    }
+}
+
+// Diagram functions
+function toggleRotateMode() {
+    rotateMode = !rotateMode;
+    const label = rotateMode ? 'ON' : 'OFF';
+    document.getElementById('rotateModeLabel').textContent = '↻ Rotate Mode: ' + label;
+}
+
+function toggleShowDistance() {
+    showActions = !showActions;
+    const label = showActions ? 'Actions' : 'Distance';
+    document.getElementById('showDistanceLabel').textContent = '📏 Show: ' + label;
+    if (devices.length > 1) generateDiagram();
+}
+
+function generateDiagram() {
+    console.log('Generating diagram for', devices.length, 'devices');
+    if (devices.length < 2) {
+        document.getElementById('diagramPreview').innerHTML = '<div class="empty-state"><div class="empty-icon">📍</div><p class="empty-text">Add at least 2 devices to generate diagram</p></div>';
+        return;
+    }
+    const distanceUnit = document.getElementById('distanceUnit').value || 'yards';
+    const width = 800;
+    const height = 500;
+    const padding = 80;
+    if (conePositions.length !== devices.length) {
+        conePositions = [];
+        const spacing = (width - 2 * padding) / (devices.length - 1);
+        devices.forEach((device, idx) => {
+            conePositions.push({ x: padding + (idx * spacing), y: height / 2, arrowAngle: 0 });
+        });
+    }
+    let svg = '<svg id="courseSvg" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%; cursor:default;">';
+    svg += '<!-- CONE_POSITIONS:' + JSON.stringify(conePositions) + ' -->';
+    svg += '<rect width="' + width + '" height="' + height + '" fill="white"/>';
+    svg += '<defs><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">';
+    svg += '<path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" stroke-width="1"/></pattern></defs>';
+    svg += '<rect width="' + width + '" height="' + height + '" fill="url(#grid)"/>';
+    for (let i = 0; i < conePositions.length - 1; i++) {
+        const p1 = conePositions[i];
+        const p2 = conePositions[i + 1];
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2;
+        svg += '<line x1="' + p1.x + '" y1="' + p1.y + '" x2="' + p2.x + '" y2="' + p2.y + '" stroke="#2196F3" stroke-width="2" stroke-dasharray="5,5" opacity="0.5"/>';
+        const distance = devices[i + 1].distance || 0;
+        const action = devices[i + 1].action || 'default_beep';
+        const label = showActions ? action.replace(/_/g, ' ') : distance + ' ' + distanceUnit;
+        svg += '<rect x="' + (midX - 40) + '" y="' + (midY - 15) + '" width="80" height="20" fill="white" stroke="' + (showActions ? '#E91E63' : '#2196F3') + '" rx="3"/>';
+        svg += '<text x="' + midX + '" y="' + midY + '" text-anchor="middle" font-size="12" font-weight="bold" fill="' + (showActions ? '#E91E63' : '#2196F3') + '">' + label + '</text>';
+    }
+    conePositions.forEach((pos, idx) => {
+        const isStart = idx === 0;
+        const color = isStart ? '#4CAF50' : '#FF9800';
+        const label = isStart ? 'S' : idx;
+        svg += '<g class="cone-group" data-idx="' + idx + '" style="cursor:grab;">';
+        svg += '<circle cx="' + pos.x + '" cy="' + pos.y + '" r="25" fill="white" stroke="' + color + '" stroke-width="3"/>';
+        svg += '<text x="' + pos.x + '" y="' + (pos.y + 6) + '" text-anchor="middle" font-size="18" font-weight="bold" fill="' + color + '" pointer-events="none">' + label + '</text>';
+        svg += '</g>';
+
+        const circleRadius = 25;
+        const arrowLen = 30;
+        const angle = pos.arrowAngle * Math.PI / 180;
+
+        const arrowStartX = pos.x + Math.cos(angle) * circleRadius;
+        const arrowStartY = pos.y + Math.sin(angle) * circleRadius;
+        const arrowEndX = pos.x + Math.cos(angle) * (circleRadius + arrowLen);
+        const arrowEndY = pos.y + Math.sin(angle) * (circleRadius + arrowLen);
+
+        const arrowHeadLen = 15;
+        const arrowHeadWidth = Math.PI/5;
+        const arrowHead1X = arrowEndX - arrowHeadLen * Math.cos(angle - arrowHeadWidth);
+        const arrowHead1Y = arrowEndY - arrowHeadLen * Math.sin(angle - arrowHeadWidth);
+        const arrowHead2X = arrowEndX - arrowHeadLen * Math.cos(angle + arrowHeadWidth);
+        const arrowHead2Y = arrowEndY - arrowHeadLen * Math.sin(angle + arrowHeadWidth);
+
+        svg += '<g class="arrow-group" data-idx="' + idx + '" style="cursor:pointer;">';
+        svg += '<line x1="' + arrowStartX + '" y1="' + arrowStartY + '" x2="' + arrowEndX + '" y2="' + arrowEndY + '" stroke="' + color + '" stroke-width="4"/>';
+        svg += '<polygon points="' + arrowEndX + ',' + arrowEndY + ' ' + arrowHead1X + ',' + arrowHead1Y + ' ' + arrowHead2X + ',' + arrowHead2Y + '" fill="' + color + '"/>';
+        svg += '</g>';
+    });
+    svg += '</svg>';
+    courseDiagram = svg;
+    document.getElementById('diagramPreview').innerHTML = svg;
+    setupDragging();
+}
+
+function setupDragging() {
+    svgElement = document.getElementById('courseSvg');
+    if (!svgElement) return;
+    const newSvg = svgElement.cloneNode(true);
+    svgElement.parentNode.replaceChild(newSvg, svgElement);
+    svgElement = newSvg;
+
+    // Prevent default touch behavior on the SVG to avoid page scrolling
+    svgElement.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+    }, { passive: false });
+
+    svgElement.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+    }, { passive: false });
+
+    // Unified function to handle both mouse and touch positioning
+    function getCoordinates(e) {
+        const rect = svgElement.getBoundingClientRect();
+        const scaleX = svgElement.viewBox.baseVal.width / rect.width;
+        const scaleY = svgElement.viewBox.baseVal.height / rect.height;
+
+        let clientX, clientY;
+        if (e.touches && e.touches.length > 0) {
+            // Touch event
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            // Mouse event
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+    }
+
+    // Click/tap handler for selecting cones and rotating arrows
+    function handleClickOrTap(e) {
+        const coneGroup = e.target.closest('.cone-group');
+        if (coneGroup) {
+            const idx = parseInt(coneGroup.dataset.idx);
+            if (rotateMode) {
+                conePositions[idx].arrowAngle = (conePositions[idx].arrowAngle + 45) % 360;
+                generateDiagram();
+                return;
+            }
+            if (dragState === null) {
+                dragState = idx;
+                svgElement.style.cursor = 'grabbing';
+            } else if (dragState === idx) {
+                dragState = null;
+                svgElement.style.cursor = 'default';
+            } else {
+                dragState = idx;
+            }
+            return;
+        }
+        const arrowGroup = e.target.closest('.arrow-group');
+        if (arrowGroup && !rotateMode && dragState === null) {
+            const idx = parseInt(arrowGroup.dataset.idx);
+            conePositions[idx].arrowAngle = (conePositions[idx].arrowAngle + 45) % 360;
+            generateDiagram();
+            return;
+        }
+        if (dragState !== null) {
+            dragState = null;
+            svgElement.style.cursor = 'default';
+        }
+    }
+
+    // Move handler for dragging cones
+    function handleMove(e) {
+        if (dragState !== null && !rotateMode) {
+            const coords = getCoordinates(e);
+            const padding = 30;
+            const maxX = svgElement.viewBox.baseVal.width - padding;
+            const maxY = svgElement.viewBox.baseVal.height - padding;
+            conePositions[dragState].x = Math.max(padding, Math.min(maxX, coords.x));
+            conePositions[dragState].y = Math.max(padding, Math.min(maxY, coords.y));
+            generateDiagram();
+        }
+    }
+
+    // Mouse events
+    svgElement.addEventListener('click', handleClickOrTap);
+    svgElement.addEventListener('mousemove', handleMove);
+
+    // Touch events
+    svgElement.addEventListener('touchstart', handleClickOrTap);
+    svgElement.addEventListener('touchmove', handleMove);
+    svgElement.addEventListener('touchend', () => {
+        if (dragState !== null) {
+            dragState = null;
+            svgElement.style.cursor = 'default';
+        }
+    });
+}
+async function saveCourse() {
+    console.log('💾 SAVE COURSE - v5');
+    
+    const name = document.getElementById('courseName').value.trim();
+    if (!name) {
+        alert('Please enter a course name');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        document.getElementById('courseName').focus();
+        return;
+    }
+    
+    if (devices.length < 2) {
+        alert('Add at least 2 devices (Start + 1 cone)');
+        document.getElementById('section-1').classList.add('expanded');
+        return;
+    }
+    
+    const saveData = {
+        course_name: name,
+        description: document.getElementById('courseDescription').value,
+        category: document.getElementById('courseCategory').value,
+        instruction: document.getElementById('courseInstruction').value,
+        distance_unit: document.getElementById('distanceUnit').value,
+        num_devices: devices.length,
+        diagram_svg: courseDiagram || '',
+        mode: courseMode,
+        course_id: courseData?.course_id || null,
+        stations: devices.map((d, i) => ({
+            sequence: i,
+            device_id: d.device_id,
+            device_name: d.device_name,
+            action: d.action,
+            instruction: d.instruction,
+            distance: d.distance
+        }))
+    };
+    
+    console.log('Saving:', saveData);
+    
+    try {
+        const res = await fetch('/api/courses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(saveData)
+        });
+        
+        const result = await res.json();
+        
+        if (result.success) {
+            alert('✅ Course saved successfully!');
+            window.location.href = '/courses';
+        } else {
+            alert('❌ Error: ' + (result.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('❌ Save failed: ' + e.message);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (availableDevices.length === 0) {
+        loadAvailableDevices();
+    }
+    
+    if (devices.length > 0) {
+        renderDevices();
+    }
+});
+</script>
+{% endblock %}

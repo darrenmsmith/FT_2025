@@ -143,9 +143,11 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
         """
         # Course-based first
         cs = REGISTRY.course_status  # "Inactive" | "Deployed" | "Active"
-        if cs == "Active":
+        # Only show active/deployed if device has an action assigned
+        has_action = node_id in REGISTRY.assignments
+        if cs == "Active" and has_action:
             return "course_active"
-        if cs == "Deployed":
+        if cs == "Deployed" and has_action:
             return "course_deployed"
 
         # Otherwise, infer from node status (basic & safe)

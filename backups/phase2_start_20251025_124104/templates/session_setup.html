@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}New Session - Field Trainer{% endblock %}
+{% block content %}
+<h2 class="mb-4"><i class="fas fa-play-circle"></i> Setup New Session</h2>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>1. Select Team & Course</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Team *</label>
+                        <select class="form-select" id="teamSelect" required>
+                            <option value="">-- Select Team --</option>
+                            {% for team in teams %}
+                                <option value="{{ team.team_id }}">{{ team.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Course *</label>
+                        <select class="form-select" id="courseSelect" required>
+                            <option value="">-- Select Course --</option>
+                            {% for course in courses %}
+                                <option value="{{ course.course_id }}">{{ course.course_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Audio Voice</label>
+                    <div class="btn-group w-100" role="group">
+                        <input type="radio" class="btn-check" name="audioVoice" id="audioMale" value="male" checked>
+                        <label class="btn btn-outline-primary" for="audioMale">
+                            <i class="fas fa-male"></i> Male Voice
+                        </label>
+                        <input type="radio" class="btn-check" name="audioVoice" id="audioFemale" value="female">
+                        <label class="btn btn-outline-primary" for="audioFemale">
+                            <i class="fas fa-female"></i> Female Voice
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5>2. Order Athletes (Drag to Reorder)</h5>
+            </div>
+            <div class="card-body">
+                <div id="athleteList" class="mb-3">
+                    <p class="text-muted">Select a team to load athletes...</p>
+                </div>
+                <button class="btn btn-success btn-lg w-100" id="createSessionBtn" disabled>
+                    <i class="fas fa-rocket"></i> Create Session
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5><i class="fas fa-info-circle"></i> Instructions</h5>
+            </div>
+            <div class="card-body">
+                <ol>
+                    <li>Select your team and course</li>
+                    <li>Choose audio voice (male/female)</li>
+                    <li>Drag athletes to set the order</li>
+                    <li>Click "Create Session" to proceed to monitoring</li>
+                </ol>
+                <hr>
+                <p class="small text-muted mb-0">
+                    <strong>Relay Mode:</strong> When the 2nd device is touched, the next athlete in queue automatically starts.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+<script>
+let athleteQueue = [];
+
+document.getElementById('teamSelect').addEventListener('change', async function() {
+    const teamId = this.value;
+    if (!teamId) return;
+    
+    const response = await fetch(`/api/team/${teamId}/athletes`);
+    const athletes = await response.json();
+    
+    athleteQueue = athletes.map(a => a.athlete_id);
+    renderAthleteList(athletes);
+});
+
+function renderAthleteList(athletes) {
+    const listDiv = document.getElementById('athleteList');
+    listDiv.innerHTML = athletes.map((a, idx) => `
+        <div class="athlete-card card mb-2" data-id="${a.athlete_id}">
+            <div class="card-body py-2">
+                <strong>${idx + 1}.</strong> 
+                ${a.name} 
+                ${a.jersey_number ? `<span class="badge bg-secondary">#${a.jersey_number}</span>` : ''}
+            </div>
+        </div>
+    `).join('');
+    
+    // Enable drag-and-drop
+    new Sortable(listDiv, {
+        animation: 150,
+        onEnd: function(evt) {
+            athleteQueue = Array.from(listDiv.children).map(el => el.dataset.id);
+            renderAthleteList(athletes.sort((a, b) => 
+                athleteQueue.indexOf(a.athlete_id) - athleteQueue.indexOf(b.athlete_id)
+            ));
+        }
+    });
+    
+    document.getElementById('createSessionBtn').disabled = false;
+}
+
+document.getElementById('createSessionBtn').addEventListener('click', async function() {
+    const teamId = document.getElementById('teamSelect').value;
+    const courseId = document.getElementById('courseSelect').value;
+    const audioVoice = document.querySelector('input[name="audioVoice"]:checked').value;
+    
+    if (!teamId || !courseId || athleteQueue.length === 0) {
+        alert('Please select team, course, and order athletes');
+        return;
+    }
+    
+    this.disabled = true;
+    this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
+    
+    const response = await fetch('/session/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({team_id: teamId, course_id: courseId, athlete_queue: athleteQueue, audio_voice: audioVoice})
+    });
+    
+    const result = await response.json();
+    if (result.success) {
+        window.location.href = result.redirect;
+    } else {
+        alert('Error: ' + result.error);
+        this.disabled = false;
+        this.innerHTML = '<i class="fas fa-rocket"></i> Create Session';
+    }
+});
+</script>
+{% endblock %}

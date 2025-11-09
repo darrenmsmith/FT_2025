@@ -11,11 +11,17 @@ Notes:
 - This file does NOT start the heartbeat server; use field_trainer_main.py.
 """
 
+import os
+import time
+from datetime import datetime
 from flask import Flask, jsonify, request, render_template
 from field_trainer.ft_registry import REGISTRY
 from field_trainer.ft_version import VERSION
 
 app = Flask(__name__)
+
+# Track when this process started
+START_TIME = datetime.utcnow().isoformat()
 
 # ---------------------------- Pages ----------------------------
 
@@ -23,6 +29,50 @@ app = Flask(__name__)
 def index():
     """Dashboard: the template uses {{ version }} in the header and meta tags."""
     return render_template("index.html", version=VERSION)
+
+@app.get("/health")
+def health():
+    """Health check endpoint - shows version and service status"""
+    # If JSON requested, return JSON
+    if request.args.get('format') == 'json':
+        return jsonify({
+            'service': 'field-trainer-admin',
+            'version': VERSION,
+            'pid': os.getpid(),
+            'started_at': START_TIME,
+            'port': 5000,
+            'courses_loaded': len(REGISTRY.courses.get('courses', [])),
+            'registry_id': id(REGISTRY),
+            'status': 'healthy'
+        })
+
+    # Otherwise return HTML page
+    health_data = {
+        'service_name': 'Admin Interface',
+        'version': VERSION,
+        'pid': os.getpid(),
+        'started_at': START_TIME,
+        'port': 5000,
+        'courses_loaded': len(REGISTRY.courses.get('courses', [])),
+        'registry_id': id(REGISTRY),
+        'course_status': REGISTRY.course_status,
+        'nodes_connected': len(REGISTRY.nodes),
+        'uptime': _calculate_uptime(START_TIME)
+    }
+    return render_template('health.html', **health_data)
+
+def _calculate_uptime(start_time_iso):
+    """Calculate uptime from ISO timestamp"""
+    try:
+        from datetime import datetime
+        start = datetime.fromisoformat(start_time_iso)
+        now = datetime.utcnow()
+        delta = now - start
+        hours, remainder = divmod(int(delta.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours}h {minutes}m {seconds}s"
+    except:
+        return "Unknown"
 
 # ---------------------------- Courses --------------------------
 

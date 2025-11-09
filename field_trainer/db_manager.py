@@ -173,16 +173,237 @@ class DatabaseManager:
                 )
             ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_segments_run ON segments(run_id)')
+
+            # Settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    setting_key TEXT UNIQUE NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(setting_key)')
+
+            # Initialize default settings if table is empty
+            settings_count = conn.execute('SELECT COUNT(*) FROM settings').fetchone()[0]
+            if settings_count == 0:
+                default_settings = {
+                    'distance_unit': 'yards',
+                    'voice_gender': 'male',
+                    'system_volume': '60',
+                    'ready_audio_file': 'default.mp3',
+                    'min_travel_time': '1',
+                    'max_travel_time': '15',
+                    'ready_led_color': 'orange',
+                    'ready_audio_target': 'all',
+                    'wifi_ssid': '',
+                    'wifi_password': ''
+                }
+                for key, value in default_settings.items():
+                    conn.execute('''
+                        INSERT INTO settings (setting_key, setting_value)
+                        VALUES (?, ?)
+                    ''', (key, value))
+
+    # ==================== DASHBOARD QUERIES ====================
     
+    def get_dashboard_stats(self) -> Dict[str, Any]:
+        """Get statistics for coach dashboard"""
+        from datetime import datetime, timedelta
+        
+        with self.get_connection() as conn:
+            stats = {}
+            
+            # Total athletes and teams
+            stats['total_athletes'] = conn.execute('SELECT COUNT(*) FROM athletes').fetchone()[0]
+            stats['total_teams'] = conn.execute('SELECT COUNT(*) FROM teams').fetchone()[0]
+            
+            # Today's activity
+            today = datetime.now().date().isoformat()
+            stats['sessions_today'] = conn.execute(
+                "SELECT COUNT(*) FROM sessions WHERE DATE(created_at) = ?", (today,)
+            ).fetchone()[0]
+            
+            stats['runs_today'] = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE DATE(started_at) = ?", (today,)
+            ).fetchone()[0]
+            
+            # PRs this week
+            week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+            stats['prs_this_week'] = conn.execute(
+                "SELECT COUNT(*) FROM personal_records WHERE achieved_at > ?",
+                (week_ago,)
+            ).fetchone()[0]
+            
+            return stats
+
+    def get_recent_activity(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent completed runs for dashboard"""
+        from datetime import datetime
+
+        with self.get_connection() as conn:
+            rows = conn.execute('''
+                SELECT
+                    r.run_id,
+                    r.total_time,
+                    r.completed_at,
+                    COALESCE(ph.is_personal_record, 0) as is_pr,
+                    a.name as athlete_name,
+                    c.course_name
+                FROM runs r
+                JOIN athletes a ON r.athlete_id = a.athlete_id
+                JOIN courses c ON r.course_id = c.course_id
+                LEFT JOIN performance_history ph ON r.run_id = ph.run_id
+                WHERE r.status = 'completed'
+                ORDER BY r.completed_at DESC
+                LIMIT ?
+            ''', (limit,)).fetchall()
+
+            activity = []
+            now = datetime.utcnow()  # Use UTC to match database timestamps
+
+            for row in rows:
+                item = dict(row)
+
+                # Calculate "time ago"
+                completed = datetime.fromisoformat(item['completed_at'])
+                delta = now - completed
+                
+                if delta.days > 0:
+                    item['time_ago'] = f"{delta.days} day{'s' if delta.days > 1 else ''} ago"
+                elif delta.seconds >= 3600:
+                    hours = delta.seconds // 3600
+                    item['time_ago'] = f"{hours} hour{'s' if hours > 1 else ''} ago"
+                elif delta.seconds >= 60:
+                    minutes = delta.seconds // 60
+                    item['time_ago'] = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+                else:
+                    item['time_ago'] = "just now"
+                
+                activity.append(item)
+            
+            return activity
+
+    def get_course_rankings(self, team_id: Optional[str] = None, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get course rankings showing each athlete's PR for each course"""
+        with self.get_connection() as conn:
+            # Build WHERE clause for filters
+            where_clauses = ["r.status = 'completed'", "r.total_time IS NOT NULL"]
+            params = []
+
+            if team_id:
+                where_clauses.append("a.team_id = ?")
+                params.append(team_id)
+
+            if category:
+                where_clauses.append("c.category = ?")
+                params.append(category)
+
+            where_clause = " AND ".join(where_clauses)
+
+            # Get best time for each athlete on each course
+            rows = conn.execute(f'''
+                SELECT
+                    c.course_id,
+                    c.course_name,
+                    c.category,
+                    a.athlete_id,
+                    a.name as athlete_name,
+                    t.name as team_name,
+                    MIN(r.total_time) as best_time,
+                    MAX(CASE WHEN r.total_time = (
+                        SELECT MIN(total_time)
+                        FROM runs
+                        WHERE athlete_id = a.athlete_id
+                        AND course_id = c.course_id
+                        AND status = 'completed'
+                    ) THEN r.completed_at END) as pr_date
+                FROM runs r
+                JOIN athletes a ON r.athlete_id = a.athlete_id
+                JOIN teams t ON a.team_id = t.team_id
+                JOIN courses c ON r.course_id = c.course_id
+                WHERE {where_clause}
+                GROUP BY c.course_id, c.course_name, c.category, a.athlete_id, a.name, t.name
+                ORDER BY c.course_name, best_time ASC
+            ''', params).fetchall()
+
+            # Organize by course
+            courses = {}
+            for row in rows:
+                course_id = row['course_id']
+                if course_id not in courses:
+                    courses[course_id] = {
+                        'course_id': course_id,
+                        'course_name': row['course_name'],
+                        'category': row['category'],
+                        'rankings': []
+                    }
+
+                courses[course_id]['rankings'].append({
+                    'athlete_id': row['athlete_id'],
+                    'athlete_name': row['athlete_name'],
+                    'team_name': row['team_name'],
+                    'best_time': row['best_time'],
+                    'pr_date': row['pr_date']
+                })
+
+            return list(courses.values())
+
+    def check_and_mark_pr(self, run_id: str) -> bool:
+        """Check if a completed run is a PR and mark it"""
+        with self.get_connection() as conn:
+            # Get the run details
+            run = conn.execute(
+                'SELECT athlete_id, course_id, total_time FROM runs WHERE run_id = ?',
+                (run_id,)
+            ).fetchone()
+            
+            if not run or not run['total_time']:
+                return False
+            
+            athlete_id = run['athlete_id']
+            course_id = run['course_id']
+            current_time = run['total_time']
+            
+            # Find best previous time for this athlete on this course
+            best_prev = conn.execute('''
+                SELECT MIN(total_time) as best_time
+                FROM runs
+                WHERE athlete_id = ? 
+                AND course_id = ?
+                AND run_id != ?
+                AND status = 'completed'
+                AND total_time IS NOT NULL
+            ''', (athlete_id, course_id, run_id)).fetchone()
+            
+            is_pr = False
+            if best_prev['best_time'] is None or current_time < best_prev['best_time']:
+                # This is a PR!
+                is_pr = True
+                conn.execute(
+                    'UPDATE runs SET is_pr = 1 WHERE run_id = ?',
+                    (run_id,)
+                )
+            
+            return is_pr
+
     # ==================== TEAM OPERATIONS ====================
     
-    def create_team(self, name: str, age_group: Optional[str] = None) -> str:
-        """Create a new team, return team_id"""
+    def create_team(self, name: str, age_group: Optional[str] = None,
+                   sport: Optional[str] = None, gender: Optional[str] = None,
+                   season: Optional[str] = None, coach_name: Optional[str] = None,
+                   notes: Optional[str] = None, active: bool = True) -> str:
+        """Create a new team - using simple schema (only team_id, name, age_group)"""
         team_id = str(uuid.uuid4())
         with self.get_connection() as conn:
+            # Simple schema: only team_id, name, age_group, created_at, updated_at
             conn.execute(
-                'INSERT INTO teams (team_id, name, age_group) VALUES (?, ?, ?)',
-                (team_id, name, age_group)
+                '''INSERT INTO teams (team_id, name, age_group, created_at, updated_at)
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)''',
+                (team_id, name, age_group or '')
             )
         return team_id
     
@@ -192,22 +413,26 @@ class DatabaseManager:
             row = conn.execute('SELECT * FROM teams WHERE team_id = ?', (team_id,)).fetchone()
             return dict(row) if row else None
     
-    def get_all_teams(self) -> List[Dict[str, Any]]:
-        """Get all teams"""
+    def get_all_teams(self, active_only: bool = False) -> List[Dict[str, Any]]:
+        """Get all teams, optionally filtering by active status"""
         with self.get_connection() as conn:
-            rows = conn.execute('SELECT * FROM teams ORDER BY name').fetchall()
+            if active_only:
+                rows = conn.execute('SELECT * FROM teams WHERE active = 1 ORDER BY name').fetchall()
+            else:
+                rows = conn.execute('SELECT * FROM teams ORDER BY name').fetchall()
             return [dict(row) for row in rows]
     
     def update_team(self, team_id: str, **kwargs):
-        """Update team fields"""
-        allowed_fields = {'name', 'age_group'}
+        """Update team fields - simple schema (name, age_group, active)"""
+        # Allow fields that exist in the schema
+        allowed_fields = {'name', 'age_group', 'active'}
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         if not updates:
             return
-        
+
         updates['updated_at'] = datetime.utcnow().isoformat()
         set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
-        
+
         with self.get_connection() as conn:
             conn.execute(
                 f'UPDATE teams SET {set_clause} WHERE team_id = ?',
@@ -218,6 +443,149 @@ class DatabaseManager:
         """Delete team (cascades to athletes)"""
         with self.get_connection() as conn:
             conn.execute('DELETE FROM teams WHERE team_id = ?', (team_id,))
+
+    def archive_team(self, team_id: str):
+        """Archive team (soft delete by setting active=0)"""
+        self.update_team(team_id, active=0)
+
+    def reactivate_team(self, team_id: str):
+        """Reactivate an archived team"""
+        self.update_team(team_id, active=1)
+
+    def duplicate_team(self, team_id: str, new_name: Optional[str] = None,
+                      new_season: Optional[str] = None) -> Optional[str]:
+        """Create a copy of a team (useful for new seasons), including athletes"""
+        original = self.get_team(team_id)
+        if not original:
+            return None
+
+        # Prepare new team data
+        new_team_name = new_name or f"{original['name']} (Copy)"
+        new_team_season = new_season or original.get('season')
+
+        new_team_id = self.create_team(
+            name=new_team_name,
+            age_group=original.get('age_group'),
+            sport=original.get('sport'),
+            gender=original.get('gender'),
+            season=new_team_season,
+            coach_name=original.get('coach_name'),
+            notes=f"Duplicated from team {original['name']}. {original.get('notes', '')}",
+            active=True
+        )
+
+        # Copy athletes from original team to new team
+        if new_team_id:
+            original_athletes = self.get_athletes_by_team(team_id)
+            for athlete in original_athletes:
+                self.create_athlete(
+                    team_id=new_team_id,
+                    name=athlete['name'],
+                    jersey_number=athlete.get('jersey_number'),
+                    age=athlete.get('age'),
+                    position=athlete.get('position')
+                )
+
+        return new_team_id
+
+    def search_teams(self, search_term: Optional[str] = None,
+                    sport: Optional[str] = None, gender: Optional[str] = None,
+                    coach_name: Optional[str] = None,
+                    active_only: bool = False) -> List[Dict[str, Any]]:
+        """Search and filter teams - simple schema (only name, age_group)"""
+        with self.get_connection() as conn:
+            query = 'SELECT * FROM teams WHERE 1=1'
+            params = []
+
+            # Note: active, sport, gender, coach_name columns don't exist in simple schema
+            # Only search by name and age_group
+
+            if search_term:
+                query += ' AND (name LIKE ? OR age_group LIKE ?)'
+                search_pattern = f'%{search_term}%'
+                params.extend([search_pattern, search_pattern])
+
+            query += ' ORDER BY name'
+
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
+
+    def export_team_csv(self, team_id: str) -> Optional[str]:
+        """Export team data as CSV string"""
+        import csv
+        from io import StringIO
+
+        team = self.get_team(team_id)
+        if not team:
+            return None
+
+        # Get athlete count
+        athletes = self.get_athletes_by_team(team_id)
+        team['athlete_count'] = len(athletes)
+
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Header
+        writer.writerow(['Field', 'Value'])
+
+        # Data
+        fields = [
+            ('Team ID', 'team_id'),
+            ('Team Name', 'name'),
+            ('Age Group', 'age_group'),
+            ('Sport', 'sport'),
+            ('Gender', 'gender'),
+            ('Season', 'season'),
+            ('Status', lambda t: 'Active' if t.get('active') else 'Archived'),
+            ('Coach Name', 'coach_name'),
+            ('Athlete Count', 'athlete_count'),
+            ('Notes', 'notes'),
+            ('Created Date', 'created_at'),
+            ('Last Modified', 'updated_at')
+        ]
+
+        for label, key in fields:
+            if callable(key):
+                value = key(team)
+            else:
+                value = team.get(key, '')
+            writer.writerow([label, value or ''])
+
+        return output.getvalue()
+
+    def export_all_teams_csv(self) -> str:
+        """Export all teams as CSV"""
+        import csv
+        from io import StringIO
+
+        teams = self.get_all_teams(active_only=False)
+
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Header
+        headers = ['ID', 'Name', 'Age Group', 'Sport', 'Gender', 'Season',
+                  'Status', 'Coach', 'Created', 'Modified']
+        writer.writerow(headers)
+
+        # Data rows
+        for team in teams:
+            row = [
+                team.get('team_id'),
+                team.get('name'),
+                team.get('age_group', ''),
+                team.get('sport', ''),
+                team.get('gender', ''),
+                team.get('season', ''),
+                'Active' if team.get('active') else 'Archived',
+                team.get('coach_name', ''),
+                team.get('created_at', ''),
+                team.get('updated_at', '')
+            ]
+            writer.writerow(row)
+
+        return output.getvalue()
     
     # ==================== ATHLETE OPERATIONS ====================
     
@@ -703,3 +1071,220 @@ class DatabaseManager:
             )
             
             print(f"Migrated course '{name}' (ID: {course_id}) with {len(actions)} actions")
+
+    def get_coach_preferences(self, coach_id='default_coach'):
+        """Get coach preferences"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM coach_preferences WHERE coach_id = ?',
+                (coach_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return {
+                'distance_unit': 'yards',
+                'deployment_timeout': 300,
+                'audio_voice': 'male'
+            }
+    
+    def mark_course_deployed(self, session_id):
+        """Mark course as deployed in session"""
+        from datetime import datetime
+        with self.get_connection() as conn:
+            conn.execute(
+                'UPDATE sessions SET course_deployed = 1, deployment_timestamp = ? WHERE session_id = ?',
+                (datetime.utcnow().isoformat(), session_id)
+            )
+    
+    def get_course_actions(self, course_id):
+        """Get all actions for a course in sequence order"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                '''SELECT * FROM course_actions 
+                   WHERE course_id = ? 
+                   ORDER BY sequence''',
+                (course_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_builtin_courses(self):
+        """Get all built-in courses"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM courses WHERE is_builtin = 1 ORDER BY course_name'
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_custom_courses(self):
+        """Get all custom (user-created) courses"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM courses WHERE is_builtin = 0 OR is_builtin IS NULL ORDER BY course_name'
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def delete_course(self, course_id):
+        """Delete a course and its actions"""
+        with self.get_connection() as conn:
+            # Delete actions first
+            conn.execute('DELETE FROM course_actions WHERE course_id = ?', (course_id,))
+            # Delete course
+            conn.execute('DELETE FROM courses WHERE course_id = ?', (course_id,))
+
+    def duplicate_course(self, course_id: int) -> int:
+        """Duplicate a course with all its actions, return new course_id"""
+        with self.get_connection() as conn:
+            # Get original course
+            original_course = conn.execute(
+                'SELECT * FROM courses WHERE course_id = ?',
+                (course_id,)
+            ).fetchone()
+
+            if not original_course:
+                raise ValueError(f"Course with ID {course_id} not found")
+
+            original_course = dict(original_course)
+
+            # Create new course name with " (Copy)" suffix
+            base_name = original_course['course_name']
+            new_name = f"{base_name} (Copy)"
+
+            # Check if name already exists and add number if needed
+            counter = 2
+            while conn.execute('SELECT COUNT(*) FROM courses WHERE course_name = ?', (new_name,)).fetchone()[0] > 0:
+                new_name = f"{base_name} (Copy {counter})"
+                counter += 1
+
+            # Insert new course with all properties from original
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO courses (
+                    course_name, description, course_type, total_devices,
+                    mode, category, num_devices, distance_unit, total_distance,
+                    diagram_svg, layout_instructions, is_builtin, version,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                new_name,
+                original_course.get('description'),
+                original_course.get('course_type', 'conditioning'),
+                original_course.get('total_devices', 6),
+                original_course.get('mode', 'sequential'),
+                original_course.get('category', 'Custom'),
+                original_course.get('num_devices', 6),
+                original_course.get('distance_unit', 'yards'),
+                original_course.get('total_distance', 0),
+                original_course.get('diagram_svg'),
+                original_course.get('layout_instructions'),
+                0,  # Never mark copies as built-in
+                original_course.get('version', '1.0'),
+                datetime.utcnow().isoformat(),
+                datetime.utcnow().isoformat()
+            ))
+
+            new_course_id = cursor.lastrowid
+
+            # Get all actions from original course
+            actions = conn.execute(
+                'SELECT * FROM course_actions WHERE course_id = ? ORDER BY sequence',
+                (course_id,)
+            ).fetchall()
+
+            # Copy all actions to new course
+            for action in actions:
+                action = dict(action)
+                cursor.execute('''
+                    INSERT INTO course_actions (
+                        course_id, sequence, device_id, device_name,
+                        action, action_type, audio_file, instruction,
+                        min_time, max_time, triggers_next_athlete, marks_run_complete,
+                        distance
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    new_course_id,
+                    action['sequence'],
+                    action['device_id'],
+                    action['device_name'],
+                    action['action'],
+                    action['action_type'],
+                    action['audio_file'],
+                    action['instruction'],
+                    action['min_time'],
+                    action['max_time'],
+                    action['triggers_next_athlete'],
+                    action['marks_run_complete'],
+                    action.get('distance', 0)
+                ))
+
+            return new_course_id
+    
+    def get_course_by_name(self, course_name):
+        """Get course by name"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM courses WHERE course_name = ?',
+                (course_name,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    def create_course_from_import(self, data):
+        """Create course from imported JSON data"""
+        from datetime import datetime
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute('''
+                INSERT INTO courses (
+                    course_name, description, course_type, total_devices,
+                    mode, category, num_devices, distance_unit, total_distance,
+                    diagram_svg, layout_instructions, is_builtin, version,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                data['course_name'],
+                data.get('description', ''),
+                data.get('category', 'Custom'),
+                data.get('num_devices', 6),
+                data.get('mode', 'sequential'),
+                data.get('category', 'Custom'),
+                data.get('num_devices', 6),
+                data.get('distance_unit', 'yards'),
+                data.get('total_distance', 0),
+                data.get('diagram_svg'),
+                data.get('layout_instructions'),
+                0,  # Not built-in
+                data.get('version', '1.0'),
+                datetime.now().isoformat(),
+                datetime.now().isoformat()
+            ))
+            
+            course_id = cursor.lastrowid
+            
+            # Insert actions
+            if 'actions' in data:
+                for action in data['actions']:
+                    conn.execute('''
+                        INSERT INTO course_actions (
+                            course_id, sequence, device_id, device_name,
+                            action, action_type, audio_file, instruction,
+                            min_time, max_time, triggers_next_athlete, marks_run_complete,
+                            distance
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        course_id,
+                        action['sequence'],
+                        action['device_id'],
+                        action['device_name'],
+                        action['action'],
+                        action.get('action_type', 'audio_start'),
+                        action['audio_file'],
+                        action.get('instruction', ''),
+                        action.get('min_time', 0.1),
+                        action.get('max_time', 30.0),
+                        action.get('triggers_next_athlete', 0),
+                        action.get('marks_run_complete', 0),
+                        action.get('distance', 0)
+                    ))
+            
+            return course_id
+

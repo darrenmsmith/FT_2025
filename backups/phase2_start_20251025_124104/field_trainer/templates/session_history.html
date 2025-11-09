@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Session History - Field Trainer{% endblock %}
+{% block content %}
+<h2><i class="fas fa-history"></i> Session History</h2>
+<div class="table-responsive">
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Team</th>
+                <th>Course</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for session in sessions %}
+            <tr>
+                <td>{{ session.created_at[:16] }}</td>
+                <td>{{ session.team_name }}</td>
+                <td>{{ session.course_name }}</td>
+                <td><span class="badge bg-{{ 'success' if session.status == 'completed' else 'secondary' }}">{{ session.status }}</span></td>
+                <td>
+                    <a href="{{ url_for('session_results', session_id=session.session_id) }}" class="btn btn-sm btn-primary">
+                        View Results
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Health - Field Trainer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <meta http-equiv="refresh" content="10">
+    <style>
+        .health-status {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+        .metric-card {
+            border-left: 4px solid #667eea;
+            background: #f8f9fa;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+        }
+        .metric-label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        .metric-value {
+            font-size: 1.5rem;
+            color: #212529;
+            font-weight: 600;
+        }
+        .registry-id {
+            font-family: monospace;
+            font-size: 0.9rem;
+            background: #e9ecef;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background: #28a745;
+            color: white;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container py-4">
+        <!-- Header -->
+        <div class="health-status">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="mb-2">
+                        <i class="bi bi-heart-pulse-fill"></i> Service Health
+                    </h1>
+                    <p class="mb-0 opacity-75">{{ service_name }} - Real-time status monitoring</p>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <span class="status-badge">
+                        <i class="bi bi-check-circle-fill"></i> Healthy
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Info Box -->
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle-fill"></i>
+            <strong>What is this page?</strong> This health check shows the current status of the Field Trainer service.
+            Use this to verify which version is running, detect duplicate services, and monitor system health.
+            <em>Auto-refreshes every 10 seconds.</em>
+        </div>
+
+        <!-- Metrics Grid -->
+        <div class="row">
+            <!-- Service Info -->
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Service Name</div>
+                    <div class="metric-value">{{ service_name }}</div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Software Version</div>
+                    <div class="metric-value">{{ version }}</div>
+                    <small class="text-muted">Check if this matches your code changes</small>
+                </div>
+            </div>
+
+            <!-- Process Info -->
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Process ID (PID)</div>
+                    <div class="metric-value">{{ pid }}</div>
+                    <small class="text-muted">Should be the same across Admin (5000) and Coach (5001) interfaces</small>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Uptime</div>
+                    <div class="metric-value">{{ uptime }}</div>
+                    <small class="text-muted">Time since last restart</small>
+                </div>
+            </div>
+
+            <!-- REGISTRY Info -->
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Registry Instance ID</div>
+                    <div class="metric-value">
+                        <span class="registry-id">{{ registry_id }}</span>
+                    </div>
+                    <small class="text-muted">Must be identical on both ports to share state</small>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Port</div>
+                    <div class="metric-value">{{ port }}</div>
+                    <small class="text-muted">Admin: 5000, Coach: 5001</small>
+                </div>
+            </div>
+
+            <!-- System Status -->
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Courses Loaded</div>
+                    <div class="metric-value">{{ courses_loaded }}</div>
+                    <small class="text-muted">Number of courses in memory from database</small>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Devices Connected</div>
+                    <div class="metric-value">{{ nodes_connected }}</div>
+                    <small class="text-muted">Number of field devices reporting heartbeats</small>
+                </div>
+            </div>
+
+            <!-- Course Status -->
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Course Status</div>
+                    <div class="metric-value">{{ course_status }}</div>
+                    <small class="text-muted">Current deployment state</small>
+                </div>
+            </div>
+
+            {% if active_session %}
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Active Session</div>
+                    <div class="metric-value text-truncate" style="font-size: 1rem;">{{ active_session }}</div>
+                    <small class="text-muted">{{ active_runs }} active runs</small>
+                </div>
+            </div>
+            {% else %}
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <div class="metric-label">Active Session</div>
+                    <div class="metric-value text-muted" style="font-size: 1.2rem;">None</div>
+                    <small class="text-muted">No session currently active</small>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Started At -->
+            <div class="col-12">
+                <div class="metric-card">
+                    <div class="metric-label">Service Started At (UTC)</div>
+                    <div class="metric-value" style="font-size: 1.2rem;">{{ started_at }}</div>
+                    <small class="text-muted">Server local time when this process started</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Troubleshooting Guide -->
+        <div class="card mt-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-wrench-adjustable"></i> Troubleshooting Guide</h5>
+            </div>
+            <div class="card-body">
+                <h6><i class="bi bi-exclamation-triangle text-warning"></i> Problem: Different PIDs on ports 5000 and 5001</h6>
+                <p class="mb-3">
+                    <strong>What this means:</strong> Two separate services are running instead of one unified service.<br>
+                    <strong>Fix:</strong> <code>sudo systemctl restart field-trainer-server</code> - This will kill all port holders and start fresh.
+                </p>
+
+                <h6><i class="bi bi-exclamation-triangle text-warning"></i> Problem: Different Registry IDs on ports 5000 and 5001</h6>
+                <p class="mb-3">
+                    <strong>What this means:</strong> Admin and Coach interfaces have separate REGISTRY instances and won't share state.<br>
+                    <strong>Fix:</strong> <code>sudo systemctl restart field-trainer-server</code>
+                </p>
+
+                <h6><i class="bi bi-exclamation-triangle text-warning"></i> Problem: Old version showing after code changes</h6>
+                <p class="mb-3">
+                    <strong>What this means:</strong> Service is still running old cached code.<br>
+                    <strong>Fix:</strong> <code>sudo systemctl restart field-trainer-server</code> - Service now automatically kills zombie processes.
+                </p>
+
+                <h6><i class="bi bi-exclamation-triangle text-warning"></i> Problem: Course changes not appearing</h6>
+                <p class="mb-0">
+                    <strong>What this means:</strong> REGISTRY loads courses from database at startup.<br>
+                    <strong>Fix:</strong> <code>sudo systemctl restart field-trainer-server</code> to reload courses from database.
+                </p>
+            </div>
+        </div>
+
+        <!-- Links -->
+        <div class="text-center mt-4">
+            <a href="http://{{ request.host.split(':')[0] }}:5000" class="btn btn-outline-primary me-2">Admin Interface (5000)</a>
+            <a href="http://{{ request.host.split(':')[0] }}:5001" class="btn btn-outline-primary me-2">Coach Interface (5001)</a>
+            <a href="?format=json" class="btn btn-outline-secondary">View as JSON</a>
+        </div>
+    </div>
+</body>
+</html>

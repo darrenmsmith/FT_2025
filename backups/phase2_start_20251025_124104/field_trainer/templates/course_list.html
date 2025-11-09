@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Courses - Field Trainer{% endblock %}
+{% block content %}
+<h2><i class="fas fa-map-marked-alt"></i> Available Courses</h2>
+<div class="row">
+    {% for course in courses %}
+    <div class="col-md-6 col-lg-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">{{ course.course_name }}</h5>
+                <p class="card-text text-muted">{{ course.description }}</p>
+                <span class="badge bg-secondary">{{ course.total_devices }} devices</span>
+                <a href="{{ url_for('course_detail', course_id=course.course_id) }}" class="btn btn-sm btn-primary mt-2">
+                    View Details
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

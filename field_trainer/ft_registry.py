@@ -46,6 +46,7 @@ class Registry:
         # Course state
         self.course_status: str = "Inactive"
         self.selected_course: Optional[str] = None
+
         # courses loaded after DB init below
         self.assignments: Dict[str, str] = {}  # node_id -> action
         self.device_0_action: Optional[str] = None  # virtual Device 0 state marker
@@ -120,6 +121,16 @@ class Registry:
         except Exception as e:
             self.log(f"Failed to load courses from database: {e}", level="error")
             return {"courses": []}
+
+    def reload_courses(self) -> bool:
+        """Reload courses from database (call after creating/editing courses)"""
+        try:
+            self.courses = self._load_courses_from_db() if self.db else load_courses()
+            self.log(f"Courses reloaded - {len(self.courses.get('courses', []))} courses available")
+            return True
+        except Exception as e:
+            self.log(f"Failed to reload courses: {e}", level="error")
+            return False
 
 	# ---------------- Utilities ----------------
 
@@ -284,6 +295,8 @@ class Registry:
                     "off": LEDState.OFF,
                     "solid_green": LEDState.SOLID_GREEN,
                     "solid_red": LEDState.SOLID_RED,
+                    "solid_blue": LEDState.SOLID_BLUE,
+                    "solid_amber": LEDState.SOLID_ORANGE,
                     "blink_amber": LEDState.BLINK_ORANGE,
                     "rainbow": LEDState.RAINBOW,
                 }
@@ -298,6 +311,7 @@ class Registry:
                 if node_id in self.nodes:
                     self.nodes[node_id].led_pattern = pattern
         return ok
+
     def play_audio(self, node_id: str, clip: str) -> bool:
         """
         Ask a device to play a logical clip identifier (device maps to actual file).
@@ -387,11 +401,13 @@ class Registry:
                         success += 1
 
             # Mark unassigned devices as inactive
-            with self.nodes_lock:
-                for node_id in self.nodes.keys():
-                    if node_id not in self.assignments and node_id != "192.168.99.100":
-                        self.send_to_node(node_id, {"deploy": True, "action": None, "course": course_name, "status": "inactive"})
-                        self.log(f"Set {node_id} to inactive (not in course)")
+            # DISABLED: This can cause TCP blocking on partial deployments
+            # TODO: Make this async or add proper timeout handling
+            # with self.nodes_lock:
+            #     for node_id in self.nodes.keys():
+            #         if node_id not in self.assignments and node_id != "192.168.99.100":
+            #             self.send_to_node(node_id, {"deploy": True, "action": None, "course": course_name, "status": "inactive"})
+            #             self.log(f"Set {node_id} to inactive (not in course)")
 
             self.log(f"Deployment sent to {success}/{max(0, len(self.assignments)-1)} client devices")
             print(f"📊 DEPLOY SUMMARY:")
@@ -457,6 +473,7 @@ class Registry:
                     self.send_to_node(node_id, {"cmd": "stop"})
 
             self.course_status = "Inactive"
+
             # Update server LED to amber (idle)
             if self._server_led:
                 from .ft_led import LEDState

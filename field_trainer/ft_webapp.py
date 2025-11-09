@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
+from ft_registry import RESISTRY
 
 app = Flask(__name__)
 
@@ -100,6 +101,38 @@ def get_devices():
             'status': status
         })
     return jsonify(devices)
+
+@app.route('/api/devices/available')
+def get_available_devices():
+    """Get devices with their online status based on heartbeats"""
+    from ft_registry import REGISTRY
+    
+    devices = []
+    for device_num in range(100, 106):  # Devices 0-5
+        device_id = f'192.168.99.{device_num}'
+        device_name = f'Device {device_num - 100}'
+        display_name = 'Start' if device_num == 100 else f'Cone {device_num - 100}'
+        
+        # Device 0 (Start) is always online when server is running
+        if device_num == 100:
+            is_online = True
+        else:
+            # Check if device has recent heartbeat (within last 5 seconds)
+            node_info = REGISTRY.get_node_info(device_id)
+            if node_info and node_info.get('last_seen'):
+                time_diff = time.time() - node_info['last_seen']
+                is_online = time_diff < 5  # Consider online if seen in last 5 seconds
+            else:
+                is_online = False
+        
+        devices.append({
+            'device_id': device_id,
+            'device_name': device_name,
+            'display_name': display_name,
+            'online': is_online
+        })
+    
+    return jsonify({'devices': devices})
 
 @app.route('/api/device/<int:device_id>/test', methods=['POST'])
 def start_test(device_id):
