@@ -132,25 +132,30 @@ class NetworkManager:
             self.run_command('sudo systemctl stop wpa_supplicant@wlan1')
             time.sleep(1)
 
+            # Ensure WiFi is not blocked by rfkill
+            logging.info("Step 2: Unblocking WiFi...")
+            self.run_command('sudo rfkill unblock wifi')
+            time.sleep(1)
+
             # Flush IP and bring interface down
-            logging.info("Step 2: Resetting wlan1...")
+            logging.info("Step 3: Resetting wlan1...")
             self.run_command('sudo ip link set dev wlan1 down')
             self.run_command('sudo ip addr flush dev wlan1')
             time.sleep(1)
 
             # Set static IP for AP mode
-            logging.info("Step 3: Setting static IP 192.168.10.1...")
+            logging.info("Step 4: Setting static IP 192.168.10.1...")
             self.run_command('sudo ip addr add 192.168.10.1/24 dev wlan1')
             self.run_command('sudo ip link set dev wlan1 up')
             time.sleep(1)
 
             # Start hostapd (Access Point)
-            logging.info("Step 4: Starting hostapd...")
+            logging.info("Step 5: Starting hostapd...")
             self.run_command('sudo systemctl start hostapd-ft')
             time.sleep(2)
 
             # Start dnsmasq (DHCP/DNS)
-            logging.info("Step 5: Starting dnsmasq...")
+            logging.info("Step 6: Starting dnsmasq...")
             self.run_command('sudo systemctl start dnsmasq-ft')
             time.sleep(1)
 
@@ -189,19 +194,24 @@ class NetworkManager:
             self.run_command('sudo systemctl stop hostapd-ft')
             time.sleep(1)
 
+            # Ensure WiFi is not blocked by rfkill
+            logging.info("Step 2: Unblocking WiFi...")
+            self.run_command('sudo rfkill unblock wifi')
+            time.sleep(1)
+
             # Reset interface
-            logging.info("Step 2: Resetting wlan1...")
+            logging.info("Step 3: Resetting wlan1...")
             self.run_command('sudo ip link set dev wlan1 down')
             self.run_command('sudo ip addr flush dev wlan1')
             time.sleep(1)
 
             # Restart wpa_supplicant (reconnect to smithhome)
-            logging.info("Step 3: Restarting wpa_supplicant...")
+            logging.info("Step 4: Restarting wpa_supplicant...")
             self.run_command('sudo systemctl restart wpa_supplicant@wlan1')
             time.sleep(2)
 
             # Restart DHCP client
-            logging.info("Step 4: Restarting DHCP client...")
+            logging.info("Step 5: Restarting DHCP client...")
             self.run_command('sudo systemctl restart dhcpcd')
             time.sleep(5)
 
