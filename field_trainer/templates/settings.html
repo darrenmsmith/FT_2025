@@ -196,6 +196,59 @@
         <h5 class="mb-0"><i class="bi bi-wifi"></i> Network Configuration</h5>
     </div>
     <div class="card-body">
+        <!-- Offline Mode Subsection -->
+        <h6 class="mb-3"><i class="bi bi-router"></i> Offline Mode / Access Point</h6>
+
+        <!-- Network Mode Status -->
+        <div class="d-flex align-items-center justify-content-between mb-3 p-3 bg-light rounded">
+            <div>
+                <label class="form-label mb-1 fw-bold">
+                    <i class="bi bi-broadcast-pin"></i> Current Network Mode
+                </label>
+                <p class="text-muted small mb-0" id="networkModeDescription">
+                    Loading network status...
+                </p>
+            </div>
+            <div>
+                <span class="badge" id="networkModeBadge" style="font-size: 1.1em;">
+                    <i class="bi bi-hourglass-split"></i> Loading...
+                </span>
+            </div>
+        </div>
+
+        <!-- Auto-Switch Toggle -->
+        <div class="d-flex align-items-center justify-content-between mb-3 p-3 bg-light rounded">
+            <div>
+                <label for="autoSwitchToggle" class="form-label mb-1 fw-bold">
+                    <i class="bi bi-arrow-left-right"></i> Automatic Mode Switching
+                </label>
+                <p class="text-muted small mb-0">
+                    Automatically switch to AP mode when internet is lost
+                </p>
+            </div>
+            <div class="form-check form-switch" style="font-size: 1.5em;">
+                <input class="form-check-input" type="checkbox" id="autoSwitchToggle" role="switch">
+            </div>
+        </div>
+
+        <!-- Manual Control Buttons -->
+        <div class="d-flex gap-2 mb-4">
+            <button type="button" class="btn btn-sm btn-outline-success" id="forceOnlineBtn">
+                <i class="bi bi-wifi"></i> Force Online Mode
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-warning" id="forceOfflineBtn">
+                <i class="bi bi-broadcast"></i> Force AP Mode
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshNetworkBtn">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+
+        <!-- Network Status Messages -->
+        <div id="networkStatusMessage" class="alert" style="display: none;" role="alert"></div>
+
+        <hr class="my-4">
+
         <!-- Mesh Network Security Subsection -->
         <h6 class="mb-3"><i class="bi bi-shield-lock"></i> Mesh Network Security</h6>
 
@@ -343,13 +396,53 @@ let deviceData = [];
 // Load security status on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadSecurityStatus();
+    loadNetworkStatus();
 
-    // Handle toggle change
+    // Handle MAC filter toggle change
     const toggle = document.getElementById('macFilterToggle');
     if (toggle) {
         toggle.addEventListener('change', function() {
             const enabled = this.checked;
             updateSecurity(enabled);
+        });
+    }
+
+    // Handle auto-switch toggle change
+    const autoSwitchToggle = document.getElementById('autoSwitchToggle');
+    if (autoSwitchToggle) {
+        autoSwitchToggle.addEventListener('change', function() {
+            const enabled = this.checked;
+            setAutoSwitch(enabled);
+        });
+    }
+
+    // Handle force online button
+    const forceOnlineBtn = document.getElementById('forceOnlineBtn');
+    if (forceOnlineBtn) {
+        forceOnlineBtn.addEventListener('click', function() {
+            if (confirm('Switch to online mode? This will disconnect AP and reconnect to WiFi.')) {
+                forceNetworkMode('online');
+            }
+        });
+    }
+
+    // Handle force offline button
+    const forceOfflineBtn = document.getElementById('forceOfflineBtn');
+    if (forceOfflineBtn) {
+        forceOfflineBtn.addEventListener('click', function() {
+            if (confirm('Switch to AP mode? Field Trainer WiFi will be created.')) {
+                forceNetworkMode('offline');
+            }
+        });
+    }
+
+    // Handle refresh button
+    const refreshNetworkBtn = document.getElementById('refreshNetworkBtn');
+    if (refreshNetworkBtn) {
+        refreshNetworkBtn.addEventListener('click', function() {
+            loadNetworkStatus();
+            showNetworkStatusMessage('info', 'Refreshing network status...');
+            setTimeout(() => hideNetworkStatusMessage(), 2000);
         });
     }
 });
@@ -555,6 +648,135 @@ function saveDeviceMACs() {
         console.error('Error saving device MACs:', error);
         alert('Error saving changes: ' + error.message);
     });
+}
+
+// Network Mode Management Functions
+function loadNetworkStatus() {
+    fetch('/api/network/status')
+        .then(response => response.json())
+        .then(data => {
+            updateNetworkStatusDisplay(data);
+        })
+        .catch(error => {
+            console.error('Error loading network status:', error);
+            const badge = document.getElementById('networkModeBadge');
+            if (badge) {
+                badge.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Error';
+                badge.className = 'badge bg-danger';
+            }
+        });
+}
+
+function updateNetworkStatusDisplay(data) {
+    const badge = document.getElementById('networkModeBadge');
+    const description = document.getElementById('networkModeDescription');
+    const autoSwitchToggle = document.getElementById('autoSwitchToggle');
+
+    if (!badge || !description) return;
+
+    // Update mode badge
+    if (data.mode === 'online') {
+        badge.innerHTML = '<i class="bi bi-wifi"></i> Online';
+        badge.className = 'badge bg-success';
+        description.textContent = `Connected to ${data.ssid || 'WiFi'} - Internet available`;
+    } else if (data.mode === 'offline') {
+        badge.innerHTML = '<i class="bi bi-broadcast"></i> AP Mode';
+        badge.className = 'badge bg-warning text-dark';
+        description.textContent = 'Access Point active - Field_Trainer WiFi available';
+    } else {
+        badge.innerHTML = '<i class="bi bi-question-circle"></i> Unknown';
+        badge.className = 'badge bg-secondary';
+        description.textContent = 'Network status unknown';
+    }
+
+    // Update auto-switch toggle
+    if (autoSwitchToggle) {
+        autoSwitchToggle.checked = data.auto_switch !== false;
+    }
+}
+
+function forceNetworkMode(mode) {
+    const badge = document.getElementById('networkModeBadge');
+    if (badge) {
+        badge.innerHTML = '<i class="bi bi-hourglass-split"></i> Switching...';
+        badge.className = 'badge bg-info';
+    }
+
+    showNetworkStatusMessage('info', `Switching to ${mode} mode...`);
+
+    fetch('/api/network/force-mode', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ mode: mode })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNetworkStatusMessage('success', data.message);
+            setTimeout(() => {
+                loadNetworkStatus();
+                hideNetworkStatusMessage();
+            }, 3000);
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+    })
+    .catch(error => {
+        console.error('Error forcing network mode:', error);
+        showNetworkStatusMessage('danger', 'Error: ' + error.message);
+        loadNetworkStatus();
+    });
+}
+
+function setAutoSwitch(enabled) {
+    fetch('/api/network/auto-switch', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ enabled: enabled })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNetworkStatusMessage('success', `Auto-switch ${enabled ? 'enabled' : 'disabled'}`);
+            setTimeout(() => hideNetworkStatusMessage(), 2000);
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+    })
+    .catch(error => {
+        console.error('Error setting auto-switch:', error);
+        showNetworkStatusMessage('danger', 'Error: ' + error.message);
+        // Revert toggle
+        const toggle = document.getElementById('autoSwitchToggle');
+        if (toggle) toggle.checked = !enabled;
+    });
+}
+
+function showNetworkStatusMessage(type, message) {
+    const statusMsg = document.getElementById('networkStatusMessage');
+    if (!statusMsg) return;
+
+    const iconMap = {
+        'success': 'check-circle',
+        'danger': 'exclamation-triangle',
+        'warning': 'exclamation-circle',
+        'info': 'info-circle'
+    };
+
+    statusMsg.className = `alert alert-${type}`;
+    statusMsg.innerHTML = `<i class="bi bi-${iconMap[type] || 'info-circle'}"></i> ${message}`;
+    statusMsg.style.display = 'block';
+}
+
+function hideNetworkStatusMessage() {
+    const statusMsg = document.getElementById('networkStatusMessage');
+    if (statusMsg) {
+        statusMsg.style.display = 'none';
+    }
 }
 </script>
 

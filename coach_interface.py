@@ -2236,6 +2236,118 @@ def get_network_info():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
+@app.route('/api/network/status', methods=['GET'])
+def get_network_status():
+    """Get current network mode status"""
+    try:
+        import json
+        import os
+
+        config_file = '/opt/data/network-config.json'
+        status_file = '/opt/data/network-status.json'
+
+        # Default response
+        response = {
+            'mode': 'unknown',
+            'auto_switch': True,
+            'ssid': 'Unknown'
+        }
+
+        # Load config
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+                response['mode'] = config.get('network_mode', {}).get('current', 'unknown')
+                response['auto_switch'] = config.get('network_mode', {}).get('auto_switch', True)
+
+        # Get current SSID
+        try:
+            result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True, timeout=2)
+            if result.returncode == 0 and result.stdout.strip():
+                response['ssid'] = result.stdout.strip()
+            elif response['mode'] == 'offline':
+                response['ssid'] = 'Field_Trainer (AP Mode)'
+        except:
+            pass
+
+        return jsonify(response)
+    except Exception as e:
+        print(f"Error getting network status: {e}")
+        return jsonify({'mode': 'unknown', 'auto_switch': True, 'error': str(e)}), 400
+
+
+@app.route('/api/network/force-mode', methods=['POST'])
+def force_network_mode():
+    """Force switch to online or offline mode"""
+    try:
+        data = request.get_json()
+        mode = data.get('mode')  # 'online' or 'offline'
+
+        if mode not in ['online', 'offline']:
+            return jsonify({'success': False, 'error': 'Invalid mode. Must be "online" or "offline"'}), 400
+
+        # Run network manager script to force mode
+        result = subprocess.run(
+            ['sudo', '/usr/bin/python3', '/opt/scripts/ft-network-manager.py', f'force-{mode}'],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'message': f'Switched to {mode} mode',
+                'mode': mode
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to switch mode: {result.stderr}'
+            }), 500
+    except Exception as e:
+        print(f"Error forcing network mode: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/network/auto-switch', methods=['POST'])
+def set_auto_switch():
+    """Enable or disable automatic network mode switching"""
+    try:
+        import json
+
+        data = request.get_json()
+        enabled = data.get('enabled', True)
+
+        config_file = '/opt/data/network-config.json'
+
+        # Load existing config
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+        else:
+            config = {
+                "network_mode": {"current": "online", "auto_switch": True},
+                "monitoring": {"internet_check_interval": 60, "internet_check_retries": 3, "failback_delay": 300},
+                "access_point": {"enabled": False, "ssid": "Field_Trainer", "password": "RaspberryField2025", "ip": "192.168.10.1"}
+            }
+
+        # Update auto_switch setting
+        config['network_mode']['auto_switch'] = bool(enabled)
+
+        # Save config
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=4)
+
+        return jsonify({
+            'success': True,
+            'auto_switch': bool(enabled)
+        })
+    except Exception as e:
+        print(f"Error setting auto-switch: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/settings/test-led', methods=['POST'])
 def test_led():
     """Test LED color on selected device(s)"""
