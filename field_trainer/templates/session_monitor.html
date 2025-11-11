@@ -50,6 +50,9 @@
     </div>
     <div class="col-md-4 text-end">
         {% if session.status == 'setup' %}
+            <a href="/dashboard" class="btn btn-secondary me-2">
+                <i class="fas fa-arrow-left"></i> Back
+            </a>
             <button class="btn btn-success big-button" id="startBtn">
                 <i class="fas fa-play"></i> GO
             </button>
@@ -57,6 +60,10 @@
             <button class="btn btn-danger" id="stopBtn">
                 <i class="fas fa-stop"></i> Stop Session
             </button>
+        {% elif session.status == 'completed' or session.status == 'incomplete' %}
+            <a href="/sessions" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back
+            </a>
         {% endif %}
     </div>
 </div>

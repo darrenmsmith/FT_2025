@@ -32,6 +32,10 @@ app = Flask(__name__, template_folder='/opt/field_trainer/templates', static_fol
 
 # Register athlete management blueprint
 from athlete_routes import athlete_bp
+
+# Register sessions blueprint
+from routes.sessions_bp import sessions_bp
+app.register_blueprint(sessions_bp)
 app.register_blueprint(athlete_bp)
 
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
@@ -45,6 +49,11 @@ START_TIME = datetime.utcnow().isoformat()
 # Initialize database
 db = DatabaseManager('/opt/data/field_trainer.db')
 perf_bridge, touch_bridge = initialize_bridge(db)
+
+# Initialize session service
+from services.session_service import SessionService
+from models.session_state import active_session_state
+session_service = SessionService(db, REGISTRY, active_session_state)
 
 # Initialize settings manager
 settings_mgr = SettingsManager(db)
@@ -76,106 +85,6 @@ def inject_version():
     return {'version': VERSION}
 
 # Helper function to find which athlete should receive a touch
-def find_athlete_for_touch(device_id: str, timestamp: datetime) -> Optional[str]:
-    """
-    Determine which active athlete should be attributed a touch on device_id.
-    Priority 1: Athletes at correct sequential position (gap == 1)
-    Priority 2: Athletes who skipped devices (gap > 1)
-    Ignores: Same device twice (gap == 0) or backwards (gap < 0)
-    """
-    if not active_session_state['active_runs']:
-        print(f"   ❌ No active runs")
-        return None
-    
-    session_id = active_session_state.get('session_id')
-    if not session_id:
-        return None
-    
-    # Find device position in sequence
-    device_sequence = active_session_state['device_sequence']
-    if device_id not in device_sequence:
-        print(f"   ❌ Device {device_id} not in course sequence")
-        return None
-    
-    device_position = device_sequence.index(device_id)
-    
-    # Categorize athletes by gap
-    priority_1 = []  # gap == 1 (sequential)
-    priority_2 = []  # gap > 1 (skipped devices)
-    
-    print(f"   🔍 Checking {len(active_session_state['active_runs'])} active athletes for device {device_id} (position {device_position}):")
-    
-    for run_id, run_info in active_session_state['active_runs'].items():
-        last_position = run_info.get('sequence_position', -1)
-        gap = device_position - last_position
-        
-        print(f"      {run_info['athlete_name']}: last_position={last_position}, gap={gap}")
-        
-        if gap == 0:
-            print(f"         ⚠️  Same device twice - IGNORE")
-            continue
-        elif gap < 0:
-            print(f"         ⚠️  Backwards touch - IGNORE")
-            continue
-        elif gap == 1:
-            print(f"         ✅ Sequential (Priority 1)")
-            priority_1.append((run_id, run_info, gap))
-        elif gap > 1:
-            print(f"         ⚠️  Skipped {gap-1} device(s) (Priority 2)")
-            priority_2.append((run_id, run_info, gap))
-    
-    # Attribution logic
-    chosen = None
-    skipped_count = 0
-    
-    if priority_1:
-        # Choose first athlete in queue order
-        priority_1.sort(key=lambda x: x[1].get('queue_position', 999))
-        chosen, chosen_info, _ = priority_1[0]
-        print(f"   ✅ Attributed to {chosen_info['athlete_name']} (sequential)")
-        
-    elif priority_2:
-        # Choose athlete with smallest gap, then by queue order
-        priority_2.sort(key=lambda x: (x[2], x[1].get('queue_position', 999)))
-        chosen, chosen_info, gap = priority_2[0]
-        skipped_count = gap - 1
-        print(f"   ⚠️  Attributed to {chosen_info['athlete_name']} (skipped {skipped_count} device(s))")
-        
-    else:
-        print(f"   ⚠️  No valid candidates for device {device_id}")
-        return None
-    
-    # Mark skipped segments if applicable
-    if skipped_count > 0:
-        mark_skipped_segments(chosen, device_position, skipped_count)
-    
-    return chosen
-
-
-def mark_skipped_segments(run_id: str, current_position: int, skipped_count: int):
-    """Mark segments as missed when athlete skips devices"""
-    run_info = active_session_state['active_runs'].get(run_id)
-    if not run_info:
-        return
-    
-    last_position = run_info.get('sequence_position', -1)
-    print(f"   📝 Marking {skipped_count} skipped segment(s) for {run_info['athlete_name']}:")
-    
-    # Mark each skipped segment
-    for pos in range(last_position + 1, current_position):
-        device_sequence = active_session_state['device_sequence']
-        from_device = device_sequence[pos - 1] if pos > 0 else '192.168.99.100'
-        to_device = device_sequence[pos]
-        
-        # Find and mark the segment
-        segments = db.get_run_segments(run_id)
-        for seg in segments:
-            if seg['from_device'] == from_device and seg['to_device'] == to_device:
-                db.mark_segment_missed(seg['segment_id'])
-                print(f"      ❌ {from_device} → {to_device} marked as missed")
-                break
-# @app.route("/teams")
-
 @app.route("/")
 def index():
     """Redirect to dashboard"""
@@ -270,6 +179,20 @@ def dashboard():
                              categories=[],
                              selected_team=None,
                              selected_category=None)
+
+@app.route('/api/dashboard/stats')
+def dashboard_stats_api():
+    """API: Get dashboard statistics for auto-refresh"""
+    try:
+        stats = db.get_dashboard_stats()
+        recent_activity = db.get_recent_activity(limit=5)
+        return jsonify({
+            'success': True,
+            'stats': stats,
+            'recent_activity': recent_activity
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route("/teams")
 def teams_list():
@@ -677,14 +600,6 @@ def delete_athlete(athlete_id):
 
 # ==================== COURSES ====================
 
-def session_setup():
-    """Session setup page - select team, course, order athletes"""
-    teams = db.get_all_teams()
-    courses = db.get_all_courses()
-    return render_template('session_setup.html', teams=teams, courses=courses)
-
-
-@app.route('/api/team/<team_id>/athletes')
 def get_team_athletes(team_id):
     """API: Get athletes for team (for session setup)"""
     athletes = db.get_athletes_by_team(team_id)
@@ -692,63 +607,11 @@ def get_team_athletes(team_id):
 
 
 
-@app.route('/session/setup')
-def session_setup():
-    """Session setup page - select team, course, order athletes"""
-    teams = db.get_all_teams()
-    courses = db.get_all_courses()
-    return render_template('session_setup.html', teams=teams, courses=courses)
-
 @app.route('/api/team/<team_id>/athletes')
-@app.route('/session/create', methods=['POST'])
-def create_session():
-    """Create session with athlete queue"""
-    try:
-        data = request.get_json()
-        team_id = data['team_id']
-        course_id = data['course_id']
-        athlete_queue = data['athlete_queue']  # List of athlete_ids in order
-        audio_voice = data.get('audio_voice', 'male')
-        
-        # Create session
-        session_id = db.create_session(
-            team_id=team_id,
-            course_id=course_id,
-            athlete_queue=athlete_queue,
-            audio_voice=audio_voice
-        )
-        
-        # Store in global state
-        active_session_state['session_id'] = session_id
-
-        # Phase 2: Deploy happens in cone setup verification page
-        # Course will be deployed after coach verifies cone placement
-        return jsonify({
-            'success': True,
-            'session_id': session_id,
-            'redirect': url_for('session_setup_cones', session_id=session_id)
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-
-@app.route('/session/<session_id>/athlete/<run_id>/absent', methods=['POST'])
-def mark_athlete_absent(session_id, run_id):
-    """Mark athlete as absent (remove from queue but note absence)"""
-    try:
-        db.update_run_status(run_id, 'absent')
-        
-        run = db.get_run(run_id)
-        REGISTRY.log(f"Athlete marked absent: {run.get('athlete_name', 'Unknown')}")
-        
-        return jsonify({
-            'success': True,
-            'session_id': session_id,
-            'redirect': url_for('session_setup_cones', session_id=session_id)
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
-
+def get_team_athletes(team_id):
+    """API: Get athletes for team (for session setup)"""
+    athletes = db.get_athletes_by_team(team_id)
+    return jsonify(athletes)
 
 # ==================== SESSION HISTORY ====================
 
@@ -769,340 +632,7 @@ def sessions():
     
     return render_template('session_history.html', sessions=sessions)
 
-
-@app.route('/session/<session_id>/results')
-def session_results(session_id):
-    """View completed session results"""
-    session = db.get_session(session_id)
-    if not session:
-        return "Session not found", 404
-    
-    course = db.get_course(session['course_id'])
-    team = db.get_team(session['team_id'])
-    
-    # Get all runs with segments
-    runs = session['runs']
-    for run in runs:
-        run['segments'] = db.get_run_segments(run['run_id'])
-    
-    return render_template(
-        'session_results.html',
-        session=session,
-        course=course,
-        team=team,
-        runs=runs
-    )
-
-
-
-@app.route('/session/<session_id>/monitor')
-def session_monitor(session_id):
-    """Session monitoring page"""
-    session = db.get_session(session_id)
-    if not session:
-        return "Session not found", 404
-    
-    team = db.get_team(session['team_id'])
-    course = db.get_course(session['course_id'])
-    
-    return render_template(
-        'session_monitor.html',
-        session=session,
-        team=team,
-        course=course
-    )
-
-@app.route('/session/<session_id>/export')
-def export_session(session_id):
-    """Export session results as CSV"""
-    import csv
-    from io import StringIO
-    
-    session = db.get_session(session_id)
-    if not session:
-        return "Session not found", 404
-    
-    output = StringIO()
-    writer = csv.writer(output)
-    
-    # Header
-    writer.writerow([
-        'Athlete Name', 'Jersey Number', 'Queue Position',
-        'Status', 'Total Time', 'Started At', 'Completed At'
-    ])
-    
-    # Rows
-    for run in session['runs']:
-        writer.writerow([
-            run['athlete_name'],
-            run.get('jersey_number', ''),
-            run['queue_position'],
-            run['status'],
-            run.get('total_time', ''),
-            run.get('started_at', ''),
-            run.get('completed_at', '')
-        ])
-    
-    output.seek(0)
-    
-    from flask import Response
-    return Response(
-        output.getvalue(),
-        mimetype='text/csv',
-        headers={'Content-Disposition': f'attachment; filename=session_{session_id[:8]}.csv'}
-    )
-
-
 # ==================== TOUCH EVENT HANDLER ====================
-
-def handle_touch_event_from_registry(device_id: str, timestamp: datetime):
-    """
-    Called by REGISTRY when a device touch is detected.
-    Supports multiple simultaneous athletes on course.
-    """
-    session_id = active_session_state.get('session_id')
-    
-    if not session_id:
-        REGISTRY.log(f"Touch on {device_id} but no active session", level="warning")
-        return
-    
-    print(f"\n{'='*80}")
-    print(f"👆 MULTI-ATHLETE TOUCH HANDLER")
-    print(f"   Device: {device_id}")
-    print(f"   Active athletes: {len(active_session_state.get('active_runs', {}))}")
-    print(f"{'='*80}")
-    
-    # Find which athlete should receive this touch
-    run_id = find_athlete_for_touch(device_id, timestamp)
-    
-    if not run_id:
-        REGISTRY.log(f"Touch on {device_id} - no valid athlete found", level="warning")
-        print(f"❌ Could not attribute touch to any athlete")
-        print(f"{'='*80}\n")
-        return
-    
-    # Record the touch
-    segment_id = db.record_touch(run_id, device_id, timestamp)
-    
-    if not segment_id:
-        REGISTRY.log(f"Touch on {device_id} but no matching segment for run {run_id}", level="warning")
-        print(f"⚠️  No segment found for this touch")
-        print(f"{'='*80}\n")
-        return
-    
-    # Update athlete's progression
-    run_info = active_session_state['active_runs'][run_id]
-    device_sequence = active_session_state['device_sequence']
-    new_position = device_sequence.index(device_id)
-    
-    run_info['last_device'] = device_id
-    run_info['sequence_position'] = new_position
-    
-    print(f"✅ Touch recorded: {run_info['athlete_name']} → Device {device_id}")
-    print(f"   Segment ID: {segment_id}")
-    print(f"   Sequence position: {new_position + 1}/{len(device_sequence)}")
-    
-    # Check for alerts
-    alert_raised, alert_type = db.check_segment_alerts(segment_id)
-    if alert_raised:
-        REGISTRY.log(f"ALERT: Segment {segment_id} - {alert_type}", level="warning")
-        print(f"⚠️  ALERT: {alert_type}")
-    
-    # Get session and course info
-    session = db.get_session(session_id)
-    course = db.get_course(session['course_id'])
-    
-    # Find the action for this device
-    action = next((a for a in course['actions'] if a['device_id'] == device_id), None)
-    
-    if not action:
-        print(f"⚠️  No action found for device {device_id}")
-        print(f"{'='*80}\n")
-        return
-    
-    # Check if this action triggers next athlete
-    if action.get('triggers_next_athlete'):
-        print(f"🔔 Device triggers next athlete")
-        next_run = db.get_next_queued_run(session_id)
-        if next_run:
-            # CRITICAL: Double-check status to prevent race conditions
-            current_status = db.get_run(next_run['run_id'])['status']
-            if current_status != 'queued':
-                print(f"ℹ️  {next_run['athlete_name']} already started (status: {current_status})")
-                return
-            
-            # Check if already started (in-memory check)
-            if next_run['run_id'] in active_session_state['active_runs']:
-                print(f"ℹ️  {next_run['athlete_name']} already in active_runs")
-                return
-    
-            # Check if we're at max capacity (5 active athletes)
-            elif len(active_session_state['active_runs']) >= 5:
-                print(f"⏸️  At max capacity (5 athletes) - next athlete will wait")
-
-            else:
-                # Start next athlete
-                start_time = datetime.utcnow()
-                
-                print(f"   🎬 Starting run for {next_run['athlete_name']}...")
-                try:
-                    db.start_run(next_run['run_id'], start_time)
-                    print(f"      ✅ Run started successfully")
-                except Exception as e:
-                    print(f"      ❌ start_run FAILED: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    print(f"{'='*80}\n")
-                    return
-                
-                # Add to active runs IMMEDIATELY to prevent duplicate triggers
-                active_session_state['active_runs'][next_run['run_id']] = {
-                    'athlete_name': next_run['athlete_name'],
-                    'athlete_id': next_run['athlete_id'],
-                    'started_at': start_time.isoformat(),
-                    'last_device': None,
-                    'sequence_position': -1
-                }
-                print(f"      ✅ Added to active_runs")
-                
-                # Create segments for next athlete
-                print(f"   📋 Creating segments for {next_run['athlete_name']}...")
-                print(f"      run_id: {next_run['run_id'][:8]}...")
-                print(f"      course_id: {session['course_id']}")
-                
-                try:
-                    db.create_segments_for_run(next_run['run_id'], session['course_id'])
-                    
-                    # Verify segments were created
-                    segments = db.get_run_segments(next_run['run_id'])
-                    print(f"      ✅ Created {len(segments)} segments")
-                    for seg in segments:
-                        print(f"         {seg['from_device']} → {seg['to_device']}")
-                    
-                    # Small delay to ensure segments are committed
-                    import time
-                    time.sleep(0.1)
-                except Exception as e:
-                    print(f"      ❌ Segment creation failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-                
-                print(f"🏃 Next athlete started: {next_run['athlete_name']}")
-                print(f"   Active: {len(active_session_state['active_runs'])}/{active_session_state['total_queued']}")
-
-                # Play audio on Device 0 for next athlete
-                first_action = course['actions'][0]
-                print(f"🔊 Playing Device 0 audio for next athlete via API")
-                try:
-                    import requests
-                    audio_response = requests.post(
-                        'http://localhost:5000/api/audio/play',
-                        json={
-                            'node_id': '192.168.99.100',
-                            'clip': first_action['audio_file'].replace('.mp3', '')
-                        },
-                        timeout=2
-                    )
-                    print(f"   Audio response: {audio_response.status_code}")
-                except Exception as e:
-                    print(f"   ❌ Audio failed: {e}")
-                
-                REGISTRY.log(f"Next athlete started: {next_run['athlete_name']}")
-        else:
-            print(f"ℹ️  No more athletes queued")
-    
-    # Check if this marks run complete
-    if action.get('marks_run_complete'):
-        print(f"🏁 Device marks run complete")
-        
-        # Complete this athlete's run
-        run = db.get_run(run_id)
-        start_time = datetime.fromisoformat(run['started_at'])
-        total_time = (timestamp - start_time).total_seconds()
-        
-        db.complete_run(run_id, timestamp, total_time)
-        # Athletic Training Platform Integration
-        try:
-            result = touch_bridge.on_run_completed(run_id)
-            if result and result.get('is_new_pr'):
-                print(f"   🏆 NEW PERSONAL RECORD!")
-                REGISTRY.log(f"🏆 NEW PR: {completed_athlete['athlete_name']}")
-            if result and result.get('achievements_awarded'):
-                for achievement in result['achievements_awarded']:
-                    print(f"   ⭐ ACHIEVEMENT: {achievement}")
-        except Exception as e:
-            print(f"   ⚠️ Performance tracking error: {e}")
-
-        # Remove from active runs
-        completed_athlete = active_session_state['active_runs'].pop(run_id)
-        
-        print(f"✅ Run completed: {completed_athlete['athlete_name']} in {total_time:.2f}s")
-        print(f"   Remaining active: {len(active_session_state['active_runs'])}")
-        
-        REGISTRY.log(f"Run completed: {run.get('athlete_name')} in {total_time:.2f}s")
-        
-        # Check if session is complete
-        next_run = db.get_next_queued_run(session_id)
-        no_queued = (next_run is None)
-        no_active = (len(active_session_state['active_runs']) == 0)
-        
-        print(f"   Queued remaining: {not no_queued}")
-        print(f"   Active athletes: {len(active_session_state['active_runs'])}")
-        
-        if no_queued and no_active:
-            print(f"🎉 SESSION COMPLETE - All athletes finished!")
-            
-            # Complete session
-            db.complete_session(session_id)
-            
-            # Deactivate course
-            import requests
-            try:
-                requests.post('http://localhost:5000/api/deactivate', timeout=2)
-                print(f"   ✅ Course deactivated - devices returning to standby")
-            except Exception as e:
-                print(f"   ⚠️  Deactivate failed: {e}")
-            
-            # Rainbow celebration on Device 0
-            try:
-                requests.post(
-                    'http://localhost:5000/api/device/192.168.99.100/led',
-                    json={'pattern': 'rainbow'},
-                    timeout=2
-                )
-                print(f"   🌈 Rainbow celebration started on Device 0")
-                
-                # Turn off rainbow after 10 seconds
-                import threading
-                def stop_rainbow():
-                    import time
-                    time.sleep(10)
-                    try:
-                        requests.post(
-                            'http://localhost:5000/api/device/192.168.99.100/led',
-                            json={'pattern': 'off'},
-                            timeout=2
-                        )
-                        print(f"   ✅ Rainbow celebration ended")
-                    except:
-                        pass
-                
-                threading.Thread(target=stop_rainbow, daemon=True).start()
-            except Exception as e:
-                print(f"   ⚠️  Rainbow failed: {e}")
-            
-            # Clear state
-            active_session_state['session_id'] = None
-            active_session_state['active_runs'] = {}
-            active_session_state['device_sequence'] = []
-            active_session_state['total_queued'] = 0
-            
-            REGISTRY.log("🎉 Session completed - all athletes finished")
-    
-    print(f"{'='*80}\n")
-
-# Export handler for REGISTRY integration
-app.handle_touch_event = handle_touch_event_from_registry
 
 # ==================== REGISTRY INTEGRATION ====================
 
@@ -1113,17 +643,17 @@ def register_touch_handler():
     """
     try:
         # Set the touch handler
-        REGISTRY.set_touch_handler(handle_touch_event_from_registry)
-        
+        REGISTRY.set_touch_handler(session_service.handle_touch_event)
+
         # Verify registration
         print("✅ Touch handler registered with REGISTRY")
-        print(f"   Handler function: {handle_touch_event_from_registry}")
+        print(f"   Handler function: {session_service.handle_touch_event}")
 #        print(f"   REGISTRY handler: {getattr(REGISTRY, '_touch_handler', 'NOT SET')}")
-        
+
         # Quick test to ensure it works
         test_timestamp = datetime.now()
         print(f"🧪 Testing handler with dummy call (should see warning about no active session)...")
-        handle_touch_event_from_registry("test_device", test_timestamp)  
+        session_service.handle_touch_event("test_device", test_timestamp)  
 
       # Test the handler with a dummy call
  #       test_timestamp = datetime.now()
@@ -1186,28 +716,13 @@ def profile():
 # PHASE 2: CONE VERIFICATION & DEPLOYMENT
 # ============================================================================
 
-@app.route('/session/<session_id>/setup/cones')
-def session_setup_cones(session_id):
-    """Cone setup verification page"""
-    session = db.get_session(session_id)
-    if not session:
-        return "Session not found", 404
-    
-    course = db.get_course(session['course_id'])
-    if not course:
-        return "Course not found", 404
-    
-    # Get timeout from preferences
-    prefs = db.get_coach_preferences()
-    timeout_minutes = prefs.get('deployment_timeout', 300) // 60
-    
-    return render_template(
-        'session_setup_cones.html',
-        session_id=session_id,
-        course=course,
-        timeout_minutes=timeout_minutes
-    )
+@app.route('/api/session/<session_id>/status')
+def api_session_status(session_id):
+    """API: Get session status (proxy to blueprint)"""
+    from routes.sessions_bp import session_status
+    return session_status(session_id)
 
+@app.route('/session/<session_id>/setup/cones')
 @app.route('/api/session/<session_id>/prepare-course', methods=['POST'])
 def api_prepare_course(session_id):
     """Set all course devices to AMBER for verification"""
@@ -1242,207 +757,6 @@ def api_prepare_course(session_id):
     except Exception as e:
         print(f"❌ Prepare course error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 400
-
-@app.route('/api/session/<session_id>/status')
-def session_status(session_id):
-    """API: Get current session status"""
-    session = db.get_session(session_id)
-    if not session:
-        return jsonify({'error': 'Session not found'}), 404
-    
-    # Get runs with segment details
-    runs_with_segments = []
-    for run in session['runs']:
-        segments = db.get_run_segments(run['run_id'])
-        run['segments'] = segments
-        runs_with_segments.append(run)
-    
-    session['runs'] = runs_with_segments
-    
-    return jsonify({
-        'session': session,
-        'active_run': active_session_state.get('current_run_id'),
-        'waiting_for_device': active_session_state.get('waiting_for_device')
-    })
-
-
-
-@app.route('/session/<session_id>/start', methods=['POST'])
-def start_session(session_id):
-    """GO button - start session and first athlete"""
-    import requests
-    print(f"\n{'='*80}")
-    print(f"🎬 START_SESSION CALLED - Session ID: {session_id}")
-    print(f"{'='*80}\n")
-    try:
-        # Mark session as active
-        print(f"Step 1: Marking session as active...")
-        db.start_session(session_id)
-        
-        # Get first queued run
-        first_run = db.get_next_queued_run(session_id)
-        if not first_run:
-            return jsonify({'success': False, 'error': 'No athletes in queue'}), 400
-        
-        # Start first run
-        start_time = datetime.utcnow()
-        db.start_run(first_run['run_id'], start_time)
-        
-        # Small delay to ensure segments are committed before touches arrive
-        import time
-        time.sleep(0.1)
-        
-        # Pre-create segments for this run
-        session = db.get_session(session_id)
-        db.create_segments_for_run(first_run['run_id'], session['course_id'])
-        
-        # Get course device sequence for multi-athlete tracking
-        course = db.get_course(session['course_id'])
-        device_sequence = [action['device_id'] for action in course['actions'] if action['device_id'] != '192.168.99.100']
-        
-        # Count total athletes
-        all_runs = db.get_session_runs(session_id)
-        total_athletes = len(all_runs)
-        
-        # Initialize multi-athlete state
-        active_session_state['session_id'] = session_id
-        active_session_state['device_sequence'] = device_sequence
-        active_session_state['total_queued'] = total_athletes
-        active_session_state['active_runs'] = {
-            first_run['run_id']: {
-                'athlete_name': first_run['athlete_name'],
-                'athlete_id': first_run['athlete_id'],
-                'started_at': start_time.isoformat(),
-                'last_device': None,
-                'sequence_position': -1  # Haven't touched any device yet
-            }
-        }
-        
-        print(f"✅ Multi-athlete state initialized:")
-        print(f"   Active athletes: 1/{total_athletes}")
-        print(f"   Device sequence: {device_sequence}")
-        print(f"   First athlete: {first_run['athlete_name']}")
-
-        # Set audio voice
-        audio_voice = session.get('audio_voice', 'male')
-        # TODO: Send audio voice setting to devices
-
-        # Get course for audio playback
-        session = db.get_session(session_id)
-        course = db.get_course(session['course_id'])    
-    
-        # Course already activated during session creation
-        print(f"\nStep 5: Course already active, proceeding with audio...")
-
-        # Wait for activation to propagate
-        import time
-        time.sleep(0.5)
-
-        # Play first audio on Device 0 via API
-        first_action = course['actions'][0]
-        print(f"🔊 Playing Device 0 audio via API: {first_action['audio_file']}")
-        try:
-            audio_response = requests.post(
-                'http://localhost:5000/api/audio/play',
-                json={
-                    'node_id': '192.168.99.100',
-                    'clip': first_action['audio_file'].replace('.mp3', '')
-                },
-                timeout=2
-            )
-            print(f"   Audio response: {audio_response.status_code}")
-        except Exception as e:
-            print(f"   ❌ Audio command failed: {e}")
-        
-        return jsonify({
-            'success': True,
-            'message': f"{first_run['athlete_name']} started",
-            'current_run': first_run
-        })
-    except Exception as e:
-        REGISTRY.log(f"Session start error: {e}", level="error")
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-@app.route('/session/<session_id>/stop', methods=['POST'])
-def stop_session(session_id):
-    """Stop Session button - deactivate course and mark session incomplete"""
-    try:
-        data = request.get_json() or {}
-        reason = data.get('reason', 'Stopped by coach')
-
-        print(f"\n{'='*80}")
-        print(f"🛑 STOP_SESSION CALLED - Session ID: {session_id}")
-        print(f"   Reason: {reason}")
-        print(f"{'='*80}\n")
-
-        # Get session to verify it exists
-        session = db.get_session(session_id)
-        if not session:
-            return jsonify({'success': False, 'error': 'Session not found'}), 404
-
-        # Mark all active runs as incomplete
-        with db.get_connection() as conn:
-            for run in session.get('runs', []):
-                if run['status'] == 'running':
-                    conn.execute('''
-                        UPDATE runs
-                        SET status = 'incomplete',
-                            completed_at = ?
-                        WHERE run_id = ?
-                    ''', (datetime.utcnow().isoformat(), run['run_id']))
-
-        # Mark session as incomplete
-        with db.get_connection() as conn:
-            conn.execute('''
-                UPDATE sessions
-                SET status = 'incomplete',
-                    completed_at = ?,
-                    notes = ?
-                WHERE session_id = ?
-            ''', (datetime.utcnow().isoformat(), reason, session_id))
-
-        # Deactivate course in REGISTRY
-        print("Deactivating course and resetting devices...")
-        REGISTRY.course_status = "Inactive"
-        REGISTRY.selected_course = None
-
-        # Clear assignments and send stop command to all devices
-        for node_id in list(REGISTRY.assignments.keys()):
-            if node_id != "192.168.99.100":
-                REGISTRY.send_to_node(node_id, {"cmd": "stop", "action": None, "course_status": "Inactive"})
-
-        REGISTRY.assignments.clear()
-
-        # Set all devices to OFF/Standby
-        course = db.get_course(session['course_id'])
-        for action in course['actions']:
-            device_id = action['device_id']
-            if device_id != "192.168.99.100":
-                REGISTRY.set_led(device_id, pattern='off')
-
-        # Clear Device 0 LED
-        if REGISTRY._server_led:
-            from field_trainer.ft_led import LEDState
-            REGISTRY._server_led.set_state(LEDState.OFF)
-
-        # Clear active session state
-        active_session_state.clear()
-
-        REGISTRY.log(f"Session {session_id} stopped: {reason}")
-        print(f"✅ Session stopped successfully")
-        print("="*80 + "\n")
-
-        return jsonify({
-            'success': True,
-            'message': 'Session stopped and devices deactivated'
-        })
-
-    except Exception as e:
-        print(f"❌ Stop session error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 400
-
 
 @app.route('/api/session/<session_id>/deploy-course', methods=['POST'])
 def api_deploy_course(session_id):

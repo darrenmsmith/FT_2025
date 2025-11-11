@@ -88,7 +88,11 @@
                                 </div>
                                 <div class="text-end">
                                     <div class="badge bg-info fs-6">
-                                        {{ "%.2f"|format(activity.total_time) }}s
+                                        {% if activity.total_time %}
+                                            {{ "%.2f"|format(activity.total_time) }}s
+                                        {% else %}
+                                            N/A
+                                        {% endif %}
                                     </div>
                                     <div>
                                         <small class="text-muted">{{ activity.time_ago }}</small>
@@ -172,7 +176,13 @@
                                     <td><strong>{{ athlete.athlete_name }}</strong></td>
                                     <td><small class="text-muted">{{ athlete.team_name }}</small></td>
                                     <td>
-                                        <span class="badge bg-info fs-6">{{ "%.2f"|format(athlete.best_time) }}s</span>
+                                        <span class="badge bg-info fs-6">
+                                            {% if athlete.best_time %}
+                                                {{ "%.2f"|format(athlete.best_time) }}s
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </span>
                                     </td>
                                     <td>
                                         <small class="text-muted">
@@ -200,7 +210,13 @@
                                                 <small class="text-muted">{{ athlete.team_name }}</small>
                                             </div>
                                             <div style="width: 120px;" class="text-center">
-                                                <span class="badge bg-info fs-6">{{ "%.2f"|format(athlete.best_time) }}s</span>
+                                                <span class="badge bg-info fs-6">
+                                                    {% if athlete.best_time %}
+                                                        {{ "%.2f"|format(athlete.best_time) }}s
+                                                    {% else %}
+                                                        N/A
+                                                    {% endif %}
+                                                </span>
                                             </div>
                                             <div style="width: 150px;" class="text-center">
                                                 <small class="text-muted">
@@ -265,6 +281,88 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+
+    // Auto-refresh dashboard stats every 10 seconds
+    async function refreshDashboard() {
+        try {
+            const response = await fetch('/api/dashboard/stats');
+            const data = await response.json();
+
+            if (data.success) {
+                // Update stats cards
+                updateStats(data.stats);
+
+                // Update recent activity
+                updateRecentActivity(data.recent_activity);
+            }
+        } catch (error) {
+            console.error('Error refreshing dashboard:', error);
+        }
+    }
+
+    function updateStats(stats) {
+        // Update total athletes
+        document.querySelector('.row .col-md-3:nth-child(1) h2').textContent = stats.total_athletes;
+        document.querySelector('.row .col-md-3:nth-child(1) small').textContent =
+            `Across ${stats.total_teams} team${stats.total_teams != 1 ? 's' : ''}`;
+
+        // Update sessions today
+        document.querySelector('.row .col-md-3:nth-child(2) h2').textContent = stats.sessions_today;
+        document.querySelector('.row .col-md-3:nth-child(2) small').textContent =
+            `${stats.runs_today} run${stats.runs_today != 1 ? 's' : ''}`;
+
+        // Update PRs
+        document.querySelector('.row .col-md-3:nth-child(3) h2').textContent = stats.prs_this_week;
+    }
+
+    function updateRecentActivity(activities) {
+        const container = document.querySelector('.list-group-flush');
+        if (!container) return;
+
+        if (activities.length === 0) {
+            // Show empty state
+            container.parentElement.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem; color: #ccc;"></i>
+                    <p class="text-muted mt-3">No recent activity</p>
+                    <a href="/session/setup" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> Start Your First Session
+                    </a>
+                </div>
+            `;
+            return;
+        }
+
+        // Update activity list
+        container.innerHTML = activities.map(activity => `
+            <div class="list-group-item">
+                <div class="d-flex w-100 justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-1">
+                            <strong>${activity.athlete_name}</strong>
+                            ${activity.is_pr ? '<span class="badge bg-warning text-dark">🏆 PR!</span>' : ''}
+                        </h6>
+                        <p class="mb-1">
+                            <small class="text-muted">
+                                <i class="bi bi-journal-code"></i> ${activity.course_name}
+                            </small>
+                        </p>
+                    </div>
+                    <div class="text-end">
+                        <div class="badge bg-info fs-6">
+                            ${activity.total_time ? activity.total_time.toFixed(2) + 's' : 'N/A'}
+                        </div>
+                        <div>
+                            <small class="text-muted">${activity.time_ago}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Start auto-refresh (every 10 seconds)
+    setInterval(refreshDashboard, 10000);
 });
 </script>
 

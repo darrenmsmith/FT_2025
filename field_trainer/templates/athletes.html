@@ -913,18 +913,75 @@
             }
         }
 
-        function exportAll() {
-            // Export all active athletes
-            window.location.href = '/api/athletes/export';
+        async function exportAll() {
+            try {
+                // Fetch CSV data from server
+                const response = await fetch('/api/athletes/export');
+                if (!response.ok) {
+                    throw new Error('Export failed');
+                }
+
+                const csvText = await response.text();
+
+                // Use data URL to trigger download
+                const encodedCsv = encodeURIComponent(csvText);
+                const dataUrl = 'data:text/csv;charset=utf-8,' + encodedCsv;
+
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = dataUrl;
+                a.download = `all_athletes_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.csv`;
+
+                document.body.appendChild(a);
+                a.click();
+
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                }, 100);
+
+                showMessage('Athletes exported successfully', 'success');
+            } catch (error) {
+                console.error('Error exporting athletes:', error);
+                showMessage('Error exporting athletes', 'error');
+            }
         }
 
-        function exportTeamRoster() {
-            // Export specific team roster
+        async function exportTeamRoster() {
             const teamId = document.getElementById('teamFilter').value;
-            if (teamId) {
-                window.location.href = `/api/teams/${teamId}/roster/export`;
-            } else {
+            if (!teamId) {
                 showMessage('Please select a team to export roster', 'error');
+                return;
+            }
+
+            try {
+                // Fetch CSV data from server
+                const response = await fetch(`/api/teams/${teamId}/roster/export`);
+                if (!response.ok) {
+                    throw new Error('Export failed');
+                }
+
+                const csvText = await response.text();
+
+                // Use data URL to trigger download
+                const encodedCsv = encodeURIComponent(csvText);
+                const dataUrl = 'data:text/csv;charset=utf-8,' + encodedCsv;
+
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = dataUrl;
+                a.download = `roster_team_${teamId}_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.csv`;
+
+                document.body.appendChild(a);
+                a.click();
+
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                }, 100);
+
+                showMessage('Team roster exported successfully', 'success');
+            } catch (error) {
+                console.error('Error exporting team roster:', error);
+                showMessage('Error exporting team roster', 'error');
             }
         }
 
@@ -932,12 +989,25 @@
             const csv = 'first_name,last_name,birthdate,gender,parent1_name,parent1_phone,parent1_email,parent2_name,parent2_phone,parent2_email,allergies,medical_conditions\n' +
                        'John,Smith,2010-05-15,male,Jane Smith,555-1234,jane@email.com,Bob Smith,555-5678,bob@email.com,Peanuts (severe),Asthma\n';
 
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
+            // Use data URL instead of blob URL for better browser compatibility
+            const encodedCsv = encodeURIComponent(csv);
+            const dataUrl = 'data:text/csv;charset=utf-8,' + encodedCsv;
+
             const a = document.createElement('a');
-            a.href = url;
+            a.style.display = 'none';
+            a.href = dataUrl;
             a.download = 'athlete_import_template.csv';
+
+            // Append to body, click, then remove
+            document.body.appendChild(a);
             a.click();
+
+            // Clean up
+            setTimeout(() => {
+                document.body.removeChild(a);
+            }, 100);
+
+            showMessage('Template downloaded', 'success');
         }
 
         function showMessage(message, type) {

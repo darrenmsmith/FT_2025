@@ -69,7 +69,7 @@ def calculate_age(birthdate):
     }
 
 def create_athlete(first_name, last_name, birthdate, gender=None,
-                  display_name=None, consent_given_by=None):
+                  display_name=None, consent_given_by=None, team_id=None):
     """Create new athlete with automatic number generation"""
 
     # Validate age and consent (consent tracking, but not strictly required)
@@ -78,21 +78,36 @@ def create_athlete(first_name, last_name, birthdate, gender=None,
 
     athlete_number = generate_athlete_number()
 
+    # Combine first_name and last_name for Field Trainer schema
+    full_name = display_name if display_name else f"{first_name} {last_name}".strip()
+
+    # Calculate age from birthdate for Field Trainer schema
+    age = age_info.get('age')
+
+    # Generate UUID for athlete_id to match Field Trainer schema
+    import uuid
+    athlete_id = str(uuid.uuid4())
+
+    # Use a default team_id if none provided (will be updated when adding to team)
+    if not team_id:
+        # Use a placeholder - should be updated when athlete is added to a team
+        team_id = ''
+
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO athletes (
-                athlete_number, first_name, last_name, display_name,
-                birthdate, gender, consent_given_by, consent_date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                athlete_id, team_id, name, athlete_number,
+                birthdate, gender, age, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            athlete_number, first_name, last_name, display_name,
-            birthdate, gender, consent_given_by,
-            datetime.now() if consent_given_by else None
+            athlete_id, team_id, full_name, athlete_number,
+            birthdate, gender, age,
+            datetime.now().isoformat(),
+            datetime.now().isoformat()
         ))
 
-        athlete_id = cursor.lastrowid
-        logger.info(f"Created athlete: {athlete_number} - {first_name} {last_name}")
+        logger.info(f"Created athlete: {athlete_number} - {full_name}")
 
         return athlete_id, athlete_number
 
@@ -535,51 +550,56 @@ def import_athletes_csv(csv_file, team_id=None, skip_duplicates=True):
     return results
 
 def add_to_team(athlete_id, team_id, jersey_number=None, position=None):
-    """Add athlete to team (handles multi-team)"""
+    """Add athlete to team (Field Trainer uses single team per athlete)"""
     with get_db() as conn:
         cursor = conn.cursor()
+        # Update athlete's team_id, jersey_number, and position in athletes table
         cursor.execute("""
-            INSERT OR IGNORE INTO team_athletes
-            (athlete_id, team_id, jersey_number, position)
-            VALUES (?, ?, ?, ?)
-        """, (athlete_id, team_id, jersey_number, position))
+            UPDATE athletes
+            SET team_id = ?,
+                jersey_number = COALESCE(?, jersey_number),
+                position = COALESCE(?, position),
+                updated_at = ?
+            WHERE athlete_id = ?
+        """, (team_id, jersey_number, position, datetime.now().isoformat(), athlete_id))
 
         if cursor.rowcount > 0:
             logger.info(f"Added athlete {athlete_id} to team {team_id}")
         return cursor.rowcount > 0
 
 def remove_from_team(athlete_id, team_id):
-    """Remove athlete from team"""
+    """Remove athlete from team (Field Trainer: set team_id to empty)"""
     with get_db() as conn:
         cursor = conn.cursor()
+        # Clear the athlete's team_id if it matches the specified team
         cursor.execute("""
-            DELETE FROM team_athletes
+            UPDATE athletes
+            SET team_id = '',
+                updated_at = ?
             WHERE athlete_id = ? AND team_id = ?
-        """, (athlete_id, team_id))
+        """, (datetime.now().isoformat(), athlete_id, team_id))
 
         if cursor.rowcount > 0:
             logger.info(f"Removed athlete {athlete_id} from team {team_id}")
         return cursor.rowcount > 0
 
 def export_all_athletes_csv():
-    """Export all athletes as CSV"""
+    """Export all athletes as CSV (Field Trainer schema)"""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT
-                a.athlete_number, a.first_name, a.last_name, a.birthdate, a.gender, a.display_name,
-                (SELECT name FROM athlete_contacts WHERE athlete_id = a.id AND is_primary = 1 LIMIT 1) as primary_contact,
-                (SELECT phone FROM athlete_contacts WHERE athlete_id = a.id AND is_primary = 1 LIMIT 1) as primary_phone,
-                (SELECT email FROM athlete_contacts WHERE athlete_id = a.id AND is_primary = 1 LIMIT 1) as primary_email,
+                a.athlete_number, a.name, a.birthdate, a.age, a.gender,
+                a.jersey_number, a.position,
+                (SELECT name FROM athlete_contacts WHERE athlete_id = a.athlete_id AND is_primary = 1 LIMIT 1) as primary_contact,
+                (SELECT phone FROM athlete_contacts WHERE athlete_id = a.athlete_id AND is_primary = 1 LIMIT 1) as primary_phone,
+                (SELECT email FROM athlete_contacts WHERE athlete_id = a.athlete_id AND is_primary = 1 LIMIT 1) as primary_email,
                 am.allergies, am.allergy_severity, am.medical_conditions,
-                GROUP_CONCAT(DISTINCT t.name) as teams
+                t.name as team_name
             FROM athletes a
-            LEFT JOIN athlete_medical am ON a.id = am.athlete_id
-            LEFT JOIN team_athletes ta ON a.id = ta.athlete_id
-            LEFT JOIN teams t ON ta.team_id = t.team_id
-            WHERE a.deleted = 0 AND a.active = 1
-            GROUP BY a.id
-            ORDER BY a.last_name, a.first_name
+            LEFT JOIN athlete_medical am ON a.athlete_id = am.athlete_id
+            LEFT JOIN teams t ON a.team_id = t.team_id
+            ORDER BY a.name
         """)
 
         # Create CSV
@@ -588,27 +608,27 @@ def export_all_athletes_csv():
 
         # Header
         writer.writerow([
-            'Athlete Number', 'First Name', 'Last Name', 'Birthdate', 'Age', 'Gender', 'Display Name',
-            'Primary Contact', 'Phone', 'Email', 'Teams',
+            'Athlete Number', 'Name', 'Birthdate', 'Age', 'Gender',
+            'Jersey Number', 'Position', 'Team',
+            'Primary Contact', 'Phone', 'Email',
             'Allergies', 'Allergy Severity', 'Medical Conditions'
         ])
 
         # Data
         for row in cursor.fetchall():
             athlete = dict(row)
-            age = calculate_age(athlete['birthdate'])['age'] if athlete['birthdate'] else ''
             writer.writerow([
                 athlete['athlete_number'] or '',
-                athlete['first_name'],
-                athlete['last_name'],
+                athlete['name'] or '',
                 athlete['birthdate'] or '',
-                age,
+                athlete['age'] or '',
                 athlete['gender'] or '',
-                athlete['display_name'] or '',
+                athlete['jersey_number'] or '',
+                athlete['position'] or '',
+                athlete['team_name'] or '',
                 athlete['primary_contact'] or '',
                 athlete['primary_phone'] or '',
                 athlete['primary_email'] or '',
-                athlete['teams'] or '',
                 athlete['allergies'] or '',
                 athlete['allergy_severity'] or '',
                 athlete['medical_conditions'] or ''
@@ -617,22 +637,21 @@ def export_all_athletes_csv():
         return output.getvalue()
 
 def export_team_roster_csv(team_id):
-    """Export team roster as CSV"""
+    """Export team roster as CSV (Field Trainer schema)"""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT
-                a.first_name, a.last_name, a.birthdate, a.gender,
-                ta.jersey_number, ta.position,
-                (SELECT name FROM athlete_contacts WHERE athlete_id = a.id AND is_primary = 1 LIMIT 1) as primary_contact,
-                (SELECT phone FROM athlete_contacts WHERE athlete_id = a.id AND is_primary = 1 LIMIT 1) as primary_phone,
-                (SELECT email FROM athlete_contacts WHERE athlete_id = a.id AND is_primary = 1 LIMIT 1) as primary_email,
+                a.name, a.birthdate, a.age, a.gender,
+                a.jersey_number, a.position,
+                (SELECT name FROM athlete_contacts WHERE athlete_id = a.athlete_id AND is_primary = 1 LIMIT 1) as primary_contact,
+                (SELECT phone FROM athlete_contacts WHERE athlete_id = a.athlete_id AND is_primary = 1 LIMIT 1) as primary_phone,
+                (SELECT email FROM athlete_contacts WHERE athlete_id = a.athlete_id AND is_primary = 1 LIMIT 1) as primary_email,
                 am.allergies, am.medical_conditions
             FROM athletes a
-            JOIN team_athletes ta ON a.id = ta.athlete_id
-            LEFT JOIN athlete_medical am ON a.id = am.athlete_id
-            WHERE ta.team_id = ? AND a.deleted = 0
-            ORDER BY a.last_name, a.first_name
+            LEFT JOIN athlete_medical am ON a.athlete_id = am.athlete_id
+            WHERE a.team_id = ?
+            ORDER BY a.name
         """, (team_id,))
 
         # Create CSV
@@ -641,7 +660,7 @@ def export_team_roster_csv(team_id):
 
         # Header
         writer.writerow([
-            'First Name', 'Last Name', 'Birthdate', 'Age', 'Gender',
+            'Name', 'Birthdate', 'Age', 'Gender',
             'Jersey', 'Position', 'Primary Contact', 'Phone', 'Email',
             'Allergies', 'Medical Conditions'
         ])
@@ -649,12 +668,10 @@ def export_team_roster_csv(team_id):
         # Data
         for row in cursor.fetchall():
             athlete = dict(row)
-            age = calculate_age(athlete['birthdate'])['age'] if athlete['birthdate'] else ''
             writer.writerow([
-                athlete['first_name'],
-                athlete['last_name'],
+                athlete['name'] or '',
                 athlete['birthdate'] or '',
-                age,
+                athlete['age'] or '',
                 athlete['gender'] or '',
                 athlete['jersey_number'] or '',
                 athlete['position'] or '',
