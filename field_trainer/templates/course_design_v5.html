@@ -11,93 +11,61 @@
 
 {% block extra_css %}
 <style>
-    body { padding-bottom: 100px; background: #f5f6fa; }
-    
-    /* Top Bar */
-    .top-bar {
-        background: white;
-        border-bottom: 3px solid #667eea;
-        padding: 20px;
-        margin-bottom: 24px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    }
-    
-    .top-bar h2 {
-        margin: 0 0 20px 0;
-        color: #2c3e50;
-        font-size: 1.8rem;
-    }
-    
+    body { padding-bottom: 100px; }
+
+    /* Form Grid */
     .top-row {
         display: grid;
         grid-template-columns: 2fr 1fr 1fr;
-        gap: 16px;
-        margin-bottom: 16px;
+        gap: 10px;
+        margin-bottom: 10px;
     }
 
     .bottom-row {
         display: grid;
         grid-template-columns: 1fr;
-        gap: 16px;
+        gap: 10px;
     }
 
-    @media (max-width: 480px) {
-        .top-row, .bottom-row { grid-template-columns: 1fr; }
+    @media (max-width: 768px) {
+        .top-row { grid-template-columns: 1fr; }
     }
-    
-    /* Main Container */
-    .course-accordion { max-width: 1200px; margin: 0 auto; padding: 0 20px 20px; }
-    
-    /* Section Divider - WIDER AND MORE COLORFUL */
-    .section-divider {
-        border: 0;
-        height: 8px;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-        margin: 32px 0;
-        border-radius: 4px;
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+
+    /* Section Cards */
+    .section-card {
+        margin-bottom: 12px;
     }
-    
-    /* Accordion Section */
-    .accordion-section {
-        background: white;
-        border-radius: 12px;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        overflow: hidden;
-        border: 2px solid #e9ecef;
-    }
-    
-    /* Accordion Header */
-    .accordion-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+    .section-card .card-header {
+        background-color: #0d6efd;
         color: white;
-        padding: 18px 24px;
         cursor: pointer;
         display: flex;
         justify-content: space-between;
         align-items: center;
         user-select: none;
-        transition: all 0.3s;
     }
-    
-    .accordion-header:hover {
-        background: linear-gradient(135deg, #5568d3 0%, #653a8b 100%);
-        transform: translateY(-1px);
+
+    .section-card .card-header:hover {
+        background-color: #0b5ed7;
     }
-    
-    .accordion-header.complete {
-        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+
+    .section-card .card-header.complete {
+        background-color: #198754;
     }
-    
-    .accordion-left {
+
+    .section-card .card-header.complete:hover {
+        background-color: #157347;
+    }
+
+    .section-header-left {
         display: flex;
         align-items: center;
-        gap: 16px;
+        gap: 12px;
     }
-    
-    .accordion-number {
-        background: rgba(255,255,255,0.3);
+
+    .section-number {
+        background: rgba(255,255,255,0.2);
         width: 42px;
         height: 42px;
         border-radius: 50%;
@@ -143,80 +111,76 @@
         font-size: 1.4rem;
         transition: transform 0.3s;
     }
-    
-    .accordion-section.expanded .accordion-arrow { transform: rotate(180deg); }
-    
-    /* Accordion Body */
-    .accordion-body {
-        max-height: 0;
-        overflow: hidden;
-        transition: max-height 0.4s ease;
-        padding: 0 24px;
+
+    .section-card .accordion-arrow {
+        color: white;
+        font-size: 1.2rem;
+        font-weight: bold;
+        transition: transform 0.2s ease;
     }
-    
-    .accordion-section.expanded .accordion-body {
-        max-height: 4000px;
-        padding: 24px;
+
+    .section-card.expanded .accordion-arrow { transform: rotate(180deg); }
+
+    /* Card Body Toggle */
+    .section-card .card-body.accordion-body {
+        padding: 0.75rem;
     }
     
     /* Device List */
     .devices-list {
         display: grid;
-        gap: 16px;
-        margin-bottom: 16px;
+        gap: 10px;
+        margin-bottom: 10px;
     }
     
     /* Device Card */
     .device-card {
-        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-        border: 2px solid #dee2e6;
-        border-radius: 12px;
-        padding: 20px;
-        transition: all 0.3s;
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 0.375rem;
+        padding: 12px;
+        transition: all 0.2s;
     }
-    
+
     .device-card:hover {
-        border-color: #667eea;
-        box-shadow: 0 4px 12px rgba(102,126,234,0.2);
-        transform: translateY(-2px);
+        border-color: #0d6efd;
+        box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
     }
-    
+
     .device-card.start {
-        border-color: #28a745;
-        background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%);
+        border-color: #198754;
+        background: #f8f9fa;
     }
     
     .device-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 20px;
-        padding-bottom: 16px;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
         border-bottom: 2px solid #e9ecef;
     }
     
     .device-label {
-        font-size: 1.2rem;
+        font-size: 1rem;
         font-weight: 700;
         color: #2c3e50;
         display: flex;
         align-items: center;
         gap: 8px;
     }
-    
+
     .device-badge {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: #0d6efd;
         color: white;
-        padding: 6px 14px;
+        padding: 4px 10px;
         border-radius: 20px;
-        font-size: 0.85rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+        font-size: 0.8rem;
+        font-weight: 600;
     }
-    
+
     .device-badge.start {
-        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        background: #198754;
     }
     
     /* Device Fields Grid - ALL SIDE BY SIDE */
@@ -258,8 +222,8 @@
     
     .form-control:focus, .form-select:focus {
         outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 4px rgba(102,126,234,0.1);
+        border-color: #86b7fe;
+        box-shadow: 0 0 0 0.25rem rgba(13,110,253,0.25);
     }
     
     textarea.form-control {
@@ -268,62 +232,13 @@
         font-family: inherit;
     }
     
-    /* Buttons */
+    /* Override Bootstrap button styles slightly */
     .btn {
-        padding: 14px 28px;
-        border: none;
-        border-radius: 8px;
-        font-size: 1rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s;
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+        gap: 8px;
     }
-    
-    .btn:active { transform: scale(0.98); }
-    
-    .btn-primary {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        box-shadow: 0 4px 12px rgba(102,126,234,0.3);
-    }
-    
-    .btn-primary:hover {
-        box-shadow: 0 6px 16px rgba(102,126,234,0.4);
-        transform: translateY(-2px);
-    }
-    
-    .btn-danger {
-        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-        color: white;
-    }
-    
-    .btn-danger:hover {
-        box-shadow: 0 4px 12px rgba(220,53,69,0.3);
-    }
-    
-    .btn-success {
-        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-        color: white;
-        box-shadow: 0 4px 12px rgba(40,167,69,0.3);
-    }
-    
-    .btn-success:hover {
-        box-shadow: 0 6px 16px rgba(40,167,69,0.4);
-        transform: translateY(-2px);
-    }
-    
-    .btn-secondary {
-        background: #6c757d;
-        color: white;
-    }
-    
-    .btn-secondary:hover { background: #5a6268; }
-    
+
     .btn-block {
         width: 100%;
         justify-content: center;
@@ -359,24 +274,78 @@
     /* Empty State */
     .empty-state {
         text-align: center;
-        padding: 60px 20px;
+        padding: 20px 15px;
         color: #6c757d;
         background: #f8f9fa;
-        border-radius: 12px;
+        border-radius: 6px;
         border: 2px dashed #dee2e6;
     }
-    
+
     .empty-icon {
-        font-size: 4rem;
-        margin-bottom: 16px;
+        font-size: 1.8rem;
+        margin-bottom: 6px;
         opacity: 0.6;
     }
-    
+
     .empty-text {
-        font-size: 1.1rem;
+        font-size: 0.85rem;
         margin: 0;
     }
-    
+
+    /* Compact card spacing */
+    .card-body {
+        padding: 0.75rem;
+    }
+
+    .card-header {
+        padding: 0.5rem 0.75rem;
+    }
+
+    .card-header h5 {
+        font-size: 1rem;
+    }
+
+    .card-header small {
+        font-size: 0.8rem;
+    }
+
+    .form-group {
+        margin-bottom: 0.4rem;
+    }
+
+    /* Compact form controls */
+    .form-control, .form-select {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.875rem;
+        height: calc(1.5em + 0.6rem + 2px);
+    }
+
+    textarea.form-control {
+        height: auto;
+        min-height: 2.2rem;
+        padding: 0.4rem 0.6rem;
+    }
+
+    label {
+        font-size: 0.8rem;
+        margin-bottom: 0.2rem;
+        font-weight: 500;
+    }
+
+    .card {
+        margin-bottom: 0.75rem !important;
+    }
+
+    /* Compact buttons */
+    .btn {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.875rem;
+    }
+
+    .btn-block {
+        padding: 0.5rem 1rem;
+    }
+
     /* Mobile Responsive */
     @media (max-width: 480px) {
         .top-bar { padding: 16px; }
@@ -411,19 +380,36 @@
 {% endblock %}
 
 {% block content %}
-<!-- Top Bar -->
-<div class="top-bar">
-    <h2>
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>
         {% if mode == 'edit' %}
-            ✏️ Edit Course
+            <i class="bi bi-pencil-square"></i> Edit Course
         {% elif mode == 'duplicate' %}
-            📋 Duplicate Course
+            <i class="bi bi-files"></i> Duplicate Course
         {% else %}
-            ➕ Create New Course
+            <i class="bi bi-plus-circle"></i> Create New Course
         {% endif %}
-    </h2>
-    
-    <div class="top-row">
+    </h1>
+    <a href="/courses" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+</div>
+
+<!-- Course Details Card -->
+<div class="card section-card mb-3 expanded" id="section-0">
+    <div class="card-header" onclick="toggleSection(0)">
+        <div class="section-header-left">
+            <div>
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Course Details</h5>
+            </div>
+        </div>
+        <div>
+            <span class="accordion-arrow">▼</span>
+        </div>
+    </div>
+    <div class="card-body accordion-body" style="display:block;">
+        <div class="top-row">
         <div class="form-group">
             <label for="courseName">Course Name *</label>
             <input type="text" class="form-control" id="courseName" placeholder="e.g., Speed Circuit">
@@ -431,71 +417,73 @@
         <div class="form-group">
             <label for="courseCategory">Category</label>
             <select class="form-select" id="courseCategory">
-                <option value="conditioning">Conditioning</option>
                 <option value="agility">Agility</option>
+                <option value="conditioning">Conditioning</option>
+                <option value="endurance">Endurance</option>
+                <option value="plyometrics">Plyometrics</option>
+                <option value="reaction">Reaction</option>
+                <option value="recovery">Recovery</option>
                 <option value="speed">Speed</option>
+                <option value="strength">Strength</option>
+                <option value="stress">Stress</option>
                 <option value="warmup">Warm-up</option>
             </select>
         </div>
         <div class="form-group">
             <label for="distanceUnit">Distance Unit</label>
-            <select class="form-select" id="distanceUnit">
+            <select class="form-select" id="distanceUnit" onchange="updateDistanceLabels()">
                 <option value="yards">Yards</option>
                 <option value="meters">Meters</option>
+                <option value="feet">Feet</option>
             </select>
         </div>
     </div>
 
-    <div class="bottom-row">
-        <div class="form-group">
-            <label for="courseDescription">Description</label>
-            <input type="text" class="form-control" id="courseDescription" placeholder="Brief description...">
+        <div class="bottom-row">
+            <div class="form-group">
+                <label for="courseDescription">Description</label>
+                <input type="text" class="form-control" id="courseDescription" placeholder="Brief description...">
+            </div>
         </div>
     </div>
 </div>
 
-<div class="course-accordion">
-    <hr class="section-divider">
-    
-    <!-- Section 1: Devices & Actions -->
-    <div class="accordion-section expanded" id="section-1">
-        <div class="accordion-header" onclick="toggleSection(1)">
-            <div class="accordion-left">
-                <div class="accordion-info">
-                    <div class="accordion-title">Devices & Actions</div>
-                    <div class="accordion-subtitle">Configure your course sequence</div>
-                </div>
-            </div>
-            <div class="accordion-right">
-                <span class="accordion-check" style="display:none;">✓</span>
-                <span class="accordion-arrow">▼</span>
+<!-- Devices & Actions Card -->
+<div class="card section-card mb-3 expanded" id="section-1">
+    <div class="card-header" onclick="toggleSection(1)">
+        <div class="section-header-left">
+            <div>
+                <h5 class="mb-0"><i class="bi bi-diagram-3"></i> Devices & Actions</h5>
+                <small>Configure your course sequence</small>
             </div>
         </div>
-        <div class="accordion-body">
+        <div>
+            <span class="accordion-arrow">▼</span>
+        </div>
+    </div>
+    <div class="card-body accordion-body" style="display:block;">
             <div class="devices-list" id="devicesList"></div>
             <button type="button" class="btn btn-primary btn-block" onclick="addDevice()">
                 ➕ Add Device
             </button>
+    </div>
+</div>
+
+<!-- Interactive Diagram Card -->
+<div class="card section-card mb-3 expanded" id="section-2">
+    <div class="card-header" onclick="toggleSection(2)">
+        <div class="section-header-left">
+            <div>
+                <h5 class="mb-0"><i class="bi bi-diagram-2"></i> Interactive Diagram</h5>
+                <small>Visualize and arrange your course layout</small>
+            </div>
+        </div>
+        <div>
+            <span class="accordion-check" style="display:none;">✓</span>
+            <span class="accordion-arrow">▼</span>
         </div>
     </div>
-    
-    <hr class="section-divider">
-
-    <!-- Section 2: Interactive Diagram -->
-    <div class="accordion-section" id="section-2">
-        <div class="accordion-header" onclick="toggleSection(2)">
-            <div class="accordion-left">
-                <div class="accordion-info">
-                    <div class="accordion-title">Interactive Diagram</div>
-                    <div class="accordion-subtitle">Visualize and arrange your course layout</div>
-                </div>
-            </div>
-            <div class="accordion-right">
-                <span class="accordion-check" style="display:none;">✓</span>
-                <span class="accordion-arrow">▼</span>
-            </div>
-        </div>
-        <div class="accordion-body">
+    <div class="card-body accordion-body" style="display:block;">
             <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
                 <button type="button" class="btn btn-primary" onclick="generateDiagram()">
                     🔄 Generate Diagram
@@ -507,7 +495,7 @@
                     <span id="showDistanceLabel">📏 Show: Distance</span>
                 </button>
             </div>
-            <div id="diagramPreview" style="min-height: 400px; border: 2px solid #dee2e6; border-radius: 8px; background: #f8f9fa; display: flex; align-items: center; justify-content: center;">
+            <div id="diagramPreview" style="min-height: 250px; border: 2px solid #dee2e6; border-radius: 6px; background: #f8f9fa; display: flex; align-items: center; justify-content: center;">
                 <div class="empty-state">
                     <div class="empty-icon">📍</div>
                     <p class="empty-text">Add devices and click "Generate Diagram"</p>
@@ -567,6 +555,26 @@ let showActions = false;
 let dragState = null;
 let svgElement = null;
 
+// Action descriptions - default instructions for each action type
+const actionDescriptions = {
+    'bounds': 'Push off forcefully from one leg and extend the opposite leg forward in a long, exaggerated stride. Land softly and repeat with rhythm and control.',
+    'butt_kicks': 'Jog forward while driving heels up toward the glutes. Keep knees low and maintain a steady cadence.',
+    'carioca_left': 'Cross one leg over the other while moving laterally, rotating hips with each step. Stay light on your feet and maintain fluid motion.',
+    'carioca_right': 'Cross one leg over the other while moving laterally, rotating hips with each step. Stay light on your feet and maintain fluid motion.',
+    'external_hip': 'Lift the knee and rotate the leg outward in a circular motion. Engage hip muscles and maintain balance throughout.',
+    'high_knees': 'Drive knees up toward the chest with each step while staying tall. Use fast, rhythmic arm swings to match leg speed.',
+    'high_skips': 'Skip forward with exaggerated vertical lift and arm drive. Focus on height, rhythm, and soft landings.',
+    'icky_shuffle': 'Step quickly in and out of an agility ladder with alternating feet. Stay low and maintain fast, precise footwork.',
+    'internal_hip': 'Lift the knee and rotate the leg inward across the body. Keep core engaged and movement controlled.',
+    'jog': 'Run at a light, steady pace with relaxed arms and even strides. Maintain upright posture and breathing rhythm.',
+    'ladder': 'Perform quick foot patterns through each box of the ladder. Stay light, fast, and coordinated.',
+    'side_shuffle_left': 'Move laterally by pushing off the trailing foot and keeping feet shoulder-width apart. Stay low and avoid crossing feet.',
+    'side_shuffle_right': 'Move laterally by pushing off the trailing foot and keeping feet shoulder-width apart. Stay low and avoid crossing feet.',
+    'sprint': 'Explode forward from a low stance using powerful leg drive. Maintain forward lean and maximum effort over short distance.',
+    'two_in_two_out': 'Step both feet into and out of each ladder box in a quick, rhythmic pattern. Focus on speed, timing, and control.',
+    'walking_lunge': 'Step forward into a deep lunge, lowering the rear knee toward the ground. Push off the front foot to rise and repeat with the opposite leg.'
+};
+
 console.log('🎨 ACCORDION v5 LOADED - Final layout with diagram support');
 
 // Initialize from existing data
@@ -578,13 +586,18 @@ if (courseData && (courseMode === 'edit' || courseMode === 'duplicate')) {
     if (courseData.distance_unit) document.getElementById('distanceUnit').value = courseData.distance_unit;
 
     if (courseData.actions && courseData.actions.length > 0) {
-        devices = courseData.actions.map(a => ({
-            device_id: a.device_id,
-            device_name: a.device_name || a.device_id,
-            action: a.action || 'default_beep',
-            instruction: a.instruction || '',
-            distance: a.distance || 0
-        }));
+        devices = courseData.actions.map(a => {
+            const action = a.action || 'default_beep';
+            // Auto-populate instruction if blank using default description for this action
+            const instruction = a.instruction || actionDescriptions[action] || '';
+            return {
+                device_id: a.device_id,
+                device_name: a.device_name || a.device_id,
+                action: action,
+                instruction: instruction,
+                distance: a.distance || 0
+            };
+        });
         devices.forEach(d => usedDevices.add(d.device_id));
     }
 
@@ -614,12 +627,15 @@ if (courseData && (courseMode === 'edit' || courseMode === 'duplicate')) {
 
 function toggleSection(num) {
     const section = document.getElementById(`section-${num}`);
+    const body = section.querySelector('.card-body');
     const isExpanded = section.classList.contains('expanded');
-    
+
     if (isExpanded) {
         section.classList.remove('expanded');
+        body.style.display = 'none';
     } else {
         section.classList.add('expanded');
+        body.style.display = 'block';
         if (num === 1 && availableDevices.length === 0) {
             loadAvailableDevices();
         }
@@ -628,15 +644,19 @@ function toggleSection(num) {
 
 function markComplete(num, complete) {
     const section = document.getElementById(`section-${num}`);
+    if (!section) return;
+
     const check = section.querySelector('.accordion-check');
-    const header = section.querySelector('.accordion-header');
-    
-    if (complete) {
-        header.classList.add('complete');
-        check.style.display = 'inline';
-    } else {
-        header.classList.remove('complete');
-        check.style.display = 'none';
+    const header = section.querySelector('.card-header');
+
+    if (header) {
+        if (complete) {
+            header.classList.add('complete');
+            if (check) check.style.display = 'inline';
+        } else {
+            header.classList.remove('complete');
+            if (check) check.style.display = 'none';
+        }
     }
 }
 
@@ -654,22 +674,32 @@ async function loadAvailableDevices() {
     }
 }
 
+function getDistanceUnitLabel() {
+    const unit = document.getElementById('distanceUnit')?.value || 'yards';
+    return unit.charAt(0).toUpperCase() + unit.slice(1);
+}
+
+function updateDistanceLabels() {
+    const labels = document.querySelectorAll('.distance-label');
+    const unitLabel = getDistanceUnitLabel();
+    labels.forEach(label => {
+        label.textContent = `Distance (${unitLabel})`;
+    });
+}
+
 function renderDevices() {
     const container = document.getElementById('devicesList');
     
     if (devices.length === 0) {
         container.innerHTML = '<div class="empty-state"><div class="empty-icon">🎯</div><p class="empty-text">No devices added yet. Click "Add Device" to begin.</p></div>';
-        markComplete(1, false);
         return;
     }
-    
+
     container.innerHTML = '';
     devices.forEach((dev, idx) => {
         const card = createDeviceCard(dev, idx);
         container.appendChild(card);
     });
-    
-    markComplete(1, true);
 }
 
 function createDeviceCard(dev, idx) {
@@ -719,17 +749,17 @@ function createDeviceCard(dev, idx) {
             </div>
             <div class="form-group">
                 <label>Action</label>
-                <select class="form-select" onchange="updateDevice(${idx}, 'action', this.value)">
+                <select class="form-select" onchange="updateDeviceAction(${idx}, this.value)">
                     ${actionOpts}
                 </select>
             </div>
             <div class="form-group">
-                <label>Distance (${document.getElementById('distanceUnit')?.value || 'yards'})</label>
+                <label class="distance-label">Distance (${getDistanceUnitLabel()})</label>
                 <input type="number" class="form-control" value="${dev.distance || 0}" min="0" onchange="updateDevice(${idx}, 'distance', this.value)">
             </div>
             <div class="form-group device-grid-full">
-                <label>Instruction (Optional)</label>
-                <input type="text" class="form-control" value="${dev.instruction || ''}" placeholder="e.g., Sprint to next cone" onchange="updateDevice(${idx}, 'instruction', this.value)">
+                <label>Description</label>
+                <textarea class="form-control" id="instruction-${idx}" rows="2" placeholder="Action description..." onchange="updateDevice(${idx}, 'instruction', this.value)">${dev.instruction || ''}</textarea>
             </div>
         </div>
     `;
@@ -753,7 +783,7 @@ function addDevice() {
         device_id: nextDev.device_id,
         device_name: nextDev.device_name,
         action: 'jog',
-        instruction: '',
+        instruction: actionDescriptions['jog'] || '',
         distance: devices.length === 0 ? 0 : 5
     });
     
@@ -768,9 +798,26 @@ function updateDevice(idx, prop, val) {
         const devInfo = availableDevices.find(d => d.device_id === val);
         devices[idx].device_name = devInfo?.device_name || val;
     }
-    
+
     devices[idx][prop] = prop === 'distance' ? parseFloat(val) || 0 : val;
     console.log(`Updated device ${idx} ${prop}:`, val);
+}
+
+function updateDeviceAction(idx, action) {
+    // Update the action
+    devices[idx].action = action;
+
+    // Auto-populate instruction with default description for this action
+    const defaultDescription = actionDescriptions[action] || '';
+    devices[idx].instruction = defaultDescription;
+
+    // Update the textarea in the DOM
+    const instructionField = document.getElementById(`instruction-${idx}`);
+    if (instructionField) {
+        instructionField.value = defaultDescription;
+    }
+
+    console.log(`Updated device ${idx} action to ${action}, instruction auto-populated`);
 }
 
 function removeDevice(idx) {
@@ -819,17 +866,11 @@ function generateDiagram() {
     svg += '<defs><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">';
     svg += '<path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" stroke-width="1"/></pattern></defs>';
     svg += '<rect width="' + width + '" height="' + height + '" fill="url(#grid)"/>';
+    // Draw connecting lines between consecutive cones (dotted lines only, no labels)
     for (let i = 0; i < conePositions.length - 1; i++) {
         const p1 = conePositions[i];
         const p2 = conePositions[i + 1];
-        const midX = (p1.x + p2.x) / 2;
-        const midY = (p1.y + p2.y) / 2;
         svg += '<line x1="' + p1.x + '" y1="' + p1.y + '" x2="' + p2.x + '" y2="' + p2.y + '" stroke="#2196F3" stroke-width="2" stroke-dasharray="5,5" opacity="0.5"/>';
-        const distance = devices[i + 1].distance || 0;
-        const action = devices[i + 1].action || 'default_beep';
-        const label = showActions ? action.replace(/_/g, ' ') : distance + ' ' + distanceUnit;
-        svg += '<rect x="' + (midX - 40) + '" y="' + (midY - 15) + '" width="80" height="20" fill="white" stroke="' + (showActions ? '#E91E63' : '#2196F3') + '" rx="3"/>';
-        svg += '<text x="' + midX + '" y="' + midY + '" text-anchor="middle" font-size="12" font-weight="bold" fill="' + (showActions ? '#E91E63' : '#2196F3') + '">' + label + '</text>';
     }
     conePositions.forEach((pos, idx) => {
         const isStart = idx === 0;
@@ -860,6 +901,22 @@ function generateDiagram() {
         svg += '<line x1="' + arrowStartX + '" y1="' + arrowStartY + '" x2="' + arrowEndX + '" y2="' + arrowEndY + '" stroke="' + color + '" stroke-width="4"/>';
         svg += '<polygon points="' + arrowEndX + ',' + arrowEndY + ' ' + arrowHead1X + ',' + arrowHead1Y + ' ' + arrowHead2X + ',' + arrowHead2Y + '" fill="' + color + '"/>';
         svg += '</g>';
+
+        // Add action/distance label along the arrow direction
+        if (idx < devices.length) {
+            const distance = devices[idx].distance || 0;
+            const action = devices[idx].action || 'default_beep';
+            const labelText = showActions ? action.replace(/_/g, ' ') : distance + ' ' + distanceUnit;
+            const boxWidth = showActions ? 120 : 80;
+
+            // Position label beyond arrow tip with extra spacing
+            const labelDistance = arrowLen + 45;
+            const labelX = pos.x + Math.cos(angle) * (circleRadius + labelDistance);
+            const labelY = pos.y + Math.sin(angle) * (circleRadius + labelDistance);
+
+            svg += '<rect x="' + (labelX - boxWidth/2) + '" y="' + (labelY - 10) + '" width="' + boxWidth + '" height="20" fill="white" stroke="' + (showActions ? '#E91E63' : '#2196F3') + '" rx="3"/>';
+            svg += '<text x="' + labelX + '" y="' + (labelY + 5) + '" text-anchor="middle" font-size="12" font-weight="bold" fill="' + (showActions ? '#E91E63' : '#2196F3') + '">' + labelText + '</text>';
+        }
     });
     svg += '</svg>';
     courseDiagram = svg;

@@ -657,17 +657,18 @@ class DatabaseManager:
             for seq, action_data in enumerate(actions):
                 device_id = action_data['device_id']
                 cursor.execute(
-                    '''INSERT INTO course_actions 
-                       (course_id, sequence, device_id, device_name, action, action_type, 
-                        audio_file, instruction, min_time, max_time, triggers_next_athlete, marks_run_complete)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    '''INSERT INTO course_actions
+                       (course_id, sequence, device_id, device_name, action, action_type,
+                        audio_file, instruction, min_time, max_time, triggers_next_athlete, marks_run_complete, distance)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (
                         course_id, seq, device_id, DEVICE_NAMES.get(device_id),
                         action_data['action'], action_data.get('action_type', 'touch_checkpoint'),
                         action_data.get('audio_file'), action_data.get('instruction'),
                         action_data.get('min_time', 1.0), action_data.get('max_time', 30.0),
                         action_data.get('triggers_next_athlete', False),
-                        action_data.get('marks_run_complete', False)
+                        action_data.get('marks_run_complete', False),
+                        action_data.get('distance', 0)
                     )
                 )
         
