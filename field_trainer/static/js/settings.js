@@ -748,3 +748,824 @@ async function applyVolume(volume) {
         console.error('[Volume] Exception:', error);
     }
 }
+
+// ============================================
+// TOUCH SENSOR CALIBRATION
+// ============================================
+
+let calibrationSocket = null;
+let testModeActive = false;
+let selectedCalibrationDevice = null;
+let liveReadingInterval = null;
+let readingStreamActive = false;
+let magnitudeChart = null;
+let magnitudeBuffer = [];
+const MAGNITUDE_BUFFER_SIZE = 10;
+let readingStartTime = null;
+let readingTimerInterval = null;
+
+// Initialize calibration section when page loads
+function initializeCalibration() {
+    loadCalibrationDeviceStatus();
+    setupCalibrationEventListeners();
+    initializeCalibrationWebSocket();
+    initializeMagnitudeChart();
+}
+
+function initializeMagnitudeChart() {
+    const ctx = document.getElementById('magnitude-chart');
+    if (!ctx) return;
+
+    magnitudeChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
+            datasets: [{
+                label: 'Magnitude (g)',
+                data: Array(MAGNITUDE_BUFFER_SIZE).fill(0),
+                backgroundColor: function(context) {
+                    const value = context.parsed.y;
+                    const threshold = parseFloat(document.getElementById('live-threshold-display')?.textContent) || 0;
+                    return value > threshold ? 'rgba(40, 167, 69, 0.8)' : 'rgba(13, 110, 253, 0.8)';
+                },
+                borderColor: function(context) {
+                    const value = context.parsed.y;
+                    const threshold = parseFloat(document.getElementById('live-threshold-display')?.textContent) || 0;
+                    return value > threshold ? 'rgb(40, 167, 69)' : 'rgb(13, 110, 253)';
+                },
+                borderWidth: 1,
+                barThickness: 30
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+                duration: 0
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Magnitude (g)',
+                        font: { size: 11 }
+                    },
+                    ticks: {
+                        font: { size: 10 }
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Reading #',
+                        font: { size: 11 }
+                    },
+                    ticks: {
+                        font: { size: 10 }
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return 'Magnitude: ' + context.parsed.y.toFixed(3) + ' g';
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function initializeCalibrationWebSocket() {
+    // Connect to WebSocket namespace
+    calibrationSocket = io('/calibration');
+
+    calibrationSocket.on('connect', function() {
+        console.log('[Calibration] WebSocket connected');
+    });
+
+    calibrationSocket.on('disconnect', function() {
+        console.log('[Calibration] WebSocket disconnected');
+        readingStreamActive = false;
+    });
+
+    // Reading stream updates
+    calibrationSocket.on('reading_update', function(data) {
+        updateLiveSensorReading(data);
+    });
+
+    // Calibration progress updates
+    calibrationSocket.on('calibration_progress', function(data) {
+        updateCalibrationProgress(data);
+    });
+
+    // Stream status
+    calibrationSocket.on('stream_started', function(data) {
+        console.log('[Calibration] Reading stream started for device', data.device_num);
+    });
+
+    calibrationSocket.on('stream_stopped', function(data) {
+        console.log('[Calibration] Reading stream stopped');
+        readingStreamActive = false;
+    });
+
+    // Errors
+    calibrationSocket.on('error', function(data) {
+        console.error('[Calibration] WebSocket error:', data.message);
+        showCalibrationMessage('danger', 'Error: ' + data.message);
+    });
+}
+
+function setupCalibrationEventListeners() {
+    // Refresh status button
+    const refreshBtn = document.getElementById('refresh-calibration-status-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadCalibrationDeviceStatus);
+    }
+
+    // Clear log button
+    const clearLogBtn = document.getElementById('clear-log-btn');
+    if (clearLogBtn) {
+        clearLogBtn.addEventListener('click', clearSystemLog);
+    }
+
+    // Device selection (old UI - kept for backward compatibility)
+    const deviceSelect = document.getElementById('calibration-device-select');
+    if (deviceSelect) {
+        deviceSelect.addEventListener('change', function(e) {
+            const deviceNum = e.target.value;
+            if (deviceNum) {
+                selectedCalibrationDevice = parseInt(deviceNum);
+                loadDeviceThreshold(selectedCalibrationDevice);
+                const thresholdSection = document.getElementById('threshold-adjustment-section');
+                if (thresholdSection) thresholdSection.style.display = 'block';
+                startLiveReadingStream();
+            } else {
+                selectedCalibrationDevice = null;
+                const thresholdSection = document.getElementById('threshold-adjustment-section');
+                if (thresholdSection) thresholdSection.style.display = 'none';
+                stopLiveReadingStream();
+            }
+        });
+    }
+
+    // Threshold adjustment buttons (old UI - kept for backward compatibility)
+    const decreaseBtn = document.getElementById('threshold-decrease-btn');
+    const increaseBtn = document.getElementById('threshold-increase-btn');
+    const saveBtn = document.getElementById('threshold-save-btn');
+
+    if (decreaseBtn) decreaseBtn.addEventListener('click', () => adjustThreshold(-0.5));
+    if (increaseBtn) increaseBtn.addEventListener('click', () => adjustThreshold(0.5));
+    if (saveBtn) saveBtn.addEventListener('click', saveThreshold);
+
+    // Test mode buttons (old UI - kept for backward compatibility)
+    const startTestBtn = document.getElementById('start-test-mode-btn');
+    const stopTestBtn = document.getElementById('stop-test-mode-btn');
+
+    if (startTestBtn) startTestBtn.addEventListener('click', startTestMode);
+    if (stopTestBtn) stopTestBtn.addEventListener('click', stopTestMode);
+
+    // Calibration button (old UI - kept for backward compatibility)
+    const runCalBtn = document.getElementById('run-calibration-btn');
+    if (runCalBtn) runCalBtn.addEventListener('click', startCalibration);
+
+    // Apply recommended threshold (old UI - kept for backward compatibility)
+    const applyRecBtn = document.getElementById('apply-recommended-btn');
+    if (applyRecBtn) applyRecBtn.addEventListener('click', applyRecommendedThreshold);
+}
+
+function loadCalibrationDeviceStatus() {
+    fetch('/api/calibration/devices/status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                updateCalibrationDeviceTable(data.devices);
+                populateCalibrationDeviceSelect(data.devices);
+            } else {
+                showCalibrationMessage('danger', 'Error loading device status');
+            }
+        })
+        .catch(error => {
+            console.error('[Calibration] Error loading device status:', error);
+            showCalibrationMessage('danger', 'Error loading device status: ' + error.message);
+        });
+}
+
+function updateCalibrationDeviceTable(devices) {
+    const tbody = document.querySelector('#calibration-devices-table tbody');
+    if (!tbody) return;
+
+    console.log('[Calibration] Updating device table with', devices.length, 'devices');
+    tbody.innerHTML = '';
+
+    devices.forEach(device => {
+        const row = document.createElement('tr');
+
+        // Threshold display - click to edit
+        let thresholdHtml = '--';
+        if (device.online && device.threshold !== undefined) {
+            thresholdHtml = `
+                <span class="threshold-display" data-device="${device.device_num}" onclick="editThreshold(${device.device_num}, ${device.threshold})">
+                    ${device.threshold.toFixed(2)} <i class="bi bi-pencil-square text-muted small"></i>
+                </span>
+                <input type="number" class="form-control form-control-sm threshold-edit"
+                       data-device="${device.device_num}"
+                       value="${device.threshold.toFixed(2)}"
+                       step="0.01"
+                       style="display: none; width: 100px;"
+                       onblur="saveThresholdInline(${device.device_num}, this.value)"
+                       onkeypress="if(event.key==='Enter') saveThresholdInline(${device.device_num}, this.value)">
+            `;
+        }
+
+        // Action buttons
+        let actionsHtml = '--';
+        if (device.online) {
+            actionsHtml = `
+                <button class="btn btn-sm btn-outline-info me-1" onclick="startLiveReading(${device.device_num})">
+                    <i class="bi bi-activity"></i> Live Reading
+                </button>
+                <button class="btn btn-sm btn-outline-primary" onclick="startCalibrationForDevice(${device.device_num})">
+                    <i class="bi bi-gear-fill"></i> Calibrate
+                </button>
+            `;
+        }
+
+        row.innerHTML = `
+            <td>${device.name}</td>
+            <td>
+                ${device.online
+                    ? '<span class="badge bg-success">Online</span>'
+                    : '<span class="badge bg-secondary">Offline</span>'}
+            </td>
+            <td>${thresholdHtml}</td>
+            <td>${actionsHtml}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function populateCalibrationDeviceSelect(devices) {
+    const select = document.getElementById('calibration-device-select');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">-- Select Device --</option>';
+
+    // Only show online devices
+    devices.filter(d => d.online).forEach(device => {
+        const option = document.createElement('option');
+        option.value = device.device_num;
+        option.textContent = device.name;
+        select.appendChild(option);
+    });
+}
+
+// ============================================
+// SIMPLIFIED UI FUNCTIONS
+// ============================================
+
+function editThreshold(deviceNum, currentValue) {
+    // Hide all other edit fields
+    document.querySelectorAll('.threshold-display').forEach(el => el.style.display = 'inline');
+    document.querySelectorAll('.threshold-edit').forEach(el => el.style.display = 'none');
+
+    // Show edit field for this device
+    const display = document.querySelector(`.threshold-display[data-device="${deviceNum}"]`);
+    const input = document.querySelector(`.threshold-edit[data-device="${deviceNum}"]`);
+
+    if (display && input) {
+        display.style.display = 'none';
+        input.style.display = 'inline-block';
+        input.focus();
+        input.select();
+    }
+}
+
+function saveThresholdInline(deviceNum, value) {
+    const threshold = parseFloat(value);
+
+    if (isNaN(threshold) || threshold <= 0) {
+        showCalibrationMessage('danger', 'Invalid threshold value');
+        loadCalibrationDeviceStatus(); // Reload to reset UI
+        return;
+    }
+
+    logToSystemLog(`💾 Saving threshold ${threshold.toFixed(2)} for device ${deviceNum}...`);
+
+    fetch(`/api/calibration/device/${deviceNum}/threshold`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold: threshold })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            logToSystemLog(`✅ ${data.message}`);
+            showCalibrationMessage('success', data.message);
+            setTimeout(() => loadCalibrationDeviceStatus(), 500);
+        } else {
+            logToSystemLog(`❌ Error: ${data.error}`);
+            showCalibrationMessage('danger', 'Error: ' + data.error);
+            loadCalibrationDeviceStatus();
+        }
+    })
+    .catch(error => {
+        logToSystemLog(`❌ Error saving threshold: ${error.message}`);
+        showCalibrationMessage('danger', 'Error saving threshold: ' + error.message);
+        loadCalibrationDeviceStatus();
+    });
+}
+
+function startLiveReading(deviceNum) {
+    logToSystemLog(`📊 Starting live reading for device ${deviceNum} (10 seconds)...`);
+
+    let count = 0;
+    const maxReadings = 100; // 10 seconds at 10Hz
+
+    function readSensor() {
+        if (count >= maxReadings) {
+            logToSystemLog(`✅ Live reading complete for device ${deviceNum}`);
+            return;
+        }
+
+        fetch(`/api/calibration/device/${deviceNum}/reading`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const line = `[${count + 1}] Mag: ${data.magnitude.toFixed(3)}g | X: ${data.x.toFixed(3)}g | Y: ${data.y.toFixed(3)}g | Z: ${data.z.toFixed(3)}g`;
+                    logToSystemLog(line);
+                    count++;
+                    setTimeout(readSensor, 100); // 10Hz
+                } else {
+                    logToSystemLog(`❌ Error reading sensor: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                logToSystemLog(`❌ Error: ${error.message}`);
+            });
+    }
+
+    readSensor();
+}
+
+function startCalibrationForDevice(deviceNum) {
+    if (!confirm('Calibration takes about 1 minute.\n\n1. Click OK to start\n2. Wait 3 seconds\n3. START TAPPING THE DEVICE 5 times (30 seconds total)\n4. Tap every 5-6 seconds\n5. Auto-adjusts if no taps detected\n\nContinue?')) {
+        return;
+    }
+
+    logToSystemLog('\n' + '='.repeat(60));
+    logToSystemLog(`🎯 Starting calibration for device ${deviceNum}...`);
+    logToSystemLog('='.repeat(60));
+
+    if (calibrationSocket) {
+        calibrationSocket.emit('start_calibration_wizard', {
+            device_num: deviceNum,
+            tap_count: 5
+        });
+    } else {
+        logToSystemLog('❌ Error: WebSocket not connected');
+        showCalibrationMessage('danger', 'WebSocket not connected');
+    }
+}
+
+function logToSystemLog(message) {
+    const logContent = document.getElementById('calibration-log-content');
+    if (!logContent) return;
+
+    const timestamp = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.textContent = `[${timestamp}] ${message}`;
+    logContent.appendChild(line);
+
+    // Auto-scroll to bottom
+    const logContainer = document.getElementById('calibration-system-log');
+    if (logContainer) {
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+}
+
+function clearSystemLog() {
+    const logContent = document.getElementById('calibration-log-content');
+    if (logContent) {
+        logContent.innerHTML = '<div class="text-muted">Ready. Waiting for actions...</div>';
+    }
+}
+
+function selectDeviceForCalibration(deviceNum) {
+    const select = document.getElementById('calibration-device-select');
+    if (select) {
+        select.value = deviceNum;
+        select.dispatchEvent(new Event('change'));
+    }
+}
+
+function loadDeviceThreshold(deviceNum) {
+    fetch(`/api/calibration/device/${deviceNum}/threshold`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const input = document.getElementById('threshold-input');
+                const display = document.getElementById('live-threshold-display');
+                if (input) input.value = data.threshold.toFixed(2);
+                if (display) display.textContent = data.threshold.toFixed(2);
+            }
+        })
+        .catch(error => {
+            console.error('[Calibration] Error loading threshold:', error);
+        });
+}
+
+function adjustThreshold(delta) {
+    const input = document.getElementById('threshold-input');
+    if (!input) return;
+
+    const currentValue = parseFloat(input.value) || 0;
+    const newValue = Math.max(0, currentValue + delta);
+    input.value = newValue.toFixed(2);
+}
+
+function saveThreshold() {
+    if (selectedCalibrationDevice === null) return;
+
+    const input = document.getElementById('threshold-input');
+    if (!input) return;
+
+    const threshold = parseFloat(input.value);
+
+    fetch(`/api/calibration/device/${selectedCalibrationDevice}/threshold`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold: threshold })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showCalibrationMessage('success', data.message);
+            const display = document.getElementById('live-threshold-display');
+            if (display) display.textContent = threshold.toFixed(2);
+
+            // Refresh device status table after a short delay to ensure backend has updated
+            console.log('[Calibration] Threshold saved, refreshing device table...');
+            setTimeout(() => {
+                loadCalibrationDeviceStatus();
+            }, 500);
+        } else {
+            showCalibrationMessage('danger', 'Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('[Calibration] Error saving threshold:', error);
+        showCalibrationMessage('danger', 'Error saving threshold: ' + error.message);
+    });
+}
+
+function startLiveReadingStream() {
+    if (readingStreamActive) {
+        stopLiveReadingStream(); // Clear any existing stream
+    }
+
+    // Clear buffer for new device
+    magnitudeBuffer = [];
+    readingStartTime = Date.now();
+
+    // Update timer display
+    const timerDisplay = document.getElementById('reading-timer');
+    if (timerDisplay) {
+        timerDisplay.textContent = '0s';
+    }
+
+    // Start timer that updates display and auto-stops after 30s
+    readingTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - readingStartTime) / 1000);
+        if (timerDisplay) {
+            timerDisplay.textContent = elapsed + 's';
+        }
+
+        // Auto-stop after 30 seconds
+        if (elapsed >= 30) {
+            stopLiveReadingStream();
+            if (timerDisplay) {
+                timerDisplay.textContent = '30s (stopped)';
+            }
+        }
+    }, 1000);
+
+    if (selectedCalibrationDevice !== null && calibrationSocket) {
+        calibrationSocket.emit('start_reading_stream', { device_num: selectedCalibrationDevice });
+        readingStreamActive = true;
+    }
+}
+
+function stopLiveReadingStream() {
+    if (calibrationSocket && readingStreamActive) {
+        calibrationSocket.emit('stop_reading_stream', {});
+        readingStreamActive = false;
+    }
+
+    // Clear timer
+    if (readingTimerInterval) {
+        clearInterval(readingTimerInterval);
+        readingTimerInterval = null;
+    }
+}
+
+function updateLiveSensorReading(data) {
+    if (!data.success) return;
+
+    const magnitudeDisplay = document.getElementById('live-magnitude-display');
+    const thresholdDisplay = document.getElementById('live-threshold-display');
+
+    if (!magnitudeDisplay) return;
+
+    const magnitude = data.magnitude;
+    const threshold = parseFloat(thresholdDisplay?.textContent) || 0;
+
+    // Update current magnitude display
+    magnitudeDisplay.textContent = magnitude.toFixed(3);
+
+    // Add to buffer (keep last 10 readings)
+    magnitudeBuffer.push(magnitude);
+    if (magnitudeBuffer.length > MAGNITUDE_BUFFER_SIZE) {
+        magnitudeBuffer.shift(); // Remove oldest
+    }
+
+    // Update chart
+    if (magnitudeChart) {
+        // Pad with zeros if buffer not full yet
+        const chartData = [...magnitudeBuffer];
+        while (chartData.length < MAGNITUDE_BUFFER_SIZE) {
+            chartData.unshift(0);
+        }
+
+        magnitudeChart.data.datasets[0].data = chartData;
+
+        // Update Y-axis scale
+        const maxValue = Math.max(threshold * 1.5, Math.max(...chartData), 1);
+        magnitudeChart.options.scales.y.max = maxValue;
+
+        magnitudeChart.update('none');
+    }
+}
+
+function startTestMode() {
+    if (selectedCalibrationDevice === null) return;
+
+    const input = document.getElementById('threshold-input');
+    if (!input) return;
+
+    const threshold = parseFloat(input.value);
+
+    // Stop regular streaming if active
+    if (readingStreamActive) {
+        stopLiveReadingStream();
+    }
+    testModeActive = true;
+
+    fetch(`/api/calibration/device/${selectedCalibrationDevice}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold: threshold, duration: 30 })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const startBtn = document.getElementById('start-test-mode-btn');
+            const stopBtn = document.getElementById('stop-test-mode-btn');
+            if (startBtn) startBtn.style.display = 'none';
+            if (stopBtn) stopBtn.style.display = 'inline-block';
+            showCalibrationMessage('info', 'Test mode active - tap the device to hear beep');
+        } else {
+            showCalibrationMessage('danger', 'Error starting test mode: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('[Calibration] Error starting test mode:', error);
+        showCalibrationMessage('danger', 'Error starting test mode: ' + error.message);
+    });
+}
+
+function stopTestMode() {
+    if (selectedCalibrationDevice === null) return;
+
+    // Update UI immediately
+    testModeActive = false;
+    const startBtn = document.getElementById('start-test-mode-btn');
+    const stopBtn = document.getElementById('stop-test-mode-btn');
+    if (startBtn) startBtn.style.display = 'inline-block';
+    if (stopBtn) stopBtn.style.display = 'none';
+
+    fetch(`/api/calibration/device/${selectedCalibrationDevice}/test/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showCalibrationMessage('success', 'Test mode stopped');
+        } else {
+            showCalibrationMessage('warning', 'Test mode stopped (device may not have responded)');
+        }
+
+        // Resume regular streaming
+        startLiveReadingStream();
+    })
+    .catch(error => {
+        console.error('[Calibration] Error stopping test mode:', error);
+        showCalibrationMessage('warning', 'Test mode stopped locally');
+
+        // Resume regular streaming even if stop command failed
+        startLiveReadingStream();
+    });
+}
+
+function startCalibration() {
+    if (selectedCalibrationDevice === null) return;
+
+    // Stop test mode if it's active
+    if (testModeActive) {
+        stopTestMode();
+    }
+
+    if (!confirm('Calibration takes 2-3 minutes.\n\n1. Click OK to start\n2. Wait 3 seconds\n3. Start tapping the device repeatedly\n4. Keep tapping every few seconds until calibration completes\n\nContinue?')) {
+        return;
+    }
+
+    const progressSection = document.getElementById('calibration-progress-section');
+    const resultsSection = document.getElementById('calibration-results-section');
+    const progressBar = document.getElementById('calibration-progress-bar');
+    const statusText = document.getElementById('calibration-status-text');
+    const runBtn = document.getElementById('run-calibration-btn');
+
+    if (progressSection) progressSection.style.display = 'block';
+    if (resultsSection) resultsSection.style.display = 'none';
+    if (progressBar) {
+        progressBar.style.width = '0%';
+        progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated';
+    }
+    if (statusText) statusText.textContent = 'Starting calibration...';
+    if (runBtn) runBtn.disabled = true;
+
+    // Stop live reading stream and start calibration
+    if (readingStreamActive) {
+        stopLiveReadingStream();
+    }
+
+    calibrationSocket.emit('start_calibration_wizard', {
+        device_num: selectedCalibrationDevice,
+        tap_count: 5
+    });
+}
+
+function updateCalibrationProgress(data) {
+    // Log progress to system log
+    switch(data.status) {
+        case 'progress':
+            // Real-time line-by-line streaming
+            if (data.message) {
+                logToSystemLog(data.message);
+            }
+            break;
+
+        case 'baseline':
+            logToSystemLog('📊 ' + data.message);
+            break;
+
+        case 'waiting_for_tap':
+            logToSystemLog(`👆 Waiting for tap ${data.tap_number}/5...`);
+            if (data.message) {
+                logToSystemLog('   ' + data.message);
+            }
+            break;
+
+        case 'analyzing':
+            logToSystemLog('🔍 ' + data.message);
+            break;
+
+        case 'complete':
+            logToSystemLog(data.message);
+            logToSystemLog('='.repeat(60));
+
+            showCalibrationMessage('success', '✅ Calibration PASSED');
+
+            // Refresh device table to show new threshold
+            setTimeout(() => loadCalibrationDeviceStatus(), 1000);
+            break;
+
+        case 'error':
+            logToSystemLog(data.message);
+            logToSystemLog('='.repeat(60));
+            showCalibrationMessage('danger', '❌ Calibration FAILED');
+            break;
+    }
+
+    // Also update old UI elements if they exist (backward compatibility)
+    const statusText = document.getElementById('calibration-status-text');
+    const progressBar = document.getElementById('calibration-progress-bar');
+    const detailsText = document.getElementById('calibration-details');
+
+    if (statusText || progressBar || detailsText) {
+        switch(data.status) {
+            case 'baseline':
+                if (statusText) statusText.textContent = 'Measuring baseline...';
+                if (progressBar) progressBar.style.width = '20%';
+                if (detailsText) detailsText.textContent = data.message;
+                break;
+
+            case 'waiting_for_tap':
+                if (statusText) statusText.textContent = `Waiting for tap ${data.tap_number}/5...`;
+                const progress = 20 + (data.tap_number * 12);
+                if (progressBar) progressBar.style.width = progress + '%';
+                if (detailsText) detailsText.textContent = data.message;
+                break;
+
+            case 'analyzing':
+                if (statusText) statusText.textContent = 'Analyzing results...';
+                if (progressBar) progressBar.style.width = '90%';
+                if (detailsText) detailsText.textContent = data.message;
+                break;
+
+            case 'complete':
+                if (statusText) statusText.textContent = 'Calibration complete!';
+                if (progressBar) {
+                    progressBar.style.width = '100%';
+                    progressBar.classList.add('bg-success');
+                }
+
+                setTimeout(() => {
+                    const progressSection = document.getElementById('calibration-progress-section');
+                    if (progressSection) progressSection.style.display = 'none';
+                    showCalibrationResults(data);
+                }, 1000);
+                break;
+
+            case 'error':
+                if (statusText) statusText.textContent = 'Calibration failed';
+                if (progressBar) progressBar.classList.add('bg-danger');
+                if (detailsText) detailsText.textContent = data.error || 'Unknown error';
+                const runBtn = document.getElementById('run-calibration-btn');
+                if (runBtn) runBtn.disabled = false;
+                break;
+        }
+    }
+}
+
+function showCalibrationResults(data) {
+    const resultsSection = document.getElementById('calibration-results-section');
+    const recommendedThreshold = document.getElementById('recommended-threshold');
+    const calibrationSummary = document.getElementById('calibration-summary');
+    const runBtn = document.getElementById('run-calibration-btn');
+
+    if (resultsSection) resultsSection.style.display = 'block';
+    if (recommendedThreshold) recommendedThreshold.textContent = data.recommended_threshold.toFixed(2);
+    if (calibrationSummary) {
+        calibrationSummary.textContent =
+            `Baseline: ${data.baseline.toFixed(3)}, Tap magnitudes: ${data.tap_magnitudes.map(t => t.toFixed(3)).join(', ')}`;
+    }
+    if (runBtn) runBtn.disabled = false;
+}
+
+function applyRecommendedThreshold() {
+    const recommendedThreshold = document.getElementById('recommended-threshold');
+    const input = document.getElementById('threshold-input');
+
+    if (recommendedThreshold && input) {
+        const recommendedValue = parseFloat(recommendedThreshold.textContent);
+        input.value = recommendedValue.toFixed(2);
+        saveThreshold();
+    }
+}
+
+function showCalibrationMessage(type, message) {
+    const statusMsg = document.getElementById('calibration-status-message');
+    if (!statusMsg) return;
+
+    const iconMap = {
+        'success': 'check-circle',
+        'danger': 'exclamation-triangle',
+        'warning': 'exclamation-circle',
+        'info': 'info-circle'
+    };
+
+    statusMsg.className = `alert alert-${type}`;
+    statusMsg.innerHTML = `<i class="bi bi-${iconMap[type] || 'info-circle'}"></i> ${message}`;
+    statusMsg.style.display = 'block';
+
+    setTimeout(() => {
+        statusMsg.style.display = 'none';
+    }, 5000);
+}
+
+// Add calibration initialization to existing DOMContentLoaded
+const originalDOMContentLoaded = document.addEventListener;
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize calibration after a short delay to ensure other systems are ready
+    setTimeout(() => {
+        initializeCalibration();
+    }, 500);
+});

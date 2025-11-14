@@ -323,6 +323,69 @@
     </div>
 </div>
 
+<!-- Touch Sensor Calibration Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-hand-index"></i> Touch Sensor Calibration</h5>
+    </div>
+    <div class="card-body">
+        <!-- Instructions -->
+        <div class="alert alert-info mb-3">
+            <h6 class="alert-heading"><i class="bi bi-info-circle"></i> How to Use</h6>
+            <ol class="mb-0" style="padding-left: 20px;">
+                <li><strong>Live Reading:</strong> Shows raw sensor values for 10 seconds</li>
+                <li><strong>Calibrate:</strong> Tap device 5 times (30 seconds total, ~6 sec per tap). Auto-adjusts if no taps detected.</li>
+                <li><strong>Threshold:</strong> Click value to edit. Lower = more sensitive (typical: 0.15-0.30)</li>
+            </ol>
+        </div>
+
+        <!-- Device Status Table -->
+        <div class="mb-3">
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered table-hover" id="calibration-devices-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Device</th>
+                            <th>Status</th>
+                            <th>Threshold</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populated via JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="refresh-calibration-status-btn">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+
+        <!-- System Log -->
+        <div class="mb-3">
+            <label class="form-label fw-bold">System Log</label>
+            <div class="card bg-dark text-light" style="height: 300px; overflow-y: auto;" id="calibration-system-log">
+                <div class="card-body p-2 font-monospace small">
+                    <div id="calibration-log-content">
+                        <div class="text-muted">Ready. Waiting for actions...</div>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm mt-1" id="clear-log-btn">
+                <i class="bi bi-x-circle"></i> Clear Log
+            </button>
+        </div>
+
+        <!-- Hidden elements for compatibility -->
+        <div style="display: none;">
+            <div id="calibration-status-message"></div>
+            <div id="threshold-adjustment-section"></div>
+            <div id="calibration-progress-section"></div>
+            <div id="calibration-results-section"></div>
+        </div>
+    </div>
+</div>
+
 <!-- Status Messages -->
 <div id="status-message" class="alert" style="display: none;"></div>
 
@@ -779,6 +842,12 @@ function hideNetworkStatusMessage() {
     }
 }
 </script>
+
+<!-- Socket.IO client library for WebSocket calibration -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+<!-- Chart.js for live sensor reading visualization -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
 <script src="/static/js/settings.js"></script>
 
