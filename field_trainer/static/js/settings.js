@@ -572,17 +572,35 @@ async function loadCurrentNetwork() {
         }
 
         if (data.success && data.ssid) {
-            ssidElement.textContent = data.ssid;
-            console.log(`[Network] ✓ Set SSID to: ${data.ssid}`);
+            // Determine icon and color based on connection type
+            let icon = '';
+            let colorClass = '';
+
+            if (data.connection_type === 'Ethernet') {
+                icon = '<i class="bi bi-ethernet text-success"></i> ';
+                colorClass = 'text-success';
+            } else if (data.connection_type === 'WiFi') {
+                icon = '<i class="bi bi-wifi text-primary"></i> ';
+                colorClass = 'text-primary';
+            } else if (data.connection_type === 'Access Point') {
+                icon = '<i class="bi bi-router text-warning"></i> ';
+                colorClass = 'text-warning';
+            } else {
+                icon = '<i class="bi bi-x-circle text-muted"></i> ';
+                colorClass = 'text-muted';
+            }
+
+            ssidElement.innerHTML = `${icon}<span class="${colorClass} fw-bold">${data.ssid}</span>`;
+            console.log(`[Network] ✓ Set network to: ${data.ssid} (${data.connection_type})`);
         } else {
-            ssidElement.textContent = 'Unknown';
+            ssidElement.innerHTML = '<i class="bi bi-question-circle text-muted"></i> <span class="text-muted">Unknown</span>';
             console.warn('[Network] No SSID in response');
         }
     } catch (error) {
         console.error('[Network] Exception:', error);
         const ssidElement = document.getElementById('current-ssid');
         if (ssidElement) {
-            ssidElement.textContent = 'Error loading';
+            ssidElement.innerHTML = '<i class="bi bi-exclamation-triangle text-danger"></i> <span class="text-danger">Error loading</span>';
         }
     }
 }
@@ -988,6 +1006,9 @@ function updateCalibrationDeviceTable(devices) {
         let actionsHtml = '--';
         if (device.online) {
             actionsHtml = `
+                <button class="btn btn-sm btn-outline-success me-1" onclick="startTestMode(${device.device_num}, ${device.threshold})">
+                    <i class="bi bi-hand-index"></i> Test
+                </button>
                 <button class="btn btn-sm btn-outline-info me-1" onclick="startLiveReading(${device.device_num})">
                     <i class="bi bi-activity"></i> Live Reading
                 </button>
@@ -1083,35 +1104,64 @@ function saveThresholdInline(deviceNum, value) {
 }
 
 function startLiveReading(deviceNum) {
-    logToSystemLog(`📊 Starting live reading for device ${deviceNum} (10 seconds)...`);
-
-    let count = 0;
-    const maxReadings = 100; // 10 seconds at 10Hz
-
-    function readSensor() {
-        if (count >= maxReadings) {
-            logToSystemLog(`✅ Live reading complete for device ${deviceNum}`);
-            return;
-        }
-
-        fetch(`/api/calibration/device/${deviceNum}/reading`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    const line = `[${count + 1}] Mag: ${data.magnitude.toFixed(3)}g | X: ${data.x.toFixed(3)}g | Y: ${data.y.toFixed(3)}g | Z: ${data.z.toFixed(3)}g`;
-                    logToSystemLog(line);
-                    count++;
-                    setTimeout(readSensor, 100); // 10Hz
-                } else {
-                    logToSystemLog(`❌ Error reading sensor: ${data.error}`);
-                }
-            })
-            .catch(error => {
-                logToSystemLog(`❌ Error: ${error.message}`);
-            });
+    // For remote devices (1-5), enable live reading mode to get faster heartbeats
+    if (deviceNum >= 1 && deviceNum <= 5) {
+        fetch(`/api/calibration/device/${deviceNum}/live-reading`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: true, duration: 10})
+        }).catch(error => {
+            console.error('Failed to enable live reading mode:', error);
+        });
     }
 
-    readSensor();
+    // First get the threshold for this device
+    fetch(`/api/calibration/device/${deviceNum}/threshold`)
+        .then(response => response.json())
+        .then(thresholdData => {
+            const threshold = thresholdData.success ? thresholdData.threshold : null;
+
+            logToSystemLog(`📊 Starting live reading for device ${deviceNum} (10 seconds)...`);
+            if (threshold !== null) {
+                logToSystemLog(`   Threshold: ${threshold.toFixed(3)}g (touch detected if magnitude exceeds this)`);
+            }
+            logToSystemLog(``);
+
+            let count = 0;
+            const maxReadings = deviceNum === 0 ? 100 : 50; // 10s @ 10Hz for Device 0, 10s @ 5Hz for others
+
+            function readSensor() {
+                if (count >= maxReadings) {
+                    logToSystemLog(``);
+                    logToSystemLog(`✅ Live reading complete for device ${deviceNum}`);
+                    return;
+                }
+
+                fetch(`/api/calibration/device/${deviceNum}/reading`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            const mag = data.magnitude;
+                            const touchDetected = threshold !== null && mag >= threshold;
+                            const indicator = touchDetected ? '🎯 TOUCH!' : '';
+                            const line = `[${count + 1}] Mag: ${mag.toFixed(3)}g | X: ${data.x.toFixed(3)}g | Y: ${data.y.toFixed(3)}g | Z: ${data.z.toFixed(3)}g ${indicator}`;
+                            logToSystemLog(line);
+                            count++;
+                            setTimeout(readSensor, 100); // 10Hz
+                        } else {
+                            logToSystemLog(`❌ Error reading sensor: ${data.error}`);
+                        }
+                    })
+                    .catch(error => {
+                        logToSystemLog(`❌ Error: ${error.message}`);
+                    });
+            }
+
+            readSensor();
+        })
+        .catch(error => {
+            logToSystemLog(`❌ Error getting threshold: ${error.message}`);
+        });
 }
 
 function startCalibrationForDevice(deviceNum) {
@@ -1559,6 +1609,173 @@ function showCalibrationMessage(type, message) {
     setTimeout(() => {
         statusMsg.style.display = 'none';
     }, 5000);
+}
+
+// ============================================
+// TEST MODE - Show touch detections in real-time
+// ============================================
+
+// Reuse existing testModeActive variable declared at line 757
+let testModeDeviceNum = null;
+let testModeTimeout = null;
+let testModeTouchCount = 0;
+
+function startTestMode(deviceNum, threshold) {
+    if (testModeActive) {
+        appendToCalibrationLog('⚠ Test mode already running. Please wait...');
+        return;
+    }
+
+    const deviceInfo = ['Start', 'Cone 1', 'Cone 2', 'Cone 3', 'Cone 4', 'Cone 5'][deviceNum];
+
+    testModeActive = true;
+    testModeDeviceNum = deviceNum;
+    testModeTouchCount = 0;
+
+    clearCalibrationLog();
+    appendToCalibrationLog(`========================================`);
+    appendToCalibrationLog(`🧪 TEST MODE: ${deviceInfo} (Device ${deviceNum})`);
+    appendToCalibrationLog(`========================================`);
+    appendToCalibrationLog(`Threshold: ${threshold.toFixed(3)}g`);
+    appendToCalibrationLog(`Duration: 30 seconds`);
+    appendToCalibrationLog(``);
+    appendToCalibrationLog(`👉 TAP the device now!`);
+    appendToCalibrationLog(`   Each touch will be logged below...`);
+    appendToCalibrationLog(``);
+
+    // Start test mode on backend
+    fetch(`/api/calibration/device/${deviceNum}/test-mode`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            enabled: true,
+            threshold: threshold,
+            duration: 30
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            appendToCalibrationLog(`✓ Test mode started`);
+            appendToCalibrationLog(``);
+        } else {
+            appendToCalibrationLog(`❌ Error: ${data.error || 'Failed to start test mode'}`);
+            testModeActive = false;
+        }
+    })
+    .catch(error => {
+        appendToCalibrationLog(`❌ Error: ${error.message}`);
+        testModeActive = false;
+    });
+
+    // Poll for touch events every 500ms
+    let lastTouchCount = 0;
+    const pollInterval = setInterval(() => {
+        if (!testModeActive) {
+            clearInterval(pollInterval);
+            return;
+        }
+
+        // Fetch current touch count from backend
+        fetch(`/api/calibration/device/${deviceNum}/touch-count`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const currentCount = data.touch_count || 0;
+
+                    // Only update if count increased
+                    if (currentCount > lastTouchCount) {
+                        const newTouches = currentCount - lastTouchCount;
+                        for (let i = 0; i < newTouches; i++) {
+                            testModeTouchCount++;
+                            appendToCalibrationLog(`👆 Touch #${testModeTouchCount} detected!`);
+                        }
+                        lastTouchCount = currentCount;
+                    }
+                }
+            })
+            .catch(error => {
+                // Silently ignore polling errors to avoid log spam
+                console.error('Touch count poll error:', error);
+            });
+    }, 500);
+
+    // Auto-stop after 30 seconds
+    testModeTimeout = setTimeout(() => {
+        stopTestMode();
+        appendToCalibrationLog(``);
+        appendToCalibrationLog(`========================================`);
+        appendToCalibrationLog(`✓ TEST COMPLETE`);
+        appendToCalibrationLog(`========================================`);
+        appendToCalibrationLog(`Total touches detected: ${testModeTouchCount}`);
+        appendToCalibrationLog(``);
+
+        if (testModeTouchCount === 0) {
+            appendToCalibrationLog(`❌ No touches detected!`);
+            appendToCalibrationLog(`   → Threshold may be too HIGH (not sensitive enough)`);
+            appendToCalibrationLog(`   → Try lowering threshold or tapping harder`);
+        } else if (testModeTouchCount < 3) {
+            appendToCalibrationLog(`⚠ Very few touches detected`);
+            appendToCalibrationLog(`   → Threshold might be too high`);
+        } else if (testModeTouchCount > 15) {
+            appendToCalibrationLog(`⚠ Many touches detected (more than taps)`);
+            appendToCalibrationLog(`   → Threshold may be too LOW (too sensitive)`);
+            appendToCalibrationLog(`   → Try raising threshold`);
+        } else {
+            appendToCalibrationLog(`✓ Good! Threshold seems appropriate`);
+        }
+
+        clearInterval(pollInterval);
+    }, 30000);
+}
+
+function stopTestMode() {
+    if (!testModeActive) return;
+
+    testModeActive = false;
+
+    if (testModeTimeout) {
+        clearTimeout(testModeTimeout);
+        testModeTimeout = null;
+    }
+
+    // Stop test mode on backend
+    if (testModeDeviceNum !== null) {
+        fetch(`/api/calibration/device/${testModeDeviceNum}/test-mode`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: false})
+        });
+    }
+
+    testModeDeviceNum = null;
+}
+
+// Listen for touch events from WebSocket (if Device 0) or backend polling (Devices 1-5)
+// This would be enhanced with actual WebSocket integration
+// For now, we rely on the backend's test mode beeping
+
+function clearCalibrationLog() {
+    const logContent = document.getElementById('calibration-log-content');
+    if (logContent) {
+        logContent.innerHTML = '';
+    }
+}
+
+function appendToCalibrationLog(message) {
+    const logContent = document.getElementById('calibration-log-content');
+    if (!logContent) return;
+
+    const timestamp = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.textContent = `[${timestamp}] ${message}`;
+    logContent.appendChild(line);
+
+    // Auto-scroll to bottom
+    const logContainer = document.getElementById('calibration-system-log');
+    if (logContainer) {
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
 }
 
 // Add calibration initialization to existing DOMContentLoaded

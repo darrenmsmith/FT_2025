@@ -329,14 +329,70 @@
         <h5 class="mb-0"><i class="bi bi-hand-index"></i> Touch Sensor Calibration</h5>
     </div>
     <div class="card-body">
-        <!-- Instructions -->
+        <!-- Instructions (Collapsible) -->
         <div class="alert alert-info mb-3">
-            <h6 class="alert-heading"><i class="bi bi-info-circle"></i> How to Use</h6>
-            <ol class="mb-0" style="padding-left: 20px;">
-                <li><strong>Live Reading:</strong> Shows raw sensor values for 10 seconds</li>
-                <li><strong>Calibrate:</strong> Tap device 5 times (30 seconds total, ~6 sec per tap). Auto-adjusts if no taps detected.</li>
-                <li><strong>Threshold:</strong> Click value to edit. Lower = more sensitive (typical: 0.15-0.30)</li>
-            </ol>
+            <h6 class="alert-heading mb-0">
+                <a class="text-decoration-none text-reset d-flex align-items-center" data-bs-toggle="collapse" href="#howToUseCollapse" role="button" aria-expanded="false" aria-controls="howToUseCollapse" style="cursor: pointer;">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <span>How to Use</span>
+                    <i class="bi bi-chevron-down ms-auto"></i>
+                </a>
+            </h6>
+            <div class="collapse" id="howToUseCollapse">
+                <hr class="my-2">
+                <p class="mb-2">Three tools are available for touch sensor setup and validation:</p>
+
+                <h6 class="mt-3 mb-2"><i class="bi bi-activity"></i> Live Reading</h6>
+                <ul class="mb-2" style="padding-left: 20px;">
+                    <li><strong>Purpose:</strong> Monitor real-time sensor data to verify hardware is working</li>
+                    <li><strong>Duration:</strong> 10 seconds of live readings at 5Hz (5 readings per second)</li>
+                    <li><strong>How to read:</strong>
+                        <ul>
+                            <li><strong>Mag:</strong> Current sensor magnitude (deviation from rest)</li>
+                            <li><strong>Threshold:</strong> Minimum magnitude required to trigger touch</li>
+                            <li><strong>🎯 TOUCH!</strong> appears when magnitude exceeds threshold</li>
+                        </ul>
+                    </li>
+                    <li><strong>When to use:</strong> Before calibration to confirm sensor responds to touch/movement</li>
+                </ul>
+
+                <h6 class="mt-3 mb-2"><i class="bi bi-bullseye"></i> Test Mode</h6>
+                <ul class="mb-2" style="padding-left: 20px;">
+                    <li><strong>Purpose:</strong> Validate threshold setting by counting actual touches</li>
+                    <li><strong>Duration:</strong> 10 seconds with touch counting enabled</li>
+                    <li><strong>How to use:</strong>
+                        <ul>
+                            <li>Tap the device 5 times during the test period</li>
+                            <li>Each tap should produce a beep and increment touch count</li>
+                            <li>Final report shows total touches detected</li>
+                        </ul>
+                    </li>
+                    <li><strong>Expected result:</strong> 5 taps = 5 beeps = 5 touches detected</li>
+                    <li><strong>When to use:</strong> After setting threshold to verify it works correctly</li>
+                </ul>
+
+                <h6 class="mt-3 mb-2"><i class="bi bi-gear"></i> Calibrate</h6>
+                <ul class="mb-2" style="padding-left: 20px;">
+                    <li><strong>Purpose:</strong> Automatically determine optimal threshold for the device</li>
+                    <li><strong>Duration:</strong> 30 seconds total (~6 seconds per tap)</li>
+                    <li><strong>How it works:</strong>
+                        <ul>
+                            <li>Wizard prompts you to tap device 5 times</li>
+                            <li>Analyzes tap magnitudes to calculate optimal threshold</li>
+                            <li>Auto-adjusts sensitivity if no taps detected</li>
+                        </ul>
+                    </li>
+                    <li><strong>When to use:</strong> First time setup or when recalibrating a device</li>
+                </ul>
+
+                <h6 class="mt-3 mb-2"><i class="bi bi-sliders"></i> Manual Threshold Adjustment</h6>
+                <ul class="mb-0" style="padding-left: 20px;">
+                    <li><strong>Click threshold value</strong> in table to edit manually</li>
+                    <li><strong>Typical range:</strong> 0.15g - 0.30g</li>
+                    <li><strong>Lower values</strong> = more sensitive (may trigger false positives)</li>
+                    <li><strong>Higher values</strong> = less sensitive (may miss light touches)</li>
+                </ul>
+            </div>
         </div>
 
         <!-- Device Status Table -->
