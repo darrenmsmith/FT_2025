@@ -215,16 +215,50 @@ class NetworkManager:
             self.run_command('sudo systemctl restart dhcpcd')
             time.sleep(5)
 
+            # Detect connection type (Ethernet vs WiFi)
+            connection_type = "Unknown"
+            connection_info = ""
+
+            try:
+                # Check if eth0 has an IP address (using Ethernet)
+                result = subprocess.run(
+                    ['ip', 'addr', 'show', 'eth0'],
+                    capture_output=True,
+                    text=True
+                )
+                if 'inet ' in result.stdout and 'state UP' in result.stdout:
+                    connection_type = "Ethernet"
+                    # Extract IP address
+                    import re
+                    ip_match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', result.stdout)
+                    if ip_match:
+                        connection_info = f"Ethernet ({ip_match.group(1)})"
+                else:
+                    # Check wlan1 for WiFi connection
+                    result = subprocess.run(
+                        ['iwgetid', 'wlan1', '-r'],
+                        capture_output=True,
+                        text=True
+                    )
+                    ssid = result.stdout.strip()
+                    if ssid:
+                        connection_type = "WiFi"
+                        connection_info = f"{ssid} WiFi"
+                    else:
+                        connection_info = "Internet connection"
+            except:
+                connection_info = "Internet connection"
+
             # Update configuration
             self.current_mode = 'online'
             self.config['network_mode']['current'] = 'online'
             self.config['access_point']['enabled'] = False
             self.save_config()
-            self.save_status('online', 'Connected to smithhome WiFi')
+            self.save_status('online', f'Connected via {connection_info}')
 
             logging.info("="*60)
             logging.info("Online mode active!")
-            logging.info("Reconnected to smithhome WiFi")
+            logging.info(f"Connected via {connection_info}")
             logging.info("="*60)
 
             return True

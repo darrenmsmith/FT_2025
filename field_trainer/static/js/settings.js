@@ -9,7 +9,6 @@ let originalSettings = {};
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadSettings();
-    loadDeviceStatus();
     attachEventListeners();
     loadTestAudioPreferences();
 });
@@ -1089,7 +1088,21 @@ function saveThresholdInline(deviceNum, value) {
         if (data.success) {
             logToSystemLog(`✅ ${data.message}`);
             showCalibrationMessage('success', data.message);
-            setTimeout(() => loadCalibrationDeviceStatus(), 500);
+
+            // Update the display directly with the new value
+            const display = document.querySelector(`.threshold-display[data-device="${deviceNum}"]`);
+            const input = document.querySelector(`.threshold-edit[data-device="${deviceNum}"]`);
+
+            if (display) {
+                // Update the display text and onclick handler
+                display.innerHTML = `${threshold.toFixed(2)} <i class="bi bi-pencil-square text-muted small"></i>`;
+                display.setAttribute('onclick', `editThreshold(${deviceNum}, ${threshold})`);
+                display.style.display = 'inline';
+            }
+            if (input) {
+                input.style.display = 'none';
+                input.value = threshold.toFixed(2);
+            }
         } else {
             logToSystemLog(`❌ Error: ${data.error}`);
             showCalibrationMessage('danger', 'Error: ' + data.error);
@@ -1775,6 +1788,38 @@ function appendToCalibrationLog(message) {
     const logContainer = document.getElementById('calibration-system-log');
     if (logContainer) {
         logContainer.scrollTop = logContainer.scrollHeight;
+    }
+}
+
+/**
+ * Load current network status
+ */
+async function loadCurrentNetwork() {
+    console.log('[Settings] Loading network status...');
+    try {
+        const response = await fetch('/api/network/status');
+        const data = await response.json();
+        console.log('[Settings] Network status:', data);
+
+        // Update the network mode description directly
+        const description = document.getElementById('networkModeDescription');
+        const ipAddressDiv = document.getElementById('networkIpAddress');
+        const ipAddressValue = document.getElementById('networkIpAddressValue');
+
+        if (description && data.message) {
+            description.textContent = data.message;
+
+            // Extract IP address from message (format: "Connected via Ethernet (192.168.7.116)")
+            const ipMatch = data.message.match(/\((\d+\.\d+\.\d+\.\d+)\)/);
+            if (ipMatch && ipAddressDiv && ipAddressValue) {
+                ipAddressValue.textContent = ipMatch[1];
+                ipAddressDiv.style.display = 'block';
+            } else if (ipAddressDiv) {
+                ipAddressDiv.style.display = 'none';
+            }
+        }
+    } catch (error) {
+        console.error('[Settings] Error loading network status:', error);
     }
 }
 

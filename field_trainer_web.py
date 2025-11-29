@@ -373,6 +373,25 @@ def get_network_info():
 #     ok = REGISTRY.sync_time(data.get("node_id"), data.get("controller_ms"))
 #     return jsonify({"success": ok})
 
+@app.post("/api/send_command")
+def api_send_command():
+    """Send a command to a specific node via REGISTRY"""
+    data = request.get_json(force=True) or {}
+    node_id = data.get("node_id")
+    command = data.get("command")
+
+    if not node_id or not command:
+        return jsonify({"success": False, "error": "Missing node_id or command"}), 400
+
+    try:
+        success = REGISTRY.send_to_node(node_id, command)
+        if success:
+            return jsonify({"success": True})
+        else:
+            return jsonify({"success": False, "error": f"Failed to send command to {node_id}"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # ----------------------- Local dev entry -----------------------
 
 if __name__ == "__main__":

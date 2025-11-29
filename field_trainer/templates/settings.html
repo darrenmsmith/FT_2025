@@ -208,6 +208,9 @@
                 <p class="text-muted small mb-0" id="networkModeDescription">
                     Loading network status...
                 </p>
+                <p class="text-muted small mb-0 mt-1" id="networkIpAddress" style="display: none;">
+                    <i class="bi bi-ethernet"></i> <span id="networkIpAddressValue"></span>
+                </p>
             </div>
             <div>
                 <span class="badge" id="networkModeBadge" style="font-size: 1.1em;">
@@ -789,6 +792,8 @@ function loadNetworkStatus() {
 function updateNetworkStatusDisplay(data) {
     const badge = document.getElementById('networkModeBadge');
     const description = document.getElementById('networkModeDescription');
+    const ipAddressDiv = document.getElementById('networkIpAddress');
+    const ipAddressValue = document.getElementById('networkIpAddressValue');
     const autoSwitchToggle = document.getElementById('autoSwitchToggle');
 
     if (!badge || !description) return;
@@ -797,15 +802,38 @@ function updateNetworkStatusDisplay(data) {
     if (data.mode === 'online') {
         badge.innerHTML = '<i class="bi bi-wifi"></i> Online';
         badge.className = 'badge bg-success';
-        description.textContent = `Connected to ${data.ssid || 'WiFi'} - Internet available`;
+
+        // Parse the message to extract connection info and IP address
+        const message = data.message || '';
+        description.textContent = message;
+
+        // Extract IP address from message (format: "Connected via Ethernet (192.168.7.116)" or "Connected via WiFi SSID")
+        const ipMatch = message.match(/\((\d+\.\d+\.\d+\.\d+)\)/);
+        if (ipMatch && ipAddressDiv && ipAddressValue) {
+            ipAddressValue.textContent = ipMatch[1];
+            ipAddressDiv.style.display = 'block';
+        } else if (ipAddressDiv) {
+            ipAddressDiv.style.display = 'none';
+        }
     } else if (data.mode === 'offline') {
         badge.innerHTML = '<i class="bi bi-broadcast"></i> AP Mode';
         badge.className = 'badge bg-warning text-dark';
         description.textContent = 'Access Point active - Field_Trainer WiFi available';
+
+        // Show AP IP address
+        if (ipAddressDiv && ipAddressValue) {
+            ipAddressValue.textContent = '192.168.10.1';
+            ipAddressDiv.style.display = 'block';
+        }
     } else {
         badge.innerHTML = '<i class="bi bi-question-circle"></i> Unknown';
         badge.className = 'badge bg-secondary';
         description.textContent = 'Network status unknown';
+
+        // Hide IP address
+        if (ipAddressDiv) {
+            ipAddressDiv.style.display = 'none';
+        }
     }
 
     // Update auto-switch toggle
@@ -905,6 +933,6 @@ function hideNetworkStatusMessage() {
 <!-- Chart.js for live sensor reading visualization -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-<script src="/static/js/settings.js"></script>
+<script src="/static/js/settings.js?v={{ range(1, 99999999) | random }}"></script>
 
 {% endblock %}

@@ -67,12 +67,25 @@ def get_device_status(device_num: int) -> Dict[str, Any]:
             'name': info['name']
         }
 
-    # Check remote device status via REGISTRY
+    # Check remote device status via field-trainer-server API
     online = False
-    with REGISTRY.nodes_lock:
-        node = REGISTRY.nodes.get(device_id)
-        if node and node.status not in ('Offline', 'Unknown') and node._writer:
-            online = True
+    try:
+        import requests
+        response = requests.get('http://localhost:5000/api/state', timeout=2)
+        if response.status_code == 200:
+            state = response.json()
+            nodes = state.get('nodes', [])
+            for node in nodes:
+                if node.get('ip') == device_id and node.get('status') not in ('Offline', 'Unknown'):
+                    online = True
+                    break
+    except Exception as e:
+        logger.debug(f"Failed to check device status via API: {e}")
+        # Fallback to REGISTRY if API fails
+        with REGISTRY.nodes_lock:
+            node = REGISTRY.nodes.get(device_id)
+            if node and node.status not in ('Offline', 'Unknown') and node._writer:
+                online = True
 
     return {
         'online': online,
@@ -124,23 +137,39 @@ def get_current_threshold(device_num: int) -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"Could not read calibration file for device {device_num}: {e}")
 
-        # Devices 1-5: Read from REGISTRY (threshold sent in heartbeat)
+        # Devices 1-5: Read from field-trainer-server API (threshold sent in heartbeat)
         else:
             try:
-                with REGISTRY.nodes_lock:
-                    node = REGISTRY.nodes.get(device_id)
-                    if node and node.sensors:
-                        # Threshold is sent in heartbeat's sensors dict as 'touch_threshold'
-                        reported_threshold = node.sensors.get('touch_threshold')
-                        if reported_threshold is not None:
-                            threshold = float(reported_threshold)
-                            logger.info(f"Loaded threshold {threshold} from REGISTRY for device {device_num}")
-                        else:
-                            logger.warning(f"No threshold in REGISTRY sensors for device {device_num}, using default")
+                import requests
+                response = requests.get('http://localhost:5000/api/state', timeout=2)
+                if response.status_code == 200:
+                    state = response.json()
+                    nodes = state.get('nodes', [])
+                    for node in nodes:
+                        if node.get('ip') == device_id:
+                            sensors = node.get('sensors', {})
+                            reported_threshold = sensors.get('touch_threshold')
+                            if reported_threshold is not None:
+                                threshold = float(reported_threshold)
+                                logger.info(f"Loaded threshold {threshold} from API for device {device_num}")
+                            else:
+                                logger.warning(f"No threshold in API sensors for device {device_num}, using default")
+                            break
                     else:
-                        logger.warning(f"Device {device_num} not found in REGISTRY or no sensors data")
+                        logger.warning(f"Device {device_num} not found in API state")
             except Exception as e:
-                logger.warning(f"Could not read threshold from REGISTRY for device {device_num}: {e}")
+                logger.warning(f"Could not read threshold from API for device {device_num}: {e}")
+                # Fallback to REGISTRY if API fails
+                try:
+                    with REGISTRY.nodes_lock:
+                        node = REGISTRY.nodes.get(device_id)
+                        if node and node.sensors:
+                            reported_threshold = node.sensors.get('touch_threshold')
+                            if reported_threshold is not None:
+                                threshold = float(reported_threshold)
+                                logger.info(f"Loaded threshold {threshold} from REGISTRY fallback for device {device_num}")
+                except:
+                    pass
 
         return {
             'success': True,
@@ -229,19 +258,47 @@ def set_threshold(device_num: int, threshold: float) -> Dict[str, Any]:
                     'error': f'Failed to save calibration: {e}'
                 }
 
-        # For remote devices, send command via REGISTRY
-        success = REGISTRY.send_to_node(device_id, command)
+        # For remote devices (1-5), send command via field-trainer-server API
+        try:
+            import requests
+            response = requests.post(
+                'http://localhost:5000/api/send_command',
+                json={
+                    'node_id': device_id,
+                    'command': command
+                },
+                timeout=5
+            )
 
-        if success:
-            return {
-                'success': True,
-                'message': f'Threshold set to {threshold} for {info["name"]}'
-            }
-        else:
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    logger.info(f"Successfully sent threshold command to device {device_num}")
+                    return {
+                        'success': True,
+                        'message': f'Threshold set to {threshold} for {info["name"]}'
+                    }
+                else:
+                    error_msg = result.get('error', 'Unknown error')
+                    logger.error(f"Field trainer server rejected command: {error_msg}")
+                    return {
+                        'success': False,
+                        'message': '',
+                        'error': f'Server error: {error_msg}'
+                    }
+            else:
+                logger.error(f"API returned status code {response.status_code}")
+                return {
+                    'success': False,
+                    'message': '',
+                    'error': f'Failed to send command to {info["name"]}'
+                }
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error communicating with field trainer server: {e}")
             return {
                 'success': False,
                 'message': '',
-                'error': f'Failed to send command to {info["name"]}'
+                'error': f'Cannot reach field trainer server: {e}'
             }
 
     except Exception as e:
