@@ -304,26 +304,79 @@ def session_results(session_id):
     )
 
 
+@sessions_bp.route('/<session_id>/repeat', methods=['POST'])
+def repeat_session(session_id):
+    """Repeat session - create new session with same team, course, and athletes"""
+    try:
+        # Get original session
+        session = db.get_session(session_id)
+        if not session:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+        # Only allow repeating completed or incomplete sessions
+        if session['status'] not in ['completed', 'incomplete', 'failed']:
+            return jsonify({'success': False, 'error': f'Cannot repeat {session["status"]} session'}), 400
+
+        # Extract session parameters
+        team_id = session['team_id']
+        course_id = session['course_id']
+        audio_voice = session.get('audio_voice', 'male')
+
+        # Get athlete queue from original runs (exclude absent athletes)
+        athlete_queue = []
+        for run in session['runs']:
+            if run['status'] != 'absent':
+                athlete_queue.append(run['athlete_id'])
+
+        if not athlete_queue:
+            return jsonify({'success': False, 'error': 'No athletes to repeat session with'}), 400
+
+        # Create new session
+        new_session_id = db.create_session(
+            team_id=team_id,
+            course_id=course_id,
+            athlete_queue=athlete_queue,
+            audio_voice=audio_voice
+        )
+
+        # Store in global state
+        active_session_state['session_id'] = new_session_id
+
+        REGISTRY.log(f"Session {session_id[:8]} repeated as {new_session_id[:8]}")
+
+        return jsonify({
+            'success': True,
+            'new_session_id': new_session_id,
+            'redirect_url': url_for('sessions.session_setup_cones', session_id=new_session_id)
+        })
+
+    except Exception as e:
+        print(f"❌ Repeat session error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
 @sessions_bp.route('/<session_id>/export')
 def export_session(session_id):
     """Export session results as CSV"""
     import csv
     from io import StringIO
     from flask import Response
-    
+
     session = db.get_session(session_id)
     if not session:
         return "Session not found", 404
-    
+
     output = StringIO()
     writer = csv.writer(output)
-    
+
     # Header
     writer.writerow([
         'Athlete Name', 'Jersey Number', 'Queue Position',
         'Status', 'Total Time', 'Started At', 'Completed At'
     ])
-    
+
     # Rows
     for run in session['runs']:
         writer.writerow([
@@ -335,9 +388,9 @@ def export_session(session_id):
             run.get('started_at', ''),
             run.get('completed_at', '')
         ])
-    
+
     output.seek(0)
-    
+
     return Response(
         output.getvalue(),
         mimetype='text/csv',

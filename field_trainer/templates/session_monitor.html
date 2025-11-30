@@ -48,7 +48,7 @@
         </h2>
         <span class="badge status-{{ session.status }}">{{ session.status|upper }}</span>
     </div>
-    <div class="col-md-4 text-end">
+    <div class="col-md-4 text-end" id="sessionControls">
         {% if session.status == 'setup' %}
             <a href="/dashboard" class="btn btn-secondary me-2">
                 <i class="fas fa-arrow-left"></i> Back
@@ -60,8 +60,21 @@
             <button class="btn btn-danger" id="stopBtn">
                 <i class="fas fa-stop"></i> Stop Session
             </button>
-        {% elif session.status == 'completed' or session.status == 'incomplete' %}
-            <a href="/sessions" class="btn btn-secondary">
+        {% elif session.status == 'completed' or session.status == 'incomplete' or session.status == 'failed' %}
+            <button class="btn btn-primary me-2" id="repeatBtn">
+                <i class="fas fa-redo"></i> Repeat Session
+            </button>
+            <a href="/sessions" class="btn btn-secondary" id="backBtn">
+                <i class="fas fa-arrow-left"></i> Back
+            </a>
+        {% endif %}
+
+        <!-- Hidden buttons for dynamic display when session completes -->
+        {% if session.status == 'active' %}
+            <button class="btn btn-primary me-2" id="repeatBtn" style="display: none;">
+                <i class="fas fa-redo"></i> Repeat Session
+            </button>
+            <a href="/sessions" class="btn btn-secondary" id="backBtn" style="display: none;">
                 <i class="fas fa-arrow-left"></i> Back
             </a>
         {% endif %}
@@ -142,13 +155,13 @@ document.getElementById('startBtn').addEventListener('click', async function() {
 document.getElementById('stopBtn').addEventListener('click', async function() {
     const reason = prompt('Reason for stopping session:');
     if (!reason) return;
-    
+
     const response = await fetch(`/session/${sessionId}/stop`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({reason: reason})
     });
-    
+
     const result = await response.json();
     if (result.success) {
         location.reload();
@@ -158,20 +171,47 @@ document.getElementById('stopBtn').addEventListener('click', async function() {
 });
 {% endif %}
 
+// Attach repeat button handler (works for both initial and dynamic display)
+const repeatBtn = document.getElementById('repeatBtn');
+if (repeatBtn) {
+    repeatBtn.addEventListener('click', async function() {
+        if (!confirm('Repeat this session with the same athletes and course?')) return;
+
+        const response = await fetch(`/session/${sessionId}/repeat`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            window.location.href = result.redirect_url || `/session/${result.new_session_id}/monitor`;
+        } else {
+            alert('Error repeating session: ' + result.error);
+        }
+    });
+}
+
 async function refreshStatus() {
     try {
         const response = await fetch(`/api/session/${sessionId}/status`);
         const data = await response.json();
-        
+
         updateProgress(data.session);
         updateDeviceStatus(data.waiting_for_device);
-        
-        if (data.session.status === 'completed') {
+
+        if (data.session.status === 'completed' || data.session.status === 'incomplete' || data.session.status === 'failed') {
             clearInterval(refreshInterval);
             showCompletionMessage();
+
             // Hide Stop Session button
             const stopBtn = document.getElementById('stopBtn');
             if (stopBtn) stopBtn.style.display = 'none';
+
+            // Show Repeat Session and Back buttons
+            const repeatBtn = document.getElementById('repeatBtn');
+            const backBtn = document.getElementById('backBtn');
+            if (repeatBtn) repeatBtn.style.display = 'inline-block';
+            if (backBtn) backBtn.style.display = 'inline-block';
         }
     } catch (error) {
         console.error('Error refreshing status:', error);

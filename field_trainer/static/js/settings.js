@@ -552,57 +552,7 @@ async function loadDeviceStatus() {
     }
 }
 
-/**
- * Load current network SSID
- */
-async function loadCurrentNetwork() {
-    console.log('[Network] Loading current network info...');
-    try {
-        const response = await fetch('/api/settings/network-info');
-        console.log('[Network] API response status:', response.status);
-
-        const data = await response.json();
-        console.log('[Network] API data:', data);
-
-        const ssidElement = document.getElementById('current-ssid');
-        if (!ssidElement) {
-            console.error('[Network] Element not found: current-ssid');
-            return;
-        }
-
-        if (data.success && data.ssid) {
-            // Determine icon and color based on connection type
-            let icon = '';
-            let colorClass = '';
-
-            if (data.connection_type === 'Ethernet') {
-                icon = '<i class="bi bi-ethernet text-success"></i> ';
-                colorClass = 'text-success';
-            } else if (data.connection_type === 'WiFi') {
-                icon = '<i class="bi bi-wifi text-primary"></i> ';
-                colorClass = 'text-primary';
-            } else if (data.connection_type === 'Access Point') {
-                icon = '<i class="bi bi-router text-warning"></i> ';
-                colorClass = 'text-warning';
-            } else {
-                icon = '<i class="bi bi-x-circle text-muted"></i> ';
-                colorClass = 'text-muted';
-            }
-
-            ssidElement.innerHTML = `${icon}<span class="${colorClass} fw-bold">${data.ssid}</span>`;
-            console.log(`[Network] ✓ Set network to: ${data.ssid} (${data.connection_type})`);
-        } else {
-            ssidElement.innerHTML = '<i class="bi bi-question-circle text-muted"></i> <span class="text-muted">Unknown</span>';
-            console.warn('[Network] No SSID in response');
-        }
-    } catch (error) {
-        console.error('[Network] Exception:', error);
-        const ssidElement = document.getElementById('current-ssid');
-        if (ssidElement) {
-            ssidElement.innerHTML = '<i class="bi bi-exclamation-triangle text-danger"></i> <span class="text-danger">Error loading</span>';
-        }
-    }
-}
+// Old loadCurrentNetwork function removed - now handled by the function at line ~1797
 
 /**
  * Play selected audio file SERVER-SIDE (through selected device speaker)
@@ -1801,7 +1751,7 @@ async function loadCurrentNetwork() {
         const data = await response.json();
         console.log('[Settings] Network status:', data);
 
-        // Update the network mode description directly
+        // Update the network mode description (Settings section)
         const description = document.getElementById('networkModeDescription');
         const ipAddressDiv = document.getElementById('networkIpAddress');
         const ipAddressValue = document.getElementById('networkIpAddressValue');
@@ -1818,8 +1768,38 @@ async function loadCurrentNetwork() {
                 ipAddressDiv.style.display = 'none';
             }
         }
+
+        // Also update the current-ssid element (Network Configuration section)
+        const ssidElement = document.getElementById('current-ssid');
+        if (ssidElement && data.message) {
+            // Determine connection type and icon
+            let icon = '';
+            let colorClass = '';
+            let displayText = '';
+
+            if (data.message.includes('Ethernet')) {
+                icon = '<i class="bi bi-ethernet text-success"></i> ';
+                colorClass = 'text-success';
+                displayText = data.message;
+            } else if (data.message.includes('WiFi')) {
+                icon = '<i class="bi bi-wifi text-primary"></i> ';
+                colorClass = 'text-primary';
+                displayText = data.message;
+            } else {
+                icon = '<i class="bi bi-question-circle text-muted"></i> ';
+                colorClass = 'text-muted';
+                displayText = data.message || 'Unknown';
+            }
+
+            ssidElement.innerHTML = `${icon}<span class="${colorClass}">${displayText}</span>`;
+            console.log(`[Settings] ✓ Updated current-ssid: ${displayText}`);
+        }
     } catch (error) {
         console.error('[Settings] Error loading network status:', error);
+        const ssidElement = document.getElementById('current-ssid');
+        if (ssidElement) {
+            ssidElement.innerHTML = '<i class="bi bi-exclamation-triangle text-danger"></i> <span class="text-danger">Error loading</span>';
+        }
     }
 }
 
