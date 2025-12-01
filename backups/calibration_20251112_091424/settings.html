@@ -1,0 +1,785 @@
+{% extends "base.html" %}
+{% block title %}Settings - Field Trainer{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-gear"></i> System Settings</h1>
+    <div>
+        <button id="reset-btn" class="btn btn-outline-danger me-2">
+            <i class="bi bi-arrow-counterclockwise"></i> Reset to Defaults
+        </button>
+        <a href="/dashboard" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back
+        </a>
+    </div>
+</div>
+
+<!-- Display & Units Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-display"></i> Display & Units</h5>
+    </div>
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-auto">
+                <label class="form-label fw-bold mb-0">Distance Unit:</label>
+            </div>
+            <div class="col-auto">
+                <div class="d-flex gap-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="distance_unit" id="unit_yards" value="yards">
+                        <label class="form-check-label" for="unit_yards">Yards</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="distance_unit" id="unit_meters" value="meters">
+                        <label class="form-check-label" for="unit_meters">Meters</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="distance_unit" id="unit_feet" value="feet">
+                        <label class="form-check-label" for="unit_feet">Feet</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Audio Settings Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-volume-up"></i> Audio Settings</h5>
+    </div>
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label fw-bold">Voice Gender</label>
+            <div class="d-flex gap-4">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="voice_gender" id="voice_male" value="male">
+                    <label class="form-check-label" for="voice_male">Male</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="voice_gender" id="voice_female" value="female">
+                    <label class="form-check-label" for="voice_female">Female</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label for="system_volume" class="form-label fw-bold">System Volume: <span id="volume-display">60</span>%</label>
+            <div style="width: 33%;">
+                <input type="range" class="form-range" min="0" max="100" step="5" id="system_volume">
+            </div>
+            <small class="form-text text-muted"><i class="bi bi-info-circle"></i> Volume slider affects Device 0 (Start) only. Remote devices use their local volume settings.</small>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold">Test Audio Playback</label>
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label for="test_device" class="form-label">Device</label>
+                    <select class="form-select" id="test_device">
+                        <option value="ALL">ALL (Sequential)</option>
+                        <option value="192.168.99.100">Start</option>
+                        <option value="192.168.99.101">Cone 1</option>
+                        <option value="192.168.99.102">Cone 2</option>
+                        <option value="192.168.99.103">Cone 3</option>
+                        <option value="192.168.99.104">Cone 4</option>
+                        <option value="192.168.99.105">Cone 5</option>
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <label for="test_audio_file" class="form-label">Audio File</label>
+                    <div class="input-group">
+                        <select class="form-select" id="test_audio_file">
+                            <option value="">-- Select Audio File --</option>
+                        </select>
+                        <button class="btn btn-outline-primary" type="button" id="play-audio-btn" title="Play on selected device">
+                            <i class="bi bi-play-fill"></i> Play
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <small class="form-text text-muted">Test audio playback on any device. Device status will be checked before playing.</small>
+        </div>
+
+        <div class="mb-3">
+            <label for="ready_audio_file" class="form-label fw-bold">Ready Notification Sound</label>
+            <select class="form-select" id="ready_audio_file">
+                <option value="">-- Select Audio File --</option>
+            </select>
+            <small class="form-text text-muted">Audio file played when system is ready for athlete</small>
+        </div>
+    </div>
+</div>
+
+<!-- Timing Defaults Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-clock"></i> Timing Defaults</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="min_travel_time" class="form-label fw-bold">Minimum Travel Time (seconds)</label>
+                <input type="number" class="form-control" id="min_travel_time" min="0.1" step="0.1">
+                <small class="form-text text-muted">Minimum expected time between devices</small>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="max_travel_time" class="form-label fw-bold">Maximum Travel Time (seconds)</label>
+                <input type="number" class="form-control" id="max_travel_time" min="1" step="1">
+                <small class="form-text text-muted">Maximum expected time between devices</small>
+            </div>
+        </div>
+        <small class="form-text text-muted"><i class="bi bi-info-circle"></i> Note: Action-specific timing will be available in a future update</small>
+    </div>
+</div>
+
+<!-- LED Settings Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-lightbulb"></i> LED Settings</h5>
+    </div>
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label fw-bold">Test LED</label>
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label for="test_led_device" class="form-label">Device</label>
+                    <select class="form-select" id="test_led_device">
+                        <option value="ALL">ALL</option>
+                        <option value="192.168.99.100">Start</option>
+                        <option value="192.168.99.101">Cone 1</option>
+                        <option value="192.168.99.102">Cone 2</option>
+                        <option value="192.168.99.103">Cone 3</option>
+                        <option value="192.168.99.104">Cone 4</option>
+                        <option value="192.168.99.105">Cone 5</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="test_led_color" class="form-label">LED Color</label>
+                    <select class="form-select" id="test_led_color">
+                        <option value="orange">Orange</option>
+                        <option value="blue">Blue</option>
+                        <option value="green">Green</option>
+                        <option value="yellow">Yellow</option>
+                        <option value="red">Red</option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-outline-primary w-100" type="button" id="test-led-btn" title="Test LED on selected device">
+                        <i class="bi bi-lightbulb"></i> Test LED
+                    </button>
+                </div>
+            </div>
+            <small class="form-text text-muted">Test will flash selected device LEDs for 5 seconds</small>
+        </div>
+
+        <div class="mb-3">
+            <label for="ready_led_color" class="form-label fw-bold">Ready LED Color (Default)</label>
+            <div style="width: 33%;">
+                <select class="form-select" id="ready_led_color">
+                    <option value="orange">Orange</option>
+                    <option value="blue">Blue</option>
+                    <option value="green">Green</option>
+                    <option value="yellow">Yellow</option>
+                    <option value="red">Red</option>
+                </select>
+            </div>
+            <small class="form-text text-muted">Default LED color when ready</small>
+        </div>
+    </div>
+</div>
+
+<!-- Network Configuration Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-wifi"></i> Network Configuration</h5>
+    </div>
+    <div class="card-body">
+        <!-- Offline Mode Subsection -->
+        <h6 class="mb-3"><i class="bi bi-router"></i> Offline Mode / Access Point</h6>
+
+        <!-- Network Mode Status -->
+        <div class="d-flex align-items-center justify-content-between mb-3 p-3 bg-light rounded">
+            <div>
+                <label class="form-label mb-1 fw-bold">
+                    <i class="bi bi-broadcast-pin"></i> Current Network Mode
+                </label>
+                <p class="text-muted small mb-0" id="networkModeDescription">
+                    Loading network status...
+                </p>
+            </div>
+            <div>
+                <span class="badge" id="networkModeBadge" style="font-size: 1.1em;">
+                    <i class="bi bi-hourglass-split"></i> Loading...
+                </span>
+            </div>
+        </div>
+
+        <!-- Auto-Switch Toggle -->
+        <div class="d-flex align-items-center justify-content-between mb-3 p-3 bg-light rounded">
+            <div>
+                <label for="autoSwitchToggle" class="form-label mb-1 fw-bold">
+                    <i class="bi bi-arrow-left-right"></i> Automatic Mode Switching
+                </label>
+                <p class="text-muted small mb-0">
+                    Automatically switch to AP mode when internet is lost
+                </p>
+            </div>
+            <div class="form-check form-switch" style="font-size: 1.5em;">
+                <input class="form-check-input" type="checkbox" id="autoSwitchToggle" role="switch">
+            </div>
+        </div>
+
+        <!-- Manual Control Buttons -->
+        <div class="d-flex gap-2 mb-4">
+            <button type="button" class="btn btn-sm btn-outline-success" id="forceOnlineBtn">
+                <i class="bi bi-wifi"></i> Force Online Mode
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-warning" id="forceOfflineBtn">
+                <i class="bi bi-broadcast"></i> Force AP Mode
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshNetworkBtn">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+
+        <!-- Network Status Messages -->
+        <div id="networkStatusMessage" class="alert" style="display: none;" role="alert"></div>
+
+        <hr class="my-4">
+
+        <!-- Mesh Network Security Subsection -->
+        <h6 class="mb-3"><i class="bi bi-shield-lock"></i> Mesh Network Security</h6>
+
+        <!-- MAC Filtering Toggle -->
+        <div class="d-flex align-items-center justify-content-between mb-3 p-3 bg-light rounded">
+            <div>
+                <label for="macFilterToggle" class="form-label mb-1 fw-bold">
+                    <i class="bi bi-funnel"></i> MAC Address Filtering
+                </label>
+                <p class="text-muted small mb-0">
+                    Only authorized Field Trainer devices can join the mesh network
+                </p>
+            </div>
+
+            <div class="form-check form-switch" style="font-size: 1.5em;">
+                <input class="form-check-input" type="checkbox" id="macFilterToggle" role="switch">
+            </div>
+        </div>
+
+        <!-- Status Display -->
+        <div id="securityStatus" class="mb-3">
+            <span class="badge" id="statusBadge" style="font-size: 0.9em;">
+                <i class="bi bi-hourglass-split"></i> Checking...
+            </span>
+            <span id="deviceCount" class="ms-2 text-muted"></span>
+        </div>
+
+        <!-- Status Messages -->
+        <div id="securityStatusMessage" class="alert" style="display: none;" role="alert"></div>
+
+        <!-- Device Management -->
+        <div class="d-flex gap-2 mb-4">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showAuthorizedDevices()">
+                <i class="bi bi-list-ul"></i> View/Edit Authorized Devices
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshSecurityStatus()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh Status
+            </button>
+        </div>
+
+        <hr class="my-4">
+
+        <!-- WiFi Configuration Subsection -->
+        <h6 class="mb-3"><i class="bi bi-wifi"></i> WiFi Configuration</h6>
+
+        <div class="alert alert-info mb-3">
+            <i class="bi bi-info-circle"></i>
+            <strong>Current Network:</strong> <span id="current-ssid">Loading...</span>
+        </div>
+
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle"></i>
+            <strong>Warning:</strong> Changing WiFi settings may disconnect the system. Only modify if you know what you're doing.
+        </div>
+
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="wifi_ssid" class="form-label fw-bold">WiFi SSID</label>
+                <input type="text" class="form-control" id="wifi_ssid" placeholder="Enter new SSID">
+            </div>
+
+            <div class="col-md-6 mb-3">
+                <label for="wifi_password" class="form-label fw-bold">WiFi Password</label>
+                <div class="input-group">
+                    <input type="password" class="form-control" id="wifi_password" placeholder="Enter new password">
+                    <button class="btn btn-outline-secondary" type="button" id="toggle-password">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status Messages -->
+<div id="status-message" class="alert" style="display: none;"></div>
+
+<!-- Authorized Devices Modal -->
+<div class="modal fade" id="devicesModal" tabindex="-1" aria-labelledby="devicesModalLabel">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="devicesModalLabel">
+                    <i class="bi bi-hdd-network"></i> Authorized Mesh Devices
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">
+                    <i class="bi bi-info-circle"></i> These MAC addresses are allowed to join the mesh network.
+                    Update MAC addresses when replacing hardware.
+                </p>
+
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Device</th>
+                                <th>Mesh IP</th>
+                                <th>MAC Address (wlan0)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devicesTableBody">
+                            <tr><td colspan="3" class="text-center">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                Loading devices...
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveDeviceMACs()">
+                    <i class="bi bi-save"></i> Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.status-filtered {
+    background-color: #d4edda !important;
+    color: #155724 !important;
+}
+
+.status-open {
+    background-color: #fff3cd !important;
+    color: #856404 !important;
+}
+
+.status-error {
+    background-color: #f8d7da !important;
+    color: #721c24 !important;
+}
+</style>
+
+<script>
+// Mesh Security Management
+let deviceData = [];
+
+// Load security status on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadSecurityStatus();
+    loadNetworkStatus();
+
+    // Handle MAC filter toggle change
+    const toggle = document.getElementById('macFilterToggle');
+    if (toggle) {
+        toggle.addEventListener('change', function() {
+            const enabled = this.checked;
+            updateSecurity(enabled);
+        });
+    }
+
+    // Handle auto-switch toggle change
+    const autoSwitchToggle = document.getElementById('autoSwitchToggle');
+    if (autoSwitchToggle) {
+        autoSwitchToggle.addEventListener('change', function() {
+            const enabled = this.checked;
+            setAutoSwitch(enabled);
+        });
+    }
+
+    // Handle force online button
+    const forceOnlineBtn = document.getElementById('forceOnlineBtn');
+    if (forceOnlineBtn) {
+        forceOnlineBtn.addEventListener('click', function() {
+            if (confirm('Switch to online mode? This will disconnect AP and reconnect to WiFi.')) {
+                forceNetworkMode('online');
+            }
+        });
+    }
+
+    // Handle force offline button
+    const forceOfflineBtn = document.getElementById('forceOfflineBtn');
+    if (forceOfflineBtn) {
+        forceOfflineBtn.addEventListener('click', function() {
+            if (confirm('Switch to AP mode? Field Trainer WiFi will be created.')) {
+                forceNetworkMode('offline');
+            }
+        });
+    }
+
+    // Handle refresh button
+    const refreshNetworkBtn = document.getElementById('refreshNetworkBtn');
+    if (refreshNetworkBtn) {
+        refreshNetworkBtn.addEventListener('click', function() {
+            loadNetworkStatus();
+            showNetworkStatusMessage('info', 'Refreshing network status...');
+            setTimeout(() => hideNetworkStatusMessage(), 2000);
+        });
+    }
+});
+
+function loadSecurityStatus() {
+    fetch('/api/mesh/security')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const toggle = document.getElementById('macFilterToggle');
+                if (toggle) toggle.checked = data.enabled;
+                updateStatusDisplay(data);
+            } else {
+                throw new Error(data.error || 'Failed to load security status');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading security status:', error);
+            const statusBadge = document.getElementById('statusBadge');
+            if (statusBadge) {
+                statusBadge.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Error';
+                statusBadge.className = 'badge status-error';
+            }
+        });
+}
+
+function refreshSecurityStatus() {
+    loadSecurityStatus();
+    showSecurityStatusMessage('info', 'Refreshing security status...');
+    setTimeout(() => {
+        showSecurityStatusMessage('success', 'Status refreshed');
+    }, 1000);
+}
+
+function updateSecurity(enabled) {
+    const toggle = document.getElementById('macFilterToggle');
+
+    showSecurityStatusMessage('info', 'Applying security changes to all devices...');
+
+    fetch('/api/mesh/security', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ enabled: enabled })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSecurityStatusMessage('success', data.message + ' on all devices');
+
+            updateStatusDisplay({
+                enabled: enabled,
+                mac_count: 6,
+                status: enabled ? 'Filtered' : 'Open'
+            });
+
+            setTimeout(() => {
+                hideSecurityStatusMessage();
+            }, 5000);
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating security:', error);
+        showSecurityStatusMessage('danger', 'Error: ' + error.message);
+
+        // Revert toggle
+        if (toggle) toggle.checked = !enabled;
+    });
+}
+
+function updateStatusDisplay(data) {
+    const statusBadge = document.getElementById('statusBadge');
+    const deviceCount = document.getElementById('deviceCount');
+
+    if (!statusBadge) return;
+
+    if (data.enabled) {
+        statusBadge.innerHTML = '<i class="bi bi-shield-check"></i> Filtered';
+        statusBadge.className = 'badge status-filtered';
+        if (deviceCount) {
+            deviceCount.textContent = `${data.mac_count || 6} devices authorized`;
+        }
+    } else {
+        statusBadge.innerHTML = '<i class="bi bi-unlock"></i> Open';
+        statusBadge.className = 'badge status-open';
+        if (deviceCount) {
+            deviceCount.textContent = 'All devices can join';
+        }
+    }
+}
+
+function showSecurityStatusMessage(type, message) {
+    const statusMsg = document.getElementById('securityStatusMessage');
+    if (!statusMsg) return;
+
+    statusMsg.className = `alert alert-${type}`;
+    statusMsg.innerHTML = `<i class="bi bi-${type === 'success' ? 'check-circle' : type === 'danger' ? 'exclamation-triangle' : 'info-circle'}"></i> ${message}`;
+    statusMsg.style.display = 'block';
+}
+
+function hideSecurityStatusMessage() {
+    const statusMsg = document.getElementById('securityStatusMessage');
+    if (statusMsg) {
+        statusMsg.style.display = 'none';
+    }
+}
+
+function showAuthorizedDevices() {
+    const modal = new bootstrap.Modal(document.getElementById('devicesModal'));
+    const tbody = document.getElementById('devicesTableBody');
+
+    // Load device list
+    fetch('/api/mesh/devices')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to load devices');
+            }
+
+            deviceData = data.devices || [];
+            tbody.innerHTML = '';
+
+            if (deviceData.length > 0) {
+                deviceData.forEach((device, index) => {
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td><strong>${device.device}</strong></td>
+                        <td><code>${device.ip}</code></td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm font-monospace"
+                                   id="mac_${device.device_num}"
+                                   value="${device.mac}"
+                                   placeholder="00:00:00:00:00:00"
+                                   title="MAC address format: XX:XX:XX:XX:XX:XX">
+                        </td>
+                    `;
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No devices configured</td></tr>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading devices:', error);
+            tbody.innerHTML = `<tr><td colspan="3" class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error loading devices: ${error.message}</td></tr>`;
+        });
+
+    modal.show();
+}
+
+function saveDeviceMACs() {
+    const updatedDevices = [];
+    let hasError = false;
+
+    deviceData.forEach(device => {
+        const macInput = document.getElementById(`mac_${device.device_num}`);
+        if (macInput) {
+            const newMAC = macInput.value.trim();
+
+            // Validate MAC format
+            const macPattern = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+            if (!macPattern.test(newMAC)) {
+                macInput.classList.add('is-invalid');
+                hasError = true;
+            } else {
+                macInput.classList.remove('is-invalid');
+                updatedDevices.push({
+                    device_num: device.device_num,
+                    mac: newMAC,
+                    ip: device.ip
+                });
+            }
+        }
+    });
+
+    if (hasError) {
+        alert('Please fix invalid MAC addresses before saving.');
+        return;
+    }
+
+    // Save to backend
+    fetch('/api/mesh/devices', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ devices: updatedDevices })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('devicesModal'));
+            modal.hide();
+            showSecurityStatusMessage('success', 'Device MAC addresses updated successfully');
+            setTimeout(hideSecurityStatusMessage, 5000);
+        } else {
+            throw new Error(data.error || 'Failed to save changes');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving device MACs:', error);
+        alert('Error saving changes: ' + error.message);
+    });
+}
+
+// Network Mode Management Functions
+function loadNetworkStatus() {
+    fetch('/api/network/status')
+        .then(response => response.json())
+        .then(data => {
+            updateNetworkStatusDisplay(data);
+        })
+        .catch(error => {
+            console.error('Error loading network status:', error);
+            const badge = document.getElementById('networkModeBadge');
+            if (badge) {
+                badge.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Error';
+                badge.className = 'badge bg-danger';
+            }
+        });
+}
+
+function updateNetworkStatusDisplay(data) {
+    const badge = document.getElementById('networkModeBadge');
+    const description = document.getElementById('networkModeDescription');
+    const autoSwitchToggle = document.getElementById('autoSwitchToggle');
+
+    if (!badge || !description) return;
+
+    // Update mode badge
+    if (data.mode === 'online') {
+        badge.innerHTML = '<i class="bi bi-wifi"></i> Online';
+        badge.className = 'badge bg-success';
+        description.textContent = `Connected to ${data.ssid || 'WiFi'} - Internet available`;
+    } else if (data.mode === 'offline') {
+        badge.innerHTML = '<i class="bi bi-broadcast"></i> AP Mode';
+        badge.className = 'badge bg-warning text-dark';
+        description.textContent = 'Access Point active - Field_Trainer WiFi available';
+    } else {
+        badge.innerHTML = '<i class="bi bi-question-circle"></i> Unknown';
+        badge.className = 'badge bg-secondary';
+        description.textContent = 'Network status unknown';
+    }
+
+    // Update auto-switch toggle
+    if (autoSwitchToggle) {
+        autoSwitchToggle.checked = data.auto_switch !== false;
+    }
+}
+
+function forceNetworkMode(mode) {
+    const badge = document.getElementById('networkModeBadge');
+    if (badge) {
+        badge.innerHTML = '<i class="bi bi-hourglass-split"></i> Switching...';
+        badge.className = 'badge bg-info';
+    }
+
+    showNetworkStatusMessage('info', `Switching to ${mode} mode...`);
+
+    fetch('/api/network/force-mode', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ mode: mode })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNetworkStatusMessage('success', data.message);
+            setTimeout(() => {
+                loadNetworkStatus();
+                hideNetworkStatusMessage();
+            }, 3000);
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+    })
+    .catch(error => {
+        console.error('Error forcing network mode:', error);
+        showNetworkStatusMessage('danger', 'Error: ' + error.message);
+        loadNetworkStatus();
+    });
+}
+
+function setAutoSwitch(enabled) {
+    fetch('/api/network/auto-switch', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ enabled: enabled })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNetworkStatusMessage('success', `Auto-switch ${enabled ? 'enabled' : 'disabled'}`);
+            setTimeout(() => hideNetworkStatusMessage(), 2000);
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+    })
+    .catch(error => {
+        console.error('Error setting auto-switch:', error);
+        showNetworkStatusMessage('danger', 'Error: ' + error.message);
+        // Revert toggle
+        const toggle = document.getElementById('autoSwitchToggle');
+        if (toggle) toggle.checked = !enabled;
+    });
+}
+
+function showNetworkStatusMessage(type, message) {
+    const statusMsg = document.getElementById('networkStatusMessage');
+    if (!statusMsg) return;
+
+    const iconMap = {
+        'success': 'check-circle',
+        'danger': 'exclamation-triangle',
+        'warning': 'exclamation-circle',
+        'info': 'info-circle'
+    };
+
+    statusMsg.className = `alert alert-${type}`;
+    statusMsg.innerHTML = `<i class="bi bi-${iconMap[type] || 'info-circle'}"></i> ${message}`;
+    statusMsg.style.display = 'block';
+}
+
+function hideNetworkStatusMessage() {
+    const statusMsg = document.getElementById('networkStatusMessage');
+    if (statusMsg) {
+        statusMsg.style.display = 'none';
+    }
+}
+</script>
+
+<script src="/static/js/settings.js"></script>
+
+{% endblock %}

@@ -21,7 +21,6 @@ from field_trainer.db_manager import DatabaseManager
 from field_trainer.ft_registry import REGISTRY
 from field_trainer.ft_version import VERSION
 from field_trainer.settings_manager import SettingsManager
-from field_trainer.calibration import calibration_logic
 sys.path.insert(0, '/opt/field_trainer/athletic_platform')
 from bridge_layer import initialize_bridge
 sys.path.insert(0, "/opt/field_trainer")
@@ -180,20 +179,6 @@ def dashboard():
                              categories=[],
                              selected_team=None,
                              selected_category=None)
-
-@app.route('/api/dashboard/stats')
-def dashboard_stats_api():
-    """API: Get dashboard statistics for auto-refresh"""
-    try:
-        stats = db.get_dashboard_stats()
-        recent_activity = db.get_recent_activity(limit=5)
-        return jsonify({
-            'success': True,
-            'stats': stats,
-            'recent_activity': recent_activity
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route("/teams")
 def teams_list():
@@ -608,12 +593,16 @@ def get_team_athletes(team_id):
 
 
 
-@app.route('/api/team/<team_id>/athletes')
-def get_team_athletes(team_id):
-    """API: Get athletes for team (for session setup)"""
-    athletes = db.get_athletes_by_team(team_id)
-    return jsonify(athletes)
+@app.route('/session/setup')
+def session_setup():
+    """Session setup page - select team, course, order athletes"""
+    teams = db.get_all_teams()
+    courses = db.get_all_courses()
+    return render_template('session_setup.html', teams=teams, courses=courses)
 
+@app.route('/api/team/<team_id>/athletes')
+@app.route('/session/create', methods=['POST'])
+@app.route('/session/<session_id>/athlete/<run_id>/absent', methods=['POST'])
 # ==================== SESSION HISTORY ====================
 
 @app.route('/sessions')
@@ -633,6 +622,10 @@ def sessions():
     
     return render_template('session_history.html', sessions=sessions)
 
+
+@app.route('/session/<session_id>/results')
+@app.route('/session/<session_id>/monitor')
+@app.route('/session/<session_id>/export')
 # ==================== TOUCH EVENT HANDLER ====================
 
 # ==================== REGISTRY INTEGRATION ====================
@@ -644,17 +637,17 @@ def register_touch_handler():
     """
     try:
         # Set the touch handler
-        REGISTRY.set_touch_handler(session_service.handle_touch_event)
-
+        REGISTRY.set_touch_handler(handle_touch_event_from_registry)
+        
         # Verify registration
         print("✅ Touch handler registered with REGISTRY")
-        print(f"   Handler function: {session_service.handle_touch_event}")
+        print(f"   Handler function: {handle_touch_event_from_registry}")
 #        print(f"   REGISTRY handler: {getattr(REGISTRY, '_touch_handler', 'NOT SET')}")
-
+        
         # Quick test to ensure it works
         test_timestamp = datetime.now()
         print(f"🧪 Testing handler with dummy call (should see warning about no active session)...")
-        session_service.handle_touch_event("test_device", test_timestamp)  
+        handle_touch_event_from_registry("test_device", test_timestamp)  
 
       # Test the handler with a dummy call
  #       test_timestamp = datetime.now()
@@ -717,12 +710,6 @@ def profile():
 # PHASE 2: CONE VERIFICATION & DEPLOYMENT
 # ============================================================================
 
-@app.route('/api/session/<session_id>/status')
-def api_session_status(session_id):
-    """API: Get session status (proxy to blueprint)"""
-    from routes.sessions_bp import session_status
-    return session_status(session_id)
-
 @app.route('/session/<session_id>/setup/cones')
 @app.route('/api/session/<session_id>/prepare-course', methods=['POST'])
 def api_prepare_course(session_id):
@@ -759,6 +746,9 @@ def api_prepare_course(session_id):
         print(f"❌ Prepare course error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 400
 
+@app.route('/api/session/<session_id>/status')
+@app.route('/session/<session_id>/start', methods=['POST'])
+@app.route('/session/<session_id>/stop', methods=['POST'])
 @app.route('/api/session/<session_id>/deploy-course', methods=['POST'])
 def api_deploy_course(session_id):
     """Deploy course - set devices to GREEN and activate"""
@@ -923,11 +913,10 @@ def save_course():
     try:
         data = request.get_json()
 
-        course_mode = data.get('mode', 'sequential')  # sequential or pattern
+        mode = data.get('mode', 'new')
         course_id = data.get('course_id')
-        is_editing = course_id is not None  # If course_id exists, we're editing
 
-        print(f"💾 SAVE COURSE REQUEST: course_mode={course_mode}, course_id={course_id}, is_editing={is_editing}, name={data.get('course_name')}")
+        print(f"💾 SAVE COURSE REQUEST: mode={mode}, course_id={course_id}, name={data.get('course_name')}")
         print(f"   Stations count: {len(data.get('stations', []))}")
         if data.get('stations'):
             print(f"   First station distance: {data['stations'][0].get('distance')}")
@@ -936,9 +925,8 @@ def save_course():
         existing = db.get_course_by_name(data['course_name'])
         if existing:
             # Allow saving if we're editing the same course
-            if is_editing and existing['course_id'] == course_id:
+            if mode == 'edit' and course_id and existing['course_id'] == course_id:
                 # This is fine - editing the same course, can keep the same name
-                print(f"   ✓ Editing existing course {course_id}, name unchanged")
                 pass
             else:
                 return jsonify({
@@ -974,11 +962,7 @@ def save_course():
                 'max_time': 30.0,
                 'triggers_next_athlete': triggers_next,
                 'marks_run_complete': marks_complete,
-                'distance': station.get('distance', 0),
-                'behavior_config': station.get('behavior_config'),
-                'device_function': station.get('device_function'),
-                'detection_method': station.get('detection_method'),
-                'group_identifier': station.get('group_identifier')
+                'distance': station.get('distance', 0)
             }
             actions.append(action)
 
@@ -990,7 +974,7 @@ def save_course():
             'course_name': data['course_name'],
             'description': data.get('description', ''),
             'category': data.get('category', 'Custom'),
-            'mode': data.get('mode', 'sequential'),  # Get mode from UI, default to sequential
+            'mode': 'sequential',
             'num_devices': data.get('num_devices', len(actions)),
             'distance_unit': data.get('distance_unit', 'yards'),
             'total_distance': total_distance,
@@ -1001,7 +985,7 @@ def save_course():
         }
 
         # If editing, update the existing course in place
-        if is_editing and course_id:
+        if mode == 'edit' and course_id:
             # Verify the course exists and is not built-in
             old_course = db.get_course(course_id)
             if not old_course:
@@ -1571,8 +1555,7 @@ def get_network_status():
         response = {
             'mode': 'unknown',
             'auto_switch': True,
-            'ssid': 'Unknown',
-            'message': 'Network status unavailable'
+            'ssid': 'Unknown'
         }
 
         # Load config
@@ -1582,27 +1565,15 @@ def get_network_status():
                 response['mode'] = config.get('network_mode', {}).get('current', 'unknown')
                 response['auto_switch'] = config.get('network_mode', {}).get('auto_switch', True)
 
-        # Load status (contains the message with connection info and IP)
-        if os.path.exists(status_file):
-            with open(status_file, 'r') as f:
-                status = json.load(f)
-                # Get the message field (e.g., "Connected via Ethernet (192.168.7.116)")
-                if 'message' in status:
-                    response['message'] = status['message']
-                # Override mode from status if present
-                if 'mode' in status:
-                    response['mode'] = status['mode']
-
-        # Get current SSID (fallback if message not in status file)
-        if 'Ethernet' not in response.get('message', ''):
-            try:
-                result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True, timeout=2)
-                if result.returncode == 0 and result.stdout.strip():
-                    response['ssid'] = result.stdout.strip()
-                elif response['mode'] == 'offline':
-                    response['ssid'] = 'Field_Trainer (AP Mode)'
-            except:
-                pass
+        # Get current SSID
+        try:
+            result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True, timeout=2)
+            if result.returncode == 0 and result.stdout.strip():
+                response['ssid'] = result.stdout.strip()
+            elif response['mode'] == 'offline':
+                response['ssid'] = 'Field_Trainer (AP Mode)'
+        except:
+            pass
 
         return jsonify(response)
     except Exception as e:
@@ -1825,146 +1796,6 @@ def apply_volume():
             'volume': volume if 'volume' in locals() else 60,
             'hardware_applied': False,
             'note': 'Volume saved but hardware control unavailable'
-        })
-
-
-# ============================================
-# TOUCH SENSOR CALIBRATION API ENDPOINTS
-# ============================================
-
-@app.route('/api/calibration/devices/status', methods=['GET'])
-def calibration_devices_status():
-    """Get status of all devices for calibration"""
-    try:
-        devices = []
-        for device_num in range(6):  # Devices 0-5
-            info = calibration_logic.get_device_info(device_num)
-            status = calibration_logic.get_device_status(device_num)
-            threshold_data = calibration_logic.get_current_threshold(device_num)
-
-            devices.append({
-                'device_num': device_num,
-                'name': info['name'],
-                'ip': info['ip'],
-                'online': status['online'],
-                'threshold': threshold_data.get('threshold', 0.0) if threshold_data.get('success') else None
-            })
-
-        return jsonify({
-            'success': True,
-            'devices': devices
-        })
-    except Exception as e:
-        logger.error(f"Error getting calibration device status: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
-
-
-@app.route('/api/calibration/device/<int:device_num>/threshold', methods=['GET'])
-def get_device_threshold(device_num):
-    """Get current threshold for a device"""
-    try:
-        result = calibration_logic.get_current_threshold(device_num)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error getting threshold for device {device_num}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
-
-
-@app.route('/api/calibration/device/<int:device_num>/threshold', methods=['POST'])
-def set_device_threshold(device_num):
-    """Set threshold for a device"""
-    try:
-        data = request.get_json()
-        threshold = float(data.get('threshold', 0))
-
-        result = calibration_logic.set_threshold(device_num, threshold)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error setting threshold for device {device_num}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
-
-
-@app.route('/api/calibration/device/<int:device_num>/reading', methods=['GET'])
-def get_device_reading(device_num):
-    """Get current accelerometer reading from device"""
-    try:
-        result = calibration_logic.get_accelerometer_reading(device_num)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error getting reading for device {device_num}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
-
-
-@app.route('/api/calibration/device/<int:device_num>/test-mode', methods=['POST'])
-def device_test_mode(device_num):
-    """Start/stop test mode on device"""
-    try:
-        data = request.get_json()
-        enabled = data.get('enabled', True)
-
-        if enabled:
-            threshold = float(data.get('threshold', 2.0))
-            duration = int(data.get('duration', 10))
-            result = calibration_logic.start_test_mode(device_num, threshold, duration)
-        else:
-            result = calibration_logic.stop_test_mode(device_num)
-
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error controlling test mode for device {device_num}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
-
-
-@app.route('/api/calibration/device/<int:device_num>/live-reading', methods=['POST'])
-def device_live_reading(device_num):
-    """Start/stop live reading mode on remote device"""
-    try:
-        data = request.get_json()
-        enabled = data.get('enabled', True)
-        duration = int(data.get('duration', 10))
-
-        if enabled:
-            result = calibration_logic.start_live_reading(device_num, duration)
-        else:
-            result = calibration_logic.stop_live_reading(device_num)
-
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error controlling live reading for device {device_num}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
-
-
-@app.route('/api/calibration/device/<int:device_num>/calibrate', methods=['POST'])
-def calibrate_device(device_num):
-    """Run full calibration wizard on device"""
-    try:
-        result = calibration_logic.run_calibration_wizard(device_num)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error calibrating device {device_num}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
         })
 
 

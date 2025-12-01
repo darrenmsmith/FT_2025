@@ -705,14 +705,16 @@ class DatabaseManager:
     
     def update_course(self, course_id: int, **kwargs):
         """Update course fields"""
-        allowed_fields = {'course_name', 'description', 'course_type'}
+        allowed_fields = {'course_name', 'description', 'course_type', 'mode', 'category',
+                         'num_devices', 'distance_unit', 'total_distance', 'diagram_svg',
+                         'layout_instructions'}
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         if not updates:
             return
-        
+
         updates['updated_at'] = datetime.utcnow().isoformat()
         set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
-        
+
         with self.get_connection() as conn:
             conn.execute(
                 f'UPDATE courses SET {set_clause} WHERE course_id = ?',
@@ -1200,8 +1202,8 @@ class DatabaseManager:
                         course_id, sequence, device_id, device_name,
                         action, action_type, audio_file, instruction,
                         min_time, max_time, triggers_next_athlete, marks_run_complete,
-                        distance
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        distance, behavior_config, device_function, detection_method, group_identifier
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     new_course_id,
                     action['sequence'],
@@ -1215,7 +1217,11 @@ class DatabaseManager:
                     action['max_time'],
                     action['triggers_next_athlete'],
                     action['marks_run_complete'],
-                    action.get('distance', 0)
+                    action.get('distance', 0),
+                    action.get('behavior_config'),
+                    action.get('device_function'),
+                    action.get('detection_method'),
+                    action.get('group_identifier')
                 ))
 
             return new_course_id
@@ -1269,8 +1275,8 @@ class DatabaseManager:
                             course_id, sequence, device_id, device_name,
                             action, action_type, audio_file, instruction,
                             min_time, max_time, triggers_next_athlete, marks_run_complete,
-                            distance
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            distance, behavior_config, device_function, detection_method, group_identifier
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         course_id,
                         action['sequence'],
@@ -1284,7 +1290,11 @@ class DatabaseManager:
                         action.get('max_time', 30.0),
                         action.get('triggers_next_athlete', 0),
                         action.get('marks_run_complete', 0),
-                        action.get('distance', 0)
+                        action.get('distance', 0),
+                        action.get('behavior_config'),
+                        action.get('device_function'),
+                        action.get('detection_method'),
+                        action.get('group_identifier')
                     ))
             
             return course_id

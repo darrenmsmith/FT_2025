@@ -292,6 +292,73 @@
         margin: 0;
     }
 
+    /* Per-Device Advanced Settings */
+    .advanced-fields {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 2px dashed #dee2e6;
+    }
+
+    .advanced-fields-header {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #6c757d;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .advanced-fields-header:hover {
+        color: #495057;
+    }
+
+    .advanced-toggle-icon {
+        transition: transform 0.2s;
+    }
+
+    .advanced-fields.expanded .advanced-toggle-icon {
+        transform: rotate(90deg);
+    }
+
+    .advanced-grid {
+        display: none;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 8px;
+    }
+
+    .advanced-fields.expanded .advanced-grid {
+        display: grid;
+    }
+
+    /* Tooltip styles */
+    .field-label-with-tooltip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .tooltip-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        background: #6c757d;
+        color: white;
+        border-radius: 50%;
+        font-size: 11px;
+        font-weight: bold;
+        cursor: help;
+    }
+
+    .tooltip-icon:hover {
+        background: #495057;
+    }
+
     /* Compact card spacing */
     .card-body {
         padding: 0.75rem;
@@ -527,6 +594,71 @@
             </div>
         </div>
     </div>
+
+    <hr class="section-divider">
+
+    <!-- Section 4: Advanced Settings -->
+    <div class="accordion-section" id="section-4">
+        <div class="accordion-header" onclick="toggleSection(4)">
+            <div class="accordion-left">
+                <div class="accordion-info">
+                    <div class="accordion-title">Advanced Settings</div>
+                    <div class="accordion-subtitle">Custom drill behaviors and pattern modes (optional)</div>
+                </div>
+            </div>
+            <div class="accordion-right">
+                <span class="accordion-check" style="display:none;">✓</span>
+                <span class="accordion-arrow">▼</span>
+            </div>
+        </div>
+        <div class="accordion-body">
+            <!-- Course Mode -->
+            <div class="form-group">
+                <label for="courseMode">
+                    <strong>Course Mode</strong>
+                    <small class="text-muted d-block">How athletes progress through the course</small>
+                </label>
+                <select class="form-control" id="courseModeSelect" onchange="updateModeDescription()">
+                    <option value="sequential">Sequential (Standard) - Athletes follow devices in order</option>
+                    <option value="pattern">Pattern-Based - Custom drill rules (e.g., Simon Says)</option>
+                </select>
+            </div>
+
+            <!-- Mode Description -->
+            <div class="alert alert-info" id="modeDescription" style="margin-top: 12px;">
+                <strong>Sequential Mode:</strong> Athletes touch devices in the defined order (1 → 2 → 3...). This is the standard mode for most drills.
+            </div>
+
+            <!-- Behavior Config (shown for pattern mode) -->
+            <div id="behaviorConfigSection" style="display: none; margin-top: 20px;">
+                <div class="form-group">
+                    <label for="behaviorConfig">
+                        <strong>Custom Behavior Configuration</strong>
+                        <small class="text-muted d-block">JSON format - defines custom drill rules</small>
+                    </label>
+                    <textarea class="form-control" id="behaviorConfig" rows="8" placeholder='Example for Simon Says:
+{
+  "allowed_colors": ["red", "green", "blue", "yellow"],
+  "pattern_length": 4,
+  "show_pattern_duration": 3,
+  "allow_repeats": false
+}'></textarea>
+                    <small class="form-text text-muted">
+                        <strong>Common configurations:</strong><br>
+                        • <code>allowed_colors</code>: Array of colors for pattern drills<br>
+                        • <code>pattern_length</code>: Number of steps in pattern<br>
+                        • <code>show_pattern_duration</code>: Seconds to display pattern<br>
+                        • <code>allow_repeats</code>: Can same color appear twice in a row
+                    </small>
+                </div>
+
+                <!-- Validation Status -->
+                <div id="jsonValidation" style="display: none; padding: 10px; border-radius: 6px; margin-top: 8px;">
+                    <small><span id="jsonValidationText"></span></small>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Sticky Footer -->
@@ -585,6 +717,28 @@ if (courseData && (courseMode === 'edit' || courseMode === 'duplicate')) {
     if (courseData.layout_instructions) document.getElementById('courseInstruction').value = courseData.layout_instructions;
     if (courseData.distance_unit) document.getElementById('distanceUnit').value = courseData.distance_unit;
 
+    // Load advanced settings
+    if (courseData.mode) {
+        document.getElementById('courseModeSelect').value = courseData.mode;
+        updateModeDescription();
+    }
+
+    // Load behavior_config if present (from first action that has it)
+    if (courseData.actions && courseData.actions.length > 0) {
+        const actionWithConfig = courseData.actions.find(a => a.behavior_config);
+        if (actionWithConfig && actionWithConfig.behavior_config) {
+            try {
+                const config = typeof actionWithConfig.behavior_config === 'string'
+                    ? JSON.parse(actionWithConfig.behavior_config)
+                    : actionWithConfig.behavior_config;
+                document.getElementById('behaviorConfig').value = JSON.stringify(config, null, 2);
+                validateJSON();
+            } catch (e) {
+                console.error('Error loading behavior config:', e);
+            }
+        }
+    }
+
     if (courseData.actions && courseData.actions.length > 0) {
         devices = courseData.actions.map(a => {
             const action = a.action || 'default_beep';
@@ -595,7 +749,11 @@ if (courseData && (courseMode === 'edit' || courseMode === 'duplicate')) {
                 device_name: a.device_name || a.device_id,
                 action: action,
                 instruction: instruction,
-                distance: a.distance || 0
+                distance: a.distance || 0,
+                device_function: a.device_function || '',
+                detection_method: a.detection_method || '',
+                group_identifier: a.group_identifier || '',
+                behavior_config: a.behavior_config || ''
             };
         });
         devices.forEach(d => usedDevices.add(d.device_id));
@@ -732,7 +890,23 @@ function createDeviceCard(dev, idx) {
         <option value="two_in_two_out" ${dev.action === 'two_in_two_out' ? 'selected' : ''}>Two In Two Out</option>
         <option value="walking_lunge" ${dev.action === 'walking_lunge' ? 'selected' : ''}>Walking Lunge</option>
     `;
-    
+
+    const deviceFunctionOpts = `
+        <option value="" ${!dev.device_function ? 'selected' : ''}>-- Not Set --</option>
+        <option value="start_finish" ${dev.device_function === 'start_finish' ? 'selected' : ''}>Start/Finish</option>
+        <option value="waypoint" ${dev.device_function === 'waypoint' ? 'selected' : ''}>Waypoint</option>
+        <option value="turnaround" ${dev.device_function === 'turnaround' ? 'selected' : ''}>Turnaround</option>
+        <option value="boundary" ${dev.device_function === 'boundary' ? 'selected' : ''}>Boundary</option>
+        <option value="timer" ${dev.device_function === 'timer' ? 'selected' : ''}>Timer</option>
+    `;
+
+    const detectionMethodOpts = `
+        <option value="" ${!dev.detection_method ? 'selected' : ''}>-- Not Set --</option>
+        <option value="touch" ${dev.detection_method === 'touch' ? 'selected' : ''}>Touch</option>
+        <option value="proximity" ${dev.detection_method === 'proximity' ? 'selected' : ''}>Proximity</option>
+        <option value="none" ${dev.detection_method === 'none' ? 'selected' : ''}>None</option>
+    `;
+
     card.innerHTML = `
         <div class="device-header">
             <div class="device-label">
@@ -762,9 +936,51 @@ function createDeviceCard(dev, idx) {
                 <textarea class="form-control" id="instruction-${idx}" rows="2" placeholder="Action description..." onchange="updateDevice(${idx}, 'instruction', this.value)">${dev.instruction || ''}</textarea>
             </div>
         </div>
+
+        <div class="advanced-fields" id="advanced-${idx}">
+            <div class="advanced-fields-header" onclick="toggleAdvancedFields(${idx})">
+                <span class="advanced-toggle-icon">▶</span>
+                <span>Advanced Settings (Optional)</span>
+            </div>
+            <div class="advanced-grid">
+                <div class="form-group">
+                    <label>Device Function</label>
+                    <select class="form-select" onchange="updateDevice(${idx}, 'device_function', this.value)">
+                        ${deviceFunctionOpts}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Detection Method</label>
+                    <select class="form-select" onchange="updateDevice(${idx}, 'detection_method', this.value)">
+                        ${detectionMethodOpts}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="field-label-with-tooltip">
+                        <span>Device Group</span>
+                        <span class="tooltip-icon" title="Assign devices to groups (e.g., 'start_line', 'finish_line') to trigger them together or track patterns">?</span>
+                    </label>
+                    <input type="text" class="form-control" value="${dev.group_identifier || ''}" placeholder="e.g., start_line, finish_line, cone_group_1" onchange="updateDevice(${idx}, 'group_identifier', this.value)">
+                </div>
+                <div class="form-group">
+                    <label class="field-label-with-tooltip">
+                        <span>Custom Rules</span>
+                        <span class="tooltip-icon" title="Advanced settings for custom behaviors like timing rules, scoring, or special conditions">?</span>
+                    </label>
+                    <textarea class="form-control" rows="2" placeholder='Example: min_time: 2.5, max_time: 10.0, scoring: true' onchange="updateDevice(${idx}, 'behavior_config', this.value)">${dev.behavior_config || ''}</textarea>
+                </div>
+            </div>
+        </div>
     `;
     
     return card;
+}
+
+function toggleAdvancedFields(idx) {
+    const section = document.getElementById(`advanced-${idx}`);
+    if (section) {
+        section.classList.toggle('expanded');
+    }
 }
 
 function addDevice() {
@@ -1024,6 +1240,53 @@ function setupDragging() {
         }
     });
 }
+
+// ==================== ADVANCED SETTINGS FUNCTIONS ====================
+
+function updateModeDescription() {
+    const mode = document.getElementById('courseModeSelect').value;
+    const descEl = document.getElementById('modeDescription');
+    const behaviorSection = document.getElementById('behaviorConfigSection');
+
+    if (mode === 'pattern') {
+        descEl.className = 'alert alert-warning';
+        descEl.innerHTML = '<strong>Pattern Mode:</strong> Athletes must follow custom rules (e.g., touch cones in a specific color sequence). Requires behavior configuration below.';
+        behaviorSection.style.display = 'block';
+    } else {
+        descEl.className = 'alert alert-info';
+        descEl.innerHTML = '<strong>Sequential Mode:</strong> Athletes touch devices in the defined order (1 → 2 → 3...). This is the standard mode for most drills.';
+        behaviorSection.style.display = 'none';
+    }
+}
+
+function validateJSON() {
+    const behaviorConfig = document.getElementById('behaviorConfig').value.trim();
+    const validationDiv = document.getElementById('jsonValidation');
+    const validationText = document.getElementById('jsonValidationText');
+
+    if (!behaviorConfig) {
+        validationDiv.style.display = 'none';
+        return true;
+    }
+
+    try {
+        JSON.parse(behaviorConfig);
+        validationDiv.style.display = 'block';
+        validationDiv.style.backgroundColor = '#d4edda';
+        validationDiv.style.color = '#155724';
+        validationText.innerHTML = '✓ Valid JSON format';
+        return true;
+    } catch (e) {
+        validationDiv.style.display = 'block';
+        validationDiv.style.backgroundColor = '#f8d7da';
+        validationDiv.style.color = '#721c24';
+        validationText.innerHTML = '✗ Invalid JSON: ' + e.message;
+        return false;
+    }
+}
+
+// ==================== SAVE COURSE FUNCTION ====================
+
 async function saveCourse() {
     console.log('💾 SAVE COURSE - v5');
     
@@ -1040,7 +1303,35 @@ async function saveCourse() {
         document.getElementById('section-1').classList.add('expanded');
         return;
     }
-    
+
+    // Get advanced settings
+    const selectedMode = document.getElementById('courseModeSelect').value;
+    const behaviorConfigRaw = document.getElementById('behaviorConfig').value.trim();
+
+    // Validate behavior config if pattern mode
+    if (selectedMode === 'pattern' && !behaviorConfigRaw) {
+        alert('Pattern mode requires behavior configuration. Please add JSON config in Advanced Settings.');
+        document.getElementById('section-4').classList.add('expanded');
+        return;
+    }
+
+    // Validate JSON if provided
+    if (behaviorConfigRaw && !validateJSON()) {
+        alert('Invalid JSON in behavior configuration. Please fix errors before saving.');
+        document.getElementById('section-4').classList.add('expanded');
+        return;
+    }
+
+    let behaviorConfig = null;
+    if (behaviorConfigRaw) {
+        try {
+            behaviorConfig = JSON.parse(behaviorConfigRaw);
+        } catch (e) {
+            alert('Invalid JSON in behavior configuration: ' + e.message);
+            return;
+        }
+    }
+
     const saveData = {
         course_name: name,
         description: document.getElementById('courseDescription').value,
@@ -1049,7 +1340,7 @@ async function saveCourse() {
         distance_unit: document.getElementById('distanceUnit').value,
         num_devices: devices.length,
         diagram_svg: courseDiagram || '',
-        mode: courseMode,
+        mode: selectedMode,
         course_id: courseData?.course_id || null,
         stations: devices.map((d, i) => ({
             sequence: i,
@@ -1057,7 +1348,11 @@ async function saveCourse() {
             device_name: d.device_name,
             action: d.action,
             instruction: d.instruction,
-            distance: d.distance
+            distance: d.distance,
+            device_function: d.device_function || null,
+            detection_method: d.detection_method || null,
+            group_identifier: d.group_identifier || null,
+            behavior_config: d.behavior_config || (behaviorConfig ? JSON.stringify(behaviorConfig) : null)
         }))
     };
     
@@ -1087,9 +1382,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (availableDevices.length === 0) {
         loadAvailableDevices();
     }
-    
+
     if (devices.length > 0) {
         renderDevices();
+    }
+
+    // Add real-time JSON validation for behavior config
+    const behaviorConfigField = document.getElementById('behaviorConfig');
+    if (behaviorConfigField) {
+        behaviorConfigField.addEventListener('input', validateJSON);
     }
 });
 </script>

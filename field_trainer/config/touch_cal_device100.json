@@ -5,7 +5,7 @@
     "y": -0.0010373740842490842,
     "z": -1.038919413919414
   },
-  "threshold": 0.5,
+  "threshold": 0.51,
   "sensor_mode": "accelerometer",
   "use_gforce": true,
   "calibration_time": 1760141627.5047472,
