@@ -762,6 +762,9 @@ def api_prepare_course(session_id):
 @app.route('/api/session/<session_id>/deploy-course', methods=['POST'])
 def api_deploy_course(session_id):
     """Deploy course - set devices to GREEN and activate"""
+    print(f"\n{'='*80}")
+    print(f"🚨 API_DEPLOY_COURSE CALLED - Session: {session_id}")
+    print(f"{'='*80}\n")
     try:
         session = db.get_session(session_id)
         course = db.get_course(session['course_id'])
@@ -792,19 +795,38 @@ def api_deploy_course(session_id):
         
         # Activate course using existing REGISTRY method
         REGISTRY.activate_course(course_name)
-        
-        # Set all devices to GREEN
-        for device in devices:
-            try:
-                REGISTRY.set_led(device['device_id'], pattern='solid_green')
-            except Exception as e:
-                print(f"⚠️  Failed to set {device['device_id']} to green: {e}")
-        
+
+        # Check if Simon Says - DON'T set to green, we'll set assigned colors separately
+        is_simon_says = course.get('mode') == 'pattern'
+
+        if not is_simon_says:
+            # Regular courses: Set all devices to GREEN
+            for device in devices:
+                try:
+                    REGISTRY.set_led(device['device_id'], pattern='solid_green')
+                except Exception as e:
+                    print(f"⚠️  Failed to set {device['device_id']} to green: {e}")
+        else:
+            print(f"📍 Simon Says detected - skipping green, will set assigned colors")
+
         # Mark course as deployed
         db.mark_course_deployed(session_id)
-        
+
         REGISTRY.log(f"Course deployed: {course['course_name']}")
-        
+
+        # If Simon Says, set assigned colors NOW
+        if is_simon_says:
+            print("\n🎨 Calling set-simon-colors endpoint...")
+            try:
+                import requests
+                color_response = requests.post(
+                    f'http://localhost:5001/api/session/{session_id}/set-simon-colors',
+                    timeout=30
+                )
+                print(f"   Response: {color_response.status_code}")
+            except Exception as e:
+                print(f"   ⚠️  Error: {e}")
+
         return jsonify({
             'success': True,
             'devices': devices,
@@ -1702,8 +1724,16 @@ def test_led():
             'orange': 'solid_amber',
             'red': 'solid_red',
             'green': 'solid_green',
-            'blue': 'solid_blue',  # True blue (deployment color)
-            'yellow': 'blink_amber'  # No yellow, use blink amber
+            'blue': 'solid_blue',
+            'yellow': 'solid_yellow',
+            'white': 'solid_white',
+            'purple': 'solid_purple',
+            'cyan': 'solid_cyan',
+            'chase_red': 'chase_red',
+            'chase_green': 'chase_green',
+            'chase_blue': 'chase_blue',
+            'chase_yellow': 'chase_yellow',
+            'chase_amber': 'chase_amber'
         }
 
         pattern = color_map.get(color, 'solid_amber')
@@ -1758,18 +1788,20 @@ def test_led():
         print(f"  Failed:  {len(results['failed'])} devices - {results['failed']}")
         print(f"{'='*60}\n")
 
-        # Schedule LEDs to turn off after 5 seconds
-        def turn_off_leds():
-            time.sleep(5)
-            print(f"\n🔦 Turning off LEDs...")
-            for device_ip in device_ips:
-                try:
-                    REGISTRY.set_led(device_ip, 'off')
-                except Exception as e:
-                    print(f"Error turning off LED for {device_ip}: {e}")
-            print(f"🔦 LED test complete\n")
-
-        threading.Thread(target=turn_off_leds, daemon=True).start()
+        # Schedule LEDs to turn off after 5 seconds (DISABLED for Simon Says)
+        # NOTE: Commented out so colors stay on for Simon Says testing
+        # def turn_off_leds():
+        #     time.sleep(5)
+        #     print(f"\n🔦 Turning off LEDs...")
+        #     for device_ip in device_ips:
+        #         try:
+        #             REGISTRY.set_led(device_ip, 'off')
+        #         except Exception as e:
+        #             print(f"Error turning off LED for {device_ip}: {e}")
+        #     print(f"🔦 LED test complete\n")
+        #
+        # threading.Thread(target=turn_off_leds, daemon=True).start()
+        print(f"\n💡 LEDs will stay on (auto-off disabled for Simon Says)")
 
         return jsonify({
             'success': True,
@@ -1966,6 +1998,34 @@ def calibrate_device(device_num):
             'success': False,
             'error': str(e)
         })
+
+
+@app.route('/api/device0/touch', methods=['POST'])
+def device0_touch():
+    """Simulate touch event for Device 0 (192.168.99.100)"""
+    try:
+        from datetime import datetime
+
+        # Trigger touch event for D0
+        device_id = "192.168.99.100"
+        timestamp = datetime.utcnow()
+
+        # Call session service touch handler
+        session_service.handle_touch_event(device_id, timestamp)
+
+        print(f"✓ D0 touch event triggered at {timestamp.isoformat()}")
+
+        return jsonify({
+            'success': True,
+            'device_id': device_id,
+            'timestamp': timestamp.isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error handling D0 touch: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 if __name__ == '__main__':
