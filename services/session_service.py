@@ -143,16 +143,28 @@ class SessionService:
         self.session_state['pattern_config'] = pattern_config  # Store config for all athletes
         self.session_state['active_runs'] = {}
 
-        # Generate unique pattern for EACH athlete and load into active_runs
+        # PATTERN MODE: Load ALL athletes upfront with unique patterns
+        # SEQUENTIAL MODE: Load ONLY first athlete (others triggered by D1 touch)
         previous_pattern = None
 
-        for idx, run in enumerate(all_runs):
+        # Determine which athletes to load at session start
+        if course_mode == 'pattern':
+            # Pattern mode: Load all athletes upfront
+            athletes_to_load = all_runs
+        else:
+            # Sequential mode: Load only first athlete
+            athletes_to_load = [all_runs[0]]
+
+        for idx, run in enumerate(athletes_to_load):
+            # Find actual index in all_runs for proper is_active setting
+            actual_idx = all_runs.index(run)
+
             # Start this run in the database
-            if idx == 0:
+            if actual_idx == 0:
                 # First run already started above
                 run_start_time = start_time
             else:
-                # Start other runs (they'll be in 'waiting' state until their turn)
+                # Start other runs (pattern mode only - they'll be in 'waiting' state until their turn)
                 run_start_time = datetime.utcnow()
                 self.db.start_run(run['run_id'], run_start_time)
                 # Create segments for this run
@@ -164,7 +176,7 @@ class SessionService:
                 'started_at': run_start_time.isoformat(),
                 'last_device': None,
                 'sequence_position': -1,  # Haven't touched any device yet
-                'is_active': (idx == 0),  # Only first athlete is active initially
+                'is_active': (actual_idx == 0),  # Only first athlete is active initially
                 'visual_feedback': {
                     'correct_devices': [],  # Devices turned green
                     'failed_device': None   # Device turned red (if failed)
@@ -214,11 +226,15 @@ class SessionService:
             self.session_state['active_runs'][run['run_id']] = run_info
 
         print(f"\n✅ Multi-athlete state initialized:")
+        print(f"   Mode: {course_mode.upper()}")
         print(f"   Total athletes: {total_athletes}")
         print(f"   Device sequence: {device_sequence}")
         print(f"   First athlete (active): {first_run['athlete_name']}")
         if total_athletes > 1:
-            print(f"   Remaining athletes (waiting): {', '.join([r['athlete_name'] for r in all_runs[1:]])}")
+            if course_mode == 'pattern':
+                print(f"   Remaining athletes (loaded, waiting): {', '.join([r['athlete_name'] for r in all_runs[1:]])}")
+            else:
+                print(f"   Remaining athletes (queued, will start on D1 trigger): {', '.join([r['athlete_name'] for r in all_runs[1:]])}")
 
         # Set audio voice
         audio_voice = session.get('audio_voice', 'male')
