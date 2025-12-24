@@ -45,14 +45,13 @@ class SessionService:
         # Start first run
         start_time = datetime.utcnow()
         self.db.start_run(first_run['run_id'], start_time)
-        
+
         # Small delay to ensure segments are committed before touches arrive
         time.sleep(0.1)
-        
-        # Pre-create segments for this run
+
+        # Get session and course (segments will be created after pattern generation)
         session = self.db.get_session(session_id)
-        self.db.create_segments_for_run(first_run['run_id'], session['course_id'])
-        
+
         # Get course device sequence for multi-athlete tracking
         course = self.db.get_course(session['course_id'])
         device_sequence = [action['device_id'] for action in course['actions']
@@ -97,23 +96,41 @@ class SessionService:
                         pass
 
             if colored_devices:
-                # Get pattern config from first action (start device)
-                first_action = course['actions'][0]
-                pattern_config_str = first_action.get('behavior_config')
-                pattern_length = 4  # Default
-                allow_repeats = True  # Default
-                error_feedback_duration = 4.0  # Default
-                debounce_ms = 1000  # Default debounce window in milliseconds (1 second)
+                # Check for session-level pattern_config override first (for "Continue to n" feature)
+                session_pattern_config_str = session.get('pattern_config')
 
-                if pattern_config_str:
+                if session_pattern_config_str:
+                    # Session has pattern override (from "Continue to n")
+                    print(f"✓ Using session-level pattern config override")
                     try:
-                        pattern_config = json.loads(pattern_config_str) if isinstance(pattern_config_str, str) else pattern_config_str
-                        pattern_length = pattern_config.get('pattern_length', 4)
-                        allow_repeats = pattern_config.get('allow_repeats', True)
-                        error_feedback_duration = pattern_config.get('error_feedback_duration', 4.0)
-                        debounce_ms = pattern_config.get('debounce_ms', 1000)
+                        session_override = json.loads(session_pattern_config_str) if isinstance(session_pattern_config_str, str) else session_pattern_config_str
+                        pattern_length = session_override.get('pattern_length', 4)
+                        allow_repeats = session_override.get('allow_repeats', True)
+                        error_feedback_duration = session_override.get('error_feedback_duration', 4.0)
+                        debounce_ms = session_override.get('debounce_ms', 1000)
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        # Fall back to course config
+                        print(f"⚠️  Failed to parse session pattern_config, using course defaults")
+                        session_pattern_config_str = None
+
+                if not session_pattern_config_str:
+                    # Get pattern config from first action (start device)
+                    first_action = course['actions'][0]
+                    pattern_config_str = first_action.get('behavior_config')
+                    pattern_length = 4  # Default
+                    allow_repeats = True  # Default
+                    error_feedback_duration = 4.0  # Default
+                    debounce_ms = 1000  # Default debounce window in milliseconds (1 second)
+
+                    if pattern_config_str:
+                        try:
+                            pattern_config = json.loads(pattern_config_str) if isinstance(pattern_config_str, str) else pattern_config_str
+                            pattern_length = pattern_config.get('pattern_length', 4)
+                            allow_repeats = pattern_config.get('allow_repeats', True)
+                            error_feedback_duration = pattern_config.get('error_feedback_duration', 4.0)
+                            debounce_ms = pattern_config.get('debounce_ms', 1000)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
 
                 # Validate pattern_length is in valid range (3-8)
                 if pattern_length < 3:
@@ -167,8 +184,6 @@ class SessionService:
                 # Start other runs (pattern mode only - they'll be in 'waiting' state until their turn)
                 run_start_time = datetime.utcnow()
                 self.db.start_run(run['run_id'], run_start_time)
-                # Create segments for this run
-                self.db.create_segments_for_run(run['run_id'], session['course_id'])
 
             run_info = {
                 'athlete_name': run['athlete_name'],
@@ -222,6 +237,14 @@ class SessionService:
                 if idx == 0:
                     device_sequence = pattern_device_ids
 
+            # Create segments for this run (after pattern generation for pattern mode)
+            if course_mode == 'pattern' and 'pattern_data' in run_info:
+                # Pattern mode: Create segments based on actual pattern sequence
+                self.db.create_pattern_segments_for_run(run['run_id'], run_info['pattern_data']['device_ids'])
+            else:
+                # Sequential mode: Create segments based on course devices
+                self.db.create_segments_for_run(run['run_id'], session['course_id'])
+
             # Add to active_runs
             self.session_state['active_runs'][run['run_id']] = run_info
 
@@ -271,7 +294,10 @@ class SessionService:
                 self._display_pattern_sequence(first_athlete_pattern)
 
                 # PHASE 3: Start completion timer after pattern display
-                self.session_state['active_runs'][first_run['run_id']]['timer_start'] = datetime.utcnow()
+                timer_start = datetime.utcnow()
+                self.session_state['active_runs'][first_run['run_id']]['timer_start'] = timer_start
+                # Store timer_start in database for cumulative timing
+                self.db.update_run_timer_start(first_run['run_id'], timer_start)
                 print(f"⏱️  Timer started for {first_run['athlete_name']}")
             else:
                 print(f"⚠️  No pattern data for first athlete")
@@ -442,7 +468,10 @@ class SessionService:
         self._display_pattern_sequence(pattern_data)
 
         # PHASE 3: Start completion timer after pattern display
-        next_run_info['timer_start'] = datetime.utcnow()
+        timer_start = datetime.utcnow()
+        next_run_info['timer_start'] = timer_start
+        # Store timer_start in database for cumulative timing
+        self.db.update_run_timer_start(next_run_info['run_id'], timer_start)
         print(f"⏱️  Timer started for {next_run_info['athlete_name']}")
 
         print(f"{'='*60}\n")
@@ -518,12 +547,27 @@ class SessionService:
         print(f"   Active athletes: {len(self.session_state.get('active_runs', {}))}")
         print(f"{'='*80}")
 
-        # Log touch to System Log with device name
+        # Log touch to System Log with device name and athlete context
         device_name = "Start (D0)" if device_id == "192.168.99.100" else f"Cone {int(device_id.split('.')[-1]) - 100}"
-        self.registry.log(f"Touch detected: {device_name} ({device_id}) at {timestamp.strftime('%H:%M:%S.%f')[:-3]}", source="session")
+
+        # Find which athlete is currently active (pattern mode) or might have touched (sequential mode)
+        course_mode = self.session_state.get('course_mode', 'sequential')
+        active_athlete_name = None
+
+        if course_mode == 'pattern':
+            # In pattern mode, find the currently active athlete
+            for run_id, run_info in self.session_state.get('active_runs', {}).items():
+                if run_info.get('is_active', False):
+                    active_athlete_name = run_info.get('athlete_name')
+                    break
+
+        # Log with athlete context if available
+        if active_athlete_name:
+            self.registry.log(f"👆 Touch: {device_name} - {active_athlete_name} at {timestamp.strftime('%H:%M:%S.%f')[:-3]}", source="session")
+        else:
+            self.registry.log(f"👆 Touch: {device_name} at {timestamp.strftime('%H:%M:%S.%f')[:-3]}", source="session")
 
         # SPECIAL HANDLING: D0 touch in pattern mode = pattern completion/submit
-        course_mode = self.session_state.get('course_mode', 'sequential')
         if device_id == "192.168.99.100" and course_mode == 'pattern':
             print(f"🟢 D0 TOUCHED - Pattern completion attempt")
 
@@ -691,26 +735,56 @@ class SessionService:
                 print(f"{'='*80}\n")
                 return
 
+            # GLOBAL DEBOUNCE: Prevent ANY touch within 500ms of the last touch (any device)
+            # This prevents accidental double-touches, spurious touches, or rapid unintentional contacts
+            global_debounce_key = f"{run_id}_last_touch_time"
+            global_debounce_window = 0.5  # 500ms global debounce
+
+            if global_debounce_key in self.session_state:
+                last_global_touch = self.session_state[global_debounce_key]
+                time_since_last_global = (timestamp - last_global_touch).total_seconds()
+
+                if time_since_last_global < global_debounce_window:
+                    device_name = f"Cone {int(device_id.split('.')[-1]) - 100}"
+                    print(f"🔇 GLOBAL DEBOUNCE: Ignoring touch on {device_name} ({time_since_last_global*1000:.0f}ms since last ANY touch, threshold={global_debounce_window*1000:.0f}ms)")
+                    print(f"{'='*80}\n")
+                    return
+
             # DEBOUNCE: Check for rapid repeated touches on same device (hardware bounce)
             # This prevents accidental double-taps from causing false failures
             # BUT still allows intentional repeated touches if they match the pattern
             debounce_key = f"{run_id}_debounce"
+            debounce_step_key = f"{run_id}_debounce_step"  # Track which step the debounce is for
+
             if debounce_key not in self.session_state:
                 self.session_state[debounce_key] = {}  # Track {device_id: last_touch_time}
+            if debounce_step_key not in self.session_state:
+                self.session_state[debounce_step_key] = {}  # Track {device_id: last_step_position}
 
             debounce_tracking = self.session_state[debounce_key]
-            debounce_window = self.session_state.get('pattern_config', {}).get('debounce_ms', 500) / 1000.0  # Convert to seconds
+            debounce_step_tracking = self.session_state[debounce_step_key]
+            debounce_window = self.session_state.get('pattern_config', {}).get('debounce_ms', 1000) / 1000.0  # Convert to seconds
+
+            # Get current expected position to check if this is a different pattern step
+            current_position = run_info.get('sequence_position', -1)
+            expected_position = current_position + 1
 
             if device_id in debounce_tracking:
                 last_touch_time = debounce_tracking[device_id]
+                last_step_position = debounce_step_tracking.get(device_id, -1)
                 time_since_last = (timestamp - last_touch_time).total_seconds()
 
-                if time_since_last < debounce_window:
-                    # This is a bounce - ignore it
-                    print(f"🔇 DEBOUNCE: Ignoring rapid repeat on {device_id} ({time_since_last*1000:.0f}ms since last touch, threshold={debounce_window*1000:.0f}ms)")
+                # Only debounce if it's the SAME pattern step (rapid double-tap)
+                # Don't debounce if it's a different step (intentional repeated cone in pattern)
+                if time_since_last < debounce_window and last_step_position == expected_position:
+                    # This is a bounce on the same step - ignore it
+                    print(f"🔇 DEBOUNCE: Ignoring rapid repeat on {device_id} ({time_since_last*1000:.0f}ms since last touch, threshold={debounce_window*1000:.0f}ms, same step={expected_position})")
                     device_name = f"Cone {int(device_id.split('.')[-1]) - 100}"
                     print(f"{'='*80}\n")
                     return
+                elif time_since_last < debounce_window and last_step_position != expected_position:
+                    # Rapid repeat but different pattern step - this is intentional, allow it
+                    print(f"✓ Rapid repeat on {device_id} ({time_since_last*1000:.0f}ms) but different pattern step (was {last_step_position}, now {expected_position}) - ALLOWING")
 
             device_sequence = self.session_state['device_sequence']
             pattern_data = run_info.get('pattern_data')
@@ -813,7 +887,7 @@ class SessionService:
 
                     # Mark run as failed in database
                     try:
-                        self.db.complete_run(run_id, datetime.utcnow(), total_time=completion_time)
+                        self.db.complete_run(run_id, datetime.utcnow(), total_time=completion_time, status='incomplete')
                         print(f"   ❌ Run failed for {run_info['athlete_name']} - pattern error")
 
                         # Move to next athlete or complete session
@@ -847,8 +921,13 @@ class SessionService:
                     print(f"   DEBUG: After update - sequence_position = {run_info['sequence_position']}")
                     print(f"   Updated position: {expected_position + 1}/{len(pattern_data['device_ids'])}")
 
-                    # Update debounce timestamp for this device (successful touch)
+                    # Update debounce timestamp AND step position for this device (successful touch)
                     debounce_tracking[device_id] = timestamp
+                    debounce_step_tracking[device_id] = expected_position
+
+                    # Update global debounce timestamp (last touch across ALL devices)
+                    global_debounce_key = f"{run_id}_last_touch_time"
+                    self.session_state[global_debounce_key] = timestamp
 
                     # Check if all pattern touches are done
                     if expected_position + 1 >= len(pattern_data['device_ids']):

@@ -85,6 +85,29 @@
                     <strong>Distance:</strong> {{ course.total_distance }} {{ course.distance_unit }}
                 </div>
             </div>
+
+            {% if course.mode == 'pattern' %}
+            <!-- Pattern Length Selector for Simon Says -->
+            <div class="alert alert-info mt-3">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <label for="patternLength" class="form-label mb-0">
+                            <i class="fas fa-list-ol"></i> <strong>Pattern Length:</strong>
+                        </label>
+                        <small class="text-muted d-block">How many steps in the pattern?</small>
+                    </div>
+                    <div class="col-md-6">
+                        <select id="patternLength" class="form-select form-select-lg">
+                            <option value="4" selected>4 Step Pattern</option>
+                            <option value="5">5 Step Pattern</option>
+                            <option value="6">6 Step Pattern</option>
+                            <option value="7">7 Step Pattern</option>
+                            <option value="8">8 Step Pattern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
     
@@ -157,7 +180,7 @@ let timeoutMinutes = {{ timeout_minutes }};
 // Prepare course (amber LEDs)
 async function prepareCourse() {
     try {
-        const response = await fetch(`/api/session/${sessionId}/prepare-course`, {
+        const response = await fetch(`/session/${sessionId}/prepare-course`, {
             method: 'POST'
         });
         const data = await response.json();
@@ -229,12 +252,21 @@ function startDeploymentTimeout() {
 document.getElementById('deployBtn').addEventListener('click', async function() {
     this.disabled = true;
     this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deploying...';
-    
+
     clearInterval(deploymentTimeout);
-    
+
+    // Get pattern length if Simon Says course
+    const patternLengthSelect = document.getElementById('patternLength');
+    const requestBody = {};
+    if (patternLengthSelect) {
+        requestBody.pattern_length = parseInt(patternLengthSelect.value);
+    }
+
     try {
-        const response = await fetch(`/api/session/${sessionId}/deploy-course`, {
-            method: 'POST'
+        const response = await fetch(`/session/${sessionId}/deploy-course`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(requestBody)
         });
         const data = await response.json();
         

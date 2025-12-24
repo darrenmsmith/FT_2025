@@ -61,6 +61,9 @@
                 <i class="fas fa-stop"></i> Stop Session
             </button>
         {% elif session.status == 'completed' or session.status == 'incomplete' or session.status == 'failed' %}
+            <button class="btn btn-success me-2" id="continueBtn" style="display: none;">
+                <i class="fas fa-arrow-up"></i> <span id="continueBtnText">Continue to 5</span>
+            </button>
             <button class="btn btn-primary me-2" id="repeatBtn">
                 <i class="fas fa-redo"></i> Repeat Session
             </button>
@@ -71,6 +74,9 @@
 
         <!-- Hidden buttons for dynamic display when session completes -->
         {% if session.status == 'active' %}
+            <button class="btn btn-success me-2" id="continueBtn" style="display: none;">
+                <i class="fas fa-arrow-up"></i> <span id="continueBtnText">Continue to 5</span>
+            </button>
             <button class="btn btn-primary me-2" id="repeatBtn" style="display: none;">
                 <i class="fas fa-redo"></i> Repeat Session
             </button>
@@ -84,10 +90,10 @@
 <!-- Course Overview -->
 <div class="card mb-4">
     <div class="card-header">
-        <h5><i class="fas fa-map-marked-alt"></i> Course Layout</h5>
+        <h5><i class="fas fa-map-marked-alt"></i> <span id="courseLayoutTitle">Course Layout</span></h5>
     </div>
     <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between">
+        <div class="d-flex flex-wrap justify-content-between" id="courseLayoutContainer">
             {% for action in course.actions %}
             <div class="text-center" style="flex: 1; min-width: 100px;">
                 <div class="mb-2">
@@ -191,11 +197,95 @@ if (repeatBtn) {
     });
 }
 
+// Attach continue button handler (for pattern progression)
+const continueBtn = document.getElementById('continueBtn');
+if (continueBtn) {
+    continueBtn.addEventListener('click', async function() {
+        const nextLength = patternLength + 1;
+        if (!confirm(`Continue with successful athletes to ${nextLength} cones?`)) return;
+
+        const response = await fetch(`/session/${sessionId}/continue`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            window.location.href = result.redirect_url || `/session/${result.new_session_id}/monitor`;
+        } else {
+            alert('Error continuing session: ' + result.error);
+        }
+    });
+}
+
+let courseMode = 'sequential';  // Track course mode globally
+let patternLength = null;  // Track pattern length for continue button
+let patternData = null;  // Track pattern data for step-based layout
+
+function updateCourseLayout() {
+    const container = document.getElementById('courseLayoutContainer');
+    const title = document.getElementById('courseLayoutTitle');
+
+    if (courseMode === 'pattern' && patternData && patternData.pattern) {
+        // Pattern mode: Show STEPS with cone assignments
+        title.textContent = 'Pattern Steps';
+
+        const positionLabels = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
+        const pattern = patternData.pattern;
+
+        let html = '';
+        pattern.forEach((step, index) => {
+            const coneNum = parseInt(step.device_id.split('.').pop()) - 100;
+            const color = step.color.toUpperCase();
+            const position = positionLabels[index] || `${index + 1}th`;
+
+            html += `
+                <div class="text-center" style="flex: 1; min-width: 100px;">
+                    <div class="mb-2">
+                        <span class="device-status device-idle"></span>
+                        <strong>${position}</strong>
+                    </div>
+                    <div class="small" style="color: ${getColorCode(step.color)}; font-weight: bold;">
+                        ${color} (C${coneNum})
+                    </div>
+                </div>
+            `;
+
+            if (index < pattern.length - 1) {
+                html += '<div class="align-self-center text-muted"><i class="fas fa-arrow-right"></i></div>';
+            }
+        });
+
+        container.innerHTML = html;
+    }
+    // Sequential mode keeps original server-rendered layout
+}
+
+function getColorCode(color) {
+    const colorMap = {
+        'red': '#dc2626',
+        'green': '#16a34a',
+        'blue': '#2563eb',
+        'yellow': '#ca8a04',
+        'orange': '#ea580c',
+        'purple': '#9333ea',
+        'cyan': '#0891b2',
+        'white': '#6b7280'
+    };
+    return colorMap[color.toLowerCase()] || '#6b7280';
+}
+
 async function refreshStatus() {
     try {
         const response = await fetch(`/api/session/${sessionId}/status`);
         const data = await response.json();
 
+        // Store course mode and pattern length for use in updateProgress
+        courseMode = data.course_mode || 'sequential';
+        patternLength = data.pattern_length;
+        patternData = data.pattern_data;
+
+        updateCourseLayout();  // Update layout based on pattern mode
         updateProgress(data.session);
         updateDeviceStatus(data.waiting_for_device);
 
@@ -212,6 +302,18 @@ async function refreshStatus() {
             const backBtn = document.getElementById('backBtn');
             if (repeatBtn) repeatBtn.style.display = 'inline-block';
             if (backBtn) backBtn.style.display = 'inline-block';
+
+            // Show Continue button if pattern mode, has successful athletes, and length < 8
+            const continueBtn = document.getElementById('continueBtn');
+            const continueBtnText = document.getElementById('continueBtnText');
+            if (continueBtn && courseMode === 'pattern' && patternLength && patternLength < 8) {
+                const successfulAthletes = data.session.runs.filter(r => r.status === 'completed');
+                if (successfulAthletes.length > 0) {
+                    const nextLength = patternLength + 1;
+                    continueBtnText.textContent = `Continue to ${nextLength}`;
+                    continueBtn.style.display = 'inline-block';
+                }
+            }
         }
     } catch (error) {
         console.error('Error refreshing status:', error);
@@ -228,7 +330,14 @@ function updateProgress(session) {
         const statusClass = `run-${run.status}`;
         const segments = run.segments || [];
         const completedSegments = segments.filter(s => s.touch_detected).length;
-        
+
+        // Determine actual status display
+        let statusDisplay = run.status.toUpperCase();
+        if (run.status === 'incomplete') {
+            // Show FAILED for incomplete runs
+            statusDisplay = 'FAILED';
+        }
+
         return `
             <div class="run-card ${statusClass} card mb-2">
                 <div class="card-body">
@@ -236,24 +345,69 @@ function updateProgress(session) {
                         <div class="col-md-3">
                             <strong>${run.queue_position + 1}. ${run.athlete_name}</strong>
                             ${run.jersey_number ? `<span class="badge bg-secondary">#${run.jersey_number}</span>` : ''}
-                            <div class="small text-muted">${run.status.toUpperCase()}</div>
+                            <div class="small text-muted">${statusDisplay}</div>
                         </div>
                         <div class="col-md-6">
                             <div class="d-flex flex-wrap">
                                 ${segments.map(seg => {
                                     let bgColor = '#6c757d';
                                     let textColor = 'white';
-                                    if (seg.touch_detected) {
-                                        bgColor = seg.alert_raised ? '#dc3545' : '#28a745';
+                                    let displayTime = '--';
+
+                                    if (courseMode === 'pattern') {
+                                        // PATTERN MODE: Show step number initially, cumulative time when touched, RED only for failed device
+                                        const segmentIndex = segments.indexOf(seg);
+
+                                        if (seg.touch_detected && seg.cumulative_time !== null && seg.cumulative_time !== undefined) {
+                                            // Touched: show cumulative time from D0 beep in GREEN
+                                            bgColor = '#28a745';
+                                            displayTime = seg.cumulative_time.toFixed(2) + 's';
+                                        } else if (run.status === 'incomplete' && !seg.touch_detected) {
+                                            // Failed run - check if this is the first untouched segment (where they failed)
+                                            const firstUntouchedIndex = segments.findIndex(s => !s.touch_detected);
+                                            if (segmentIndex === firstUntouchedIndex) {
+                                                // This is where they failed - show RED
+                                                bgColor = '#dc3545';
+                                                displayTime = '--';
+                                            } else {
+                                                // Other untouched segments after failure - show gray
+                                                bgColor = '#6c757d';
+                                                displayTime = '--';
+                                            }
+                                        } else if (!seg.touch_detected) {
+                                            // Not touched yet (queued or running) - show gray
+                                            bgColor = '#6c757d';
+                                            displayTime = '--';
+                                        } else {
+                                            // Touched but no cumulative_time (fallback - shouldn't happen with new backend)
+                                            bgColor = '#28a745';
+                                            displayTime = '--';
+                                        }
+                                    } else {
+                                        // SEQUENTIAL MODE: Show per-device times (original behavior)
+                                        if (seg.touch_detected) {
+                                            bgColor = seg.alert_raised ? '#dc3545' : '#28a745';
+                                            displayTime = seg.actual_time.toFixed(2) + 's';
+                                        }
                                     }
+
                                     const deviceNum = seg.to_device.split('.').pop();
+                                    const coneNum = parseInt(deviceNum) - 100;  // Convert 101 -> 1, 102 -> 2, etc.
+                                    const segmentIndex = segments.indexOf(seg);
+
+                                    // For pattern mode, show just cone number (more compact)
+                                    // For sequential mode, show device number
+                                    const labelText = courseMode === 'pattern'
+                                        ? `C${coneNum}`
+                                        : `Device ${deviceNum}`;
+
                                     return `
                                         <div style="background-color: ${bgColor}; color: ${textColor}; padding: 10px; border-radius: 8px; text-align: center; min-width: 85px; margin: 4px; display: inline-block;">
-                                            <div style="font-size: 0.7rem; font-weight: bold; margin-bottom: 4px;">Device ${deviceNum}</div>
+                                            <div style="font-size: 0.7rem; font-weight: bold; margin-bottom: 4px;">${labelText}</div>
                                             <div style="font-size: 1.1rem; font-weight: bold;">
-                                                ${seg.touch_detected ? seg.actual_time.toFixed(2) + 's' : '--'}
+                                                ${displayTime}
                                             </div>
-                                            ${seg.alert_raised ? `<div style="font-size: 0.65rem; margin-top: 2px;">${seg.alert_type}</div>` : ''}
+                                            ${courseMode !== 'pattern' && seg.alert_raised ? `<div style="font-size: 0.65rem; margin-top: 2px;">${seg.alert_type}</div>` : ''}
                                         </div>
                                     `;
                                 }).join('')}
@@ -262,7 +416,7 @@ function updateProgress(session) {
                         <div class="col-md-3 text-end">
                             ${run.total_time ? `<strong>${run.total_time.toFixed(2)}s</strong>` : ''}
                             ${run.status === 'queued' ? `
-                                <button class="btn btn-sm btn-outline-secondary" 
+                                <button class="btn btn-sm btn-outline-secondary"
                                         onclick="markAbsent('${run.run_id}')">
                                     <i class="fas fa-user-slash"></i> Absent
                                 </button>

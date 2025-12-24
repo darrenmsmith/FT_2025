@@ -32,8 +32,9 @@ class DatabaseManager:
     @contextmanager
     def get_connection(self):
         """Context manager for database connections"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)  # 10 second timeout for locks
         conn.row_factory = sqlite3.Row  # Enable dict-like access
+        conn.execute('PRAGMA journal_mode=WAL')  # Enable Write-Ahead Logging for better concurrency
         try:
             yield conn
             conn.commit()
@@ -729,16 +730,25 @@ class DatabaseManager:
     # ==================== SESSION OPERATIONS ====================
     
     def create_session(self, team_id: str, course_id: int, athlete_queue: List[str],
-                      audio_voice: str = 'male') -> str:
-        """Create session with athlete queue, return session_id"""
+                      audio_voice: str = 'male', pattern_config: Optional[str] = None) -> str:
+        """Create session with athlete queue, return session_id
+
+        Args:
+            team_id: Team identifier
+            course_id: Course identifier
+            athlete_queue: List of athlete IDs in queue order
+            audio_voice: Voice for audio feedback ('male' or 'female')
+            pattern_config: Optional JSON string with pattern configuration override
+                           (for Simon Says pattern length progression)
+        """
         session_id = str(uuid.uuid4())
-        
+
         with self.get_connection() as conn:
             # Create session
             conn.execute(
-                '''INSERT INTO sessions (session_id, team_id, course_id, status, audio_voice)
-                   VALUES (?, ?, ?, 'setup', ?)''',
-                (session_id, team_id, course_id, audio_voice)
+                '''INSERT INTO sessions (session_id, team_id, course_id, status, audio_voice, pattern_config)
+                   VALUES (?, ?, ?, 'setup', ?, ?)''',
+                (session_id, team_id, course_id, audio_voice, pattern_config)
             )
             
             # Create runs for each athlete in queue
@@ -850,17 +860,32 @@ class DatabaseManager:
             # Force immediate commit to prevent race conditions
             conn.commit()
 
-    def complete_run(self, run_id: str, timestamp: Optional[datetime] = None, total_time: Optional[float] = None):
-        """Mark run as completed"""
+    def complete_run(self, run_id: str, timestamp: Optional[datetime] = None, total_time: Optional[float] = None, status: str = 'completed'):
+        """Mark run as completed or incomplete
+
+        Args:
+            run_id: The run ID
+            timestamp: Completion timestamp (defaults to now)
+            total_time: Total time in seconds
+            status: Run status ('completed' for success, 'incomplete' for failure)
+        """
         if timestamp is None:
             timestamp = datetime.utcnow()
-        
+
         with self.get_connection() as conn:
             conn.execute(
                 'UPDATE runs SET status = ?, completed_at = ?, total_time = ? WHERE run_id = ?',
-                ('completed', timestamp.isoformat(), total_time, run_id)
+                (status, timestamp.isoformat(), total_time, run_id)
             )
-    
+
+    def update_run_timer_start(self, run_id: str, timer_start: datetime):
+        """Update the timer_start_at timestamp for a run (when D0 beeps in pattern mode)"""
+        with self.get_connection() as conn:
+            conn.execute(
+                'UPDATE runs SET timer_start_at = ? WHERE run_id = ?',
+                (timer_start.isoformat(), run_id)
+            )
+
     def get_session_runs(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all runs for a session"""
         with self.get_connection() as conn:
@@ -898,24 +923,24 @@ class DatabaseManager:
                 'SELECT COUNT(*) as count FROM segments WHERE run_id = ?',
                 (run_id,)
              ).fetchone()
-        
+
             if existing['count'] > 0:
                 print(f"⚠️  Segments already exist for run {run_id[:8]}... (skipping creation)")
                 return
-  
+
             # Get course actions
             actions = conn.execute(
                 'SELECT * FROM course_actions WHERE course_id = ? ORDER BY sequence',
                 (course_id,)
             ).fetchall()
-            
+
             # Create segments (device N to device N+1)
             for i in range(len(actions) - 1):
                 from_action = actions[i]
                 to_action = actions[i + 1]
-                
+
                 conn.execute(
-                    '''INSERT INTO segments 
+                    '''INSERT INTO segments
                        (run_id, from_device, to_device, sequence, expected_min_time, expected_max_time)
                        VALUES (?, ?, ?, ?, ?, ?)''',
                     (
@@ -927,6 +952,42 @@ class DatabaseManager:
                         to_action['max_time']
                     )
                 )
+
+    def create_pattern_segments_for_run(self, run_id: str, pattern_device_ids: list):
+        """Create segments for pattern mode based on actual pattern sequence"""
+        with self.get_connection() as conn:
+            # Check if segments already exist (prevent duplicates)
+            existing = conn.execute(
+                'SELECT COUNT(*) as count FROM segments WHERE run_id = ?',
+                (run_id,)
+             ).fetchone()
+
+            if existing['count'] > 0:
+                print(f"⚠️  Pattern segments already exist for run {run_id[:8]}... (skipping creation)")
+                return
+
+            # Create one segment per pattern step
+            # Segment represents the transition from previous step to current step
+            from_device = '192.168.99.100'  # Start from D0
+
+            for i, to_device in enumerate(pattern_device_ids):
+                conn.execute(
+                    '''INSERT INTO segments
+                       (run_id, from_device, to_device, sequence, expected_min_time, expected_max_time)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (
+                        run_id,
+                        from_device,
+                        to_device,
+                        i,
+                        0.0,    # Pattern mode doesn't use time constraints
+                        999.9   # Pattern mode doesn't use time constraints
+                    )
+                )
+                # Next segment starts from this device
+                from_device = to_device
+
+            print(f"   ✓ Created {len(pattern_device_ids)} pattern segments for run {run_id[:8]}")
     
     def record_touch(self, run_id: str, device_id: str, timestamp: datetime) -> Optional[int]:
         """Record a touch event and update segment timing"""
@@ -943,36 +1004,56 @@ class DatabaseManager:
                 return None
             
             segment_id = segment['segment_id']
-            
+
             # Calculate actual time from previous touch
-            run = conn.execute('SELECT started_at FROM runs WHERE run_id = ?', (run_id,)).fetchone()
-            
+            run = conn.execute('SELECT started_at, timer_start_at FROM runs WHERE run_id = ?', (run_id,)).fetchone()
+
             # Get previous segment's touch time, or run start time
             prev_segment = conn.execute(
-                '''SELECT touch_timestamp FROM segments 
+                '''SELECT touch_timestamp FROM segments
                    WHERE run_id = ? AND sequence < ? AND touch_detected = 1
                    ORDER BY sequence DESC LIMIT 1''',
                 (run_id, segment['sequence'])
             ).fetchone()
-            
+
             if prev_segment and prev_segment['touch_timestamp']:
                 start_time = datetime.fromisoformat(prev_segment['touch_timestamp'])
             else:
                 start_time = datetime.fromisoformat(run['started_at'])
-            
+
             actual_time = (timestamp - start_time).total_seconds()
-            
-            # Update segment
-            conn.execute(
-                '''UPDATE segments 
-                   SET touch_detected = 1, touch_timestamp = ?, actual_time = ?
-                   WHERE segment_id = ?''',
-                (timestamp.isoformat(), actual_time, segment_id)
-            )
-            
+
+            # Calculate cumulative time from timer_start (D0 beep) if available
+            cumulative_time = None
+            if run['timer_start_at']:
+                timer_start = datetime.fromisoformat(run['timer_start_at'])
+                cumulative_time = (timestamp - timer_start).total_seconds()
+
+            # Update segment with retry logic for concurrent touches
+            import time
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    conn.execute(
+                        '''UPDATE segments
+                           SET touch_detected = 1, touch_timestamp = ?, actual_time = ?, cumulative_time = ?
+                           WHERE segment_id = ?''',
+                        (timestamp.isoformat(), actual_time, cumulative_time, segment_id)
+                    )
+                    break  # Success - exit retry loop
+                except sqlite3.OperationalError as e:
+                    if 'database is locked' in str(e) and attempt < max_retries - 1:
+                        time.sleep(0.1 * (attempt + 1))  # 100ms, 200ms, 300ms, 400ms, 500ms
+                        continue
+                    # On final attempt or different error, log and return None
+                    if 'database is locked' in str(e):
+                        print(f"⚠️  Database lock persisted after {max_retries} retries - touch not recorded")
+                        return None
+                    raise
+
             # Check for alerts
             self.check_segment_alerts(segment_id)
-            
+
             return segment_id
 
     def mark_segment_missed(self, segment_id: int):
@@ -1008,11 +1089,27 @@ class DatabaseManager:
                 alert_type = 'too_slow'
             
             if alert_type:
-                conn.execute(
-                    'UPDATE segments SET alert_raised = 1, alert_type = ? WHERE segment_id = ?',
-                    (alert_type, segment_id)
-                )
-                return True, alert_type
+                # Retry logic for database locking with increased timeout
+                import time
+                max_retries = 5
+                for attempt in range(max_retries):
+                    try:
+                        conn.execute(
+                            'UPDATE segments SET alert_raised = 1, alert_type = ? WHERE segment_id = ?',
+                            (alert_type, segment_id)
+                        )
+                        return True, alert_type
+                    except sqlite3.OperationalError as e:
+                        if 'database is locked' in str(e) and attempt < max_retries - 1:
+                            time.sleep(0.1 * (attempt + 1))  # 100ms, 200ms, 300ms, 400ms backoff
+                            continue
+                        # On final attempt, log warning and continue instead of crashing
+                        if 'database is locked' in str(e):
+                            print(f"⚠️  Database lock persisted after {max_retries} retries - alert not saved")
+                            return False, None
+                        raise  # Re-raise if it's a different error
+
+                return True, alert_type  # Fallback if all retries exhausted
             
             return False, None
     
