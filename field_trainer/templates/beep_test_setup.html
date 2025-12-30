@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block title %}Beep Test Setup - Field Trainer{% endblock %}
+{% block content %}
+<h2 class="mb-4"><i class="fas fa-heartbeat"></i> Beep Test Setup</h2>
+
+<div class="row">
+    <div class="col-lg-8">
+        <!-- Step 1: Team & Configuration -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>1. Select Team & Configuration</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Team *</label>
+                        <select class="form-select" id="teamSelect" required>
+                            <option value="">-- Select Team --</option>
+                            {% for team in teams %}
+                                <option value="{{ team.team_id }}">{{ team.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Distance *</label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="distance" id="distance20m" value="20" checked>
+                            <label class="btn btn-outline-primary" for="distance20m">
+                                <i class="fas fa-ruler"></i> 20 meters
+                            </label>
+                            <input type="radio" class="btn-check" name="distance" id="distance15m" value="15">
+                            <label class="btn btn-outline-primary" for="distance15m">
+                                <i class="fas fa-ruler"></i> 15 meters
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Device Count *</label>
+                        <select class="form-select" id="deviceCount" required>
+                            <option value="2">2 devices (1 at each end)</option>
+                            <option value="4" selected>4 devices (2 at each end)</option>
+                            <option value="6">6 devices (3 at each end)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Start Level *</label>
+                        <select class="form-select" id="startLevel" required>
+                            {% for level in range(1, 22) %}
+                                <option value="{{ level }}" {% if level == 1 %}selected{% endif %}>
+                                    Level {{ level }} ({{ 8.0 + (level - 1) * 0.5 }} km/h)
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Continue from Last Test Button -->
+                <div id="continueFromLastContainer" class="mb-3" style="display: none;">
+                    <button class="btn btn-outline-info w-100" id="continueFromLastBtn" type="button">
+                        <i class="fas fa-history"></i> Continue from Last Test (Level <span id="lastTestLevel">-</span>)
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Athlete Order -->
+        <div class="card">
+            <div class="card-header">
+                <h5>2. Athlete Order & Attendance</h5>
+                <small class="text-muted">Drag to reorder • Click X to mark absent</small>
+            </div>
+            <div class="card-body">
+                <div id="athleteList" class="mb-3">
+                    <p class="text-muted">Select a team to load athletes...</p>
+                </div>
+                <div class="d-grid gap-2">
+                    <button class="btn btn-success btn-lg" id="startTestBtn" disabled>
+                        <i class="fas fa-play"></i> START BEEP TEST
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <!-- Instructions -->
+        <div class="card mb-3">
+            <div class="card-header bg-info text-white">
+                <h5><i class="fas fa-info-circle"></i> Instructions</h5>
+            </div>
+            <div class="card-body">
+                <ol class="small">
+                    <li>Select your team</li>
+                    <li>Choose distance (15m or 20m)</li>
+                    <li>Set device count (minimum 2)</li>
+                    <li>Choose start level (1-21)</li>
+                    <li>Drag to reorder athletes</li>
+                    <li>Mark absent athletes (X button)</li>
+                    <li>Click "START BEEP TEST"</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Beep Test Info -->
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5><i class="fas fa-info"></i> About Beep Test</h5>
+            </div>
+            <div class="card-body small">
+                <p><strong>Léger Protocol</strong></p>
+                <ul class="mb-2">
+                    <li>21 levels total</li>
+                    <li>Starts at 8.5 km/h</li>
+                    <li>Increases by 0.5 km/h per level</li>
+                    <li>Each level ~60 seconds</li>
+                </ul>
+                <p class="mb-2"><strong>How it works:</strong></p>
+                <p class="mb-0">Athletes run between two lines at progressively faster speeds. Click FAIL when an athlete can't keep pace.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/vendor/sortable/Sortable.min.js"></script>
+<style>
+.athlete-card {
+    cursor: move;
+    transition: all 0.2s;
+}
+.athlete-card:hover {
+    background-color: #f8f9fa;
+}
+.athlete-card.absent {
+    opacity: 0.5;
+    background-color: #fee;
+    border-left: 4px solid #dc3545;
+}
+.sortable-ghost {
+    opacity: 0.4;
+    background-color: #e3f2fd;
+}
+</style>
+<script>
+let athleteQueue = [];
+let absentAthletes = new Set();
+let lastTestData = null;
+
+// Load athletes when team selected
+document.getElementById('teamSelect').addEventListener('change', async function() {
+    const teamId = this.value;
+    if (!teamId) {
+        document.getElementById('athleteList').innerHTML = '<p class="text-muted">Select a team to load athletes...</p>';
+        document.getElementById('startTestBtn').disabled = true;
+        document.getElementById('continueFromLastContainer').style.display = 'none';
+        return;
+    }
+
+    // Load athletes
+    const response = await fetch(`/api/team/${teamId}/athletes`);
+    const athletes = await response.json();
+
+    // Initialize queue with all athletes
+    athleteQueue = athletes.map(a => a.athlete_id);
+    absentAthletes.clear();
+    renderAthleteList(athletes);
+
+    // Load last beep test for this team
+    try {
+        const lastTestResponse = await fetch(`/api/beep-test/last-test/${teamId}`);
+        if (lastTestResponse.ok) {
+            lastTestData = await lastTestResponse.json();
+            if (lastTestData && lastTestData.max_level_completed > 0) {
+                document.getElementById('lastTestLevel').textContent = lastTestData.max_level_completed;
+                document.getElementById('continueFromLastContainer').style.display = 'block';
+            }
+        }
+    } catch (e) {
+        console.log('No previous test found');
+    }
+});
+
+// Continue from last test
+document.getElementById('continueFromLastBtn').addEventListener('click', function() {
+    if (lastTestData && lastTestData.max_level_completed > 0) {
+        document.getElementById('startLevel').value = lastTestData.max_level_completed;
+        this.classList.add('btn-success');
+        this.classList.remove('btn-outline-info');
+        setTimeout(() => {
+            this.classList.remove('btn-success');
+            this.classList.add('btn-outline-info');
+        }, 1000);
+    }
+});
+
+function renderAthleteList(athletes) {
+    if (athletes.length === 0) {
+        document.getElementById('athleteList').innerHTML = '<p class="text-muted">No athletes in this team.</p>';
+        document.getElementById('startTestBtn').disabled = true;
+        return;
+    }
+
+    const listDiv = document.getElementById('athleteList');
+    listDiv.innerHTML = athletes.map((a, idx) => {
+        const isAbsent = absentAthletes.has(a.athlete_id);
+        return `
+            <div class="athlete-card card mb-2 ${isAbsent ? 'absent' : ''}" data-id="${a.athlete_id}">
+                <div class="card-body py-2 d-flex justify-content-between align-items-center">
+                    <div>
+                        <i class="fas fa-grip-vertical text-muted me-2"></i>
+                        <strong>${idx + 1}.</strong>
+                        ${a.name}
+                        ${a.jersey_number ? `<span class="badge bg-secondary">#${a.jersey_number}</span>` : ''}
+                        ${isAbsent ? '<span class="badge bg-danger ms-2">ABSENT</span>' : ''}
+                    </div>
+                    <button class="btn btn-sm ${isAbsent ? 'btn-success' : 'btn-outline-danger'}"
+                            onclick="toggleAbsent('${a.athlete_id}')">
+                        ${isAbsent ? '<i class="fas fa-check"></i> Present' : '<i class="fas fa-times"></i> Absent'}
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // Enable drag-and-drop
+    new Sortable(listDiv, {
+        animation: 150,
+        handle: '.athlete-card',
+        ghostClass: 'sortable-ghost',
+        onEnd: function(evt) {
+            athleteQueue = Array.from(listDiv.children).map(el => el.dataset.id);
+            renderAthleteList(athletes.sort((a, b) =>
+                athleteQueue.indexOf(a.athlete_id) - athleteQueue.indexOf(b.athlete_id)
+            ));
+        }
+    });
+
+    updateStartButton();
+}
+
+function toggleAbsent(athleteId) {
+    if (absentAthletes.has(athleteId)) {
+        absentAthletes.delete(athleteId);
+    } else {
+        absentAthletes.add(athleteId);
+    }
+
+    // Re-render the list
+    const teamId = document.getElementById('teamSelect').value;
+    fetch(`/api/team/${teamId}/athletes`)
+        .then(r => r.json())
+        .then(athletes => {
+            renderAthleteList(athletes.sort((a, b) =>
+                athleteQueue.indexOf(a.athlete_id) - athleteQueue.indexOf(b.athlete_id)
+            ));
+        });
+}
+
+function updateStartButton() {
+    // Enable button if at least one athlete is present
+    const presentCount = athleteQueue.length - absentAthletes.size;
+    document.getElementById('startTestBtn').disabled = presentCount === 0;
+}
+
+// Start test button
+document.getElementById('startTestBtn').addEventListener('click', async function() {
+    const teamId = document.getElementById('teamSelect').value;
+    const distance = document.querySelector('input[name="distance"]:checked').value;
+    const deviceCount = document.getElementById('deviceCount').value;
+    const startLevel = document.getElementById('startLevel').value;
+
+    // Get only present athletes (excluding absent ones)
+    const presentAthletes = athleteQueue.filter(id => !absentAthletes.has(id));
+
+    if (!teamId || presentAthletes.length === 0) {
+        alert('Please select a team and have at least one athlete present');
+        return;
+    }
+
+    this.disabled = true;
+    this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
+
+    // Create session
+    const response = await fetch('/api/beep-test/create-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            team_id: teamId,
+            distance_meters: parseInt(distance),
+            device_count: parseInt(deviceCount),
+            start_level: parseInt(startLevel),
+            athlete_ids: presentAthletes
+        })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+        // Redirect to monitor page
+        window.location.href = `/beep-test/monitor/${result.session_id}`;
+    } else {
+        alert('Error creating session: ' + (result.error || 'Unknown error'));
+        this.disabled = false;
+        this.innerHTML = '<i class="fas fa-play"></i> START BEEP TEST';
+    }
+});
+</script>
+{% endblock %}

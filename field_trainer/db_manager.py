@@ -209,6 +209,44 @@ class DatabaseManager:
                         VALUES (?, ?)
                     ''', (key, value))
 
+            # Beep Test Sessions table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS beep_test_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    team_id TEXT NOT NULL,
+                    date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    distance_meters INTEGER NOT NULL CHECK (distance_meters IN (15, 20)),
+                    device_count INTEGER NOT NULL CHECK (device_count IN (2, 4, 6)),
+                    start_level INTEGER NOT NULL DEFAULT 1 CHECK (start_level >= 1 AND start_level <= 21),
+                    status TEXT NOT NULL DEFAULT 'setup' CHECK (status IN ('setup', 'active', 'completed', 'stopped')),
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    notes TEXT,
+                    FOREIGN KEY (team_id) REFERENCES teams(team_id)
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_beep_sessions_team ON beep_test_sessions(team_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_beep_sessions_status ON beep_test_sessions(status)')
+
+            # Beep Test Results table (per athlete)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS beep_test_results (
+                    result_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    athlete_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'failed', 'passed', 'did_not_start')),
+                    level_completed INTEGER CHECK (level_completed >= 0 AND level_completed <= 21),
+                    level_failed INTEGER CHECK (level_failed >= 1 AND level_failed <= 21),
+                    shuttle_failed_on INTEGER,
+                    vo2_max_estimate REAL,
+                    failed_at TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES beep_test_sessions(session_id) ON DELETE CASCADE,
+                    FOREIGN KEY (athlete_id) REFERENCES athletes(athlete_id)
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_beep_results_session ON beep_test_results(session_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_beep_results_athlete ON beep_test_results(athlete_id)')
+
     # ==================== DASHBOARD QUERIES ====================
     
     def get_dashboard_stats(self) -> Dict[str, Any]:
@@ -242,24 +280,42 @@ class DatabaseManager:
             return stats
 
     def get_recent_activity(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent completed runs for dashboard"""
+        """Get recent completed runs for dashboard (includes both regular runs and beep tests)"""
         from datetime import datetime
 
         with self.get_connection() as conn:
+            # UNION regular runs with beep test results
             rows = conn.execute('''
                 SELECT
-                    r.run_id,
+                    r.run_id as activity_id,
                     r.total_time,
                     r.completed_at,
                     COALESCE(ph.is_personal_record, 0) as is_pr,
                     a.name as athlete_name,
-                    c.course_name
+                    c.course_name,
+                    'run' as activity_type
                 FROM runs r
                 JOIN athletes a ON r.athlete_id = a.athlete_id
                 JOIN courses c ON r.course_id = c.course_id
                 LEFT JOIN performance_history ph ON r.run_id = ph.run_id
                 WHERE r.status = 'completed'
-                ORDER BY r.completed_at DESC
+
+                UNION ALL
+
+                SELECT
+                    btr.result_id as activity_id,
+                    NULL as total_time,
+                    s.created_at as completed_at,
+                    0 as is_pr,
+                    a.name as athlete_name,
+                    'Beep Test - Level ' || COALESCE(btr.level_completed, 0) as course_name,
+                    'beep_test' as activity_type
+                FROM beep_test_results btr
+                JOIN athletes a ON btr.athlete_id = a.athlete_id
+                JOIN sessions s ON btr.session_id = s.session_id
+                WHERE s.status IN ('completed', 'incomplete')
+
+                ORDER BY completed_at DESC
                 LIMIT ?
             ''', (limit,)).fetchall()
 
@@ -272,7 +328,7 @@ class DatabaseManager:
                 # Calculate "time ago"
                 completed = datetime.fromisoformat(item['completed_at'])
                 delta = now - completed
-                
+
                 if delta.days > 0:
                     item['time_ago'] = f"{delta.days} day{'s' if delta.days > 1 else ''} ago"
                 elif delta.seconds >= 3600:
@@ -283,13 +339,13 @@ class DatabaseManager:
                     item['time_ago'] = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
                 else:
                     item['time_ago'] = "just now"
-                
+
                 activity.append(item)
-            
+
             return activity
 
     def get_course_rankings(self, team_id: Optional[str] = None, category: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get course rankings showing each athlete's PR for each course"""
+        """Get course rankings showing each athlete's PR for each course (includes Beep Test)"""
         with self.get_connection() as conn:
             # Build WHERE clause for filters
             where_clauses = ["r.status = 'completed'", "r.total_time IS NOT NULL"]
@@ -321,7 +377,8 @@ class DatabaseManager:
                         WHERE athlete_id = a.athlete_id
                         AND course_id = c.course_id
                         AND status = 'completed'
-                    ) THEN r.completed_at END) as pr_date
+                    ) THEN r.completed_at END) as pr_date,
+                    'course' as ranking_type
                 FROM runs r
                 JOIN athletes a ON r.athlete_id = a.athlete_id
                 JOIN teams t ON a.team_id = t.team_id
@@ -340,6 +397,7 @@ class DatabaseManager:
                         'course_id': course_id,
                         'course_name': row['course_name'],
                         'category': row['category'],
+                        'ranking_type': 'course',
                         'rankings': []
                     }
 
@@ -348,8 +406,59 @@ class DatabaseManager:
                     'athlete_name': row['athlete_name'],
                     'team_name': row['team_name'],
                     'best_time': row['best_time'],
+                    'best_level': None,
                     'pr_date': row['pr_date']
                 })
+
+            # Add Beep Test rankings (if not filtering by category, or category is fitness/cardio)
+            if not category or category.lower() in ['fitness', 'cardio']:
+                beep_params = []
+                beep_where = ["s.status IN ('completed', 'incomplete')"]
+
+                if team_id:
+                    beep_where.append("a.team_id = ?")
+                    beep_params.append(team_id)
+
+                beep_where_clause = " AND ".join(beep_where)
+
+                beep_rows = conn.execute(f'''
+                    SELECT
+                        a.athlete_id,
+                        a.name as athlete_name,
+                        t.name as team_name,
+                        MAX(btr.level_completed) as best_level,
+                        MAX(CASE WHEN btr.level_completed = (
+                            SELECT MAX(level_completed)
+                            FROM beep_test_results
+                            WHERE athlete_id = a.athlete_id
+                        ) THEN s.created_at END) as pr_date
+                    FROM beep_test_results btr
+                    JOIN athletes a ON btr.athlete_id = a.athlete_id
+                    JOIN teams t ON a.team_id = t.team_id
+                    JOIN sessions s ON btr.session_id = s.session_id
+                    WHERE {beep_where_clause}
+                    GROUP BY a.athlete_id, a.name, t.name
+                    ORDER BY best_level DESC
+                ''', beep_params).fetchall()
+
+                if beep_rows:
+                    courses['beep_test'] = {
+                        'course_id': 'beep_test',
+                        'course_name': 'Beep Test',
+                        'category': 'Fitness',
+                        'ranking_type': 'beep_test',
+                        'rankings': []
+                    }
+
+                    for row in beep_rows:
+                        courses['beep_test']['rankings'].append({
+                            'athlete_id': row['athlete_id'],
+                            'athlete_name': row['athlete_name'],
+                            'team_name': row['team_name'],
+                            'best_time': None,
+                            'best_level': row['best_level'],
+                            'pr_date': row['pr_date']
+                        })
 
             return list(courses.values())
 
@@ -640,39 +749,46 @@ class DatabaseManager:
     
     # ==================== COURSE OPERATIONS ====================
     
-    def create_course(self, name: str, description: str, course_type: str, 
-                     actions: List[Dict[str, Any]]) -> int:
+    def create_course(self, name: str, description: str, course_type: str,
+                     actions: List[Dict[str, Any]], mode: Optional[str] = None,
+                     category: Optional[str] = None, total_devices: Optional[int] = None) -> int:
         """Create course with actions, return course_id"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
+            # Use provided total_devices or default to action count
+            device_count = total_devices if total_devices is not None else len(actions)
+
             # Create course
             cursor.execute(
-                '''INSERT INTO courses (course_name, description, course_type, total_devices)
-                   VALUES (?, ?, ?, ?)''',
-                (name, description, course_type, len(actions))
+                '''INSERT INTO courses (course_name, description, course_type, total_devices, mode, category)
+                   VALUES (?, ?, ?, ?, ?, ?)''',
+                (name, description, course_type, device_count, mode, category)
             )
             course_id = cursor.lastrowid
-            
+
             # Create actions
             for seq, action_data in enumerate(actions):
                 device_id = action_data['device_id']
                 cursor.execute(
                     '''INSERT INTO course_actions
                        (course_id, sequence, device_id, device_name, action, action_type,
-                        audio_file, instruction, min_time, max_time, triggers_next_athlete, marks_run_complete, distance)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        audio_file, instruction, min_time, max_time, triggers_next_athlete,
+                        marks_run_complete, distance, behavior_config, group_identifier)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (
-                        course_id, seq, device_id, DEVICE_NAMES.get(device_id),
+                        course_id, seq, device_id, action_data.get('device_name') or DEVICE_NAMES.get(device_id),
                         action_data['action'], action_data.get('action_type', 'touch_checkpoint'),
                         action_data.get('audio_file'), action_data.get('instruction'),
                         action_data.get('min_time', 1.0), action_data.get('max_time', 30.0),
                         action_data.get('triggers_next_athlete', False),
                         action_data.get('marks_run_complete', False),
-                        action_data.get('distance', 0)
+                        action_data.get('distance', 0),
+                        action_data.get('behavior_config'),
+                        action_data.get('group_identifier')
                     )
                 )
-        
+
         return course_id
     
     def get_course(self, course_id_or_name) -> Optional[Dict[str, Any]]:
@@ -1395,4 +1511,198 @@ class DatabaseManager:
                     ))
             
             return course_id
+
+    # ==================== BEEP TEST OPERATIONS ====================
+
+    def create_beep_test_session(self, team_id: str, distance_meters: int,
+                                 device_count: int, start_level: int = 1) -> str:
+        """Create a new beep test session"""
+        session_id = str(uuid.uuid4())
+        with self.get_connection() as conn:
+            conn.execute('''
+                INSERT INTO beep_test_sessions (
+                    session_id, team_id, distance_meters, device_count, start_level, status
+                ) VALUES (?, ?, ?, ?, ?, 'setup')
+            ''', (session_id, team_id, distance_meters, device_count, start_level))
+        return session_id
+
+    def get_beep_test_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get beep test session by ID"""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                'SELECT * FROM beep_test_sessions WHERE session_id = ?',
+                (session_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def add_athlete_to_beep_test(self, session_id: str, athlete_id: str) -> str:
+        """Add an athlete to a beep test session"""
+        result_id = str(uuid.uuid4())
+        with self.get_connection() as conn:
+            conn.execute('''
+                INSERT INTO beep_test_results (
+                    result_id, session_id, athlete_id, status
+                ) VALUES (?, ?, ?, 'active')
+            ''', (result_id, session_id, athlete_id))
+        return result_id
+
+    def get_beep_test_athletes(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get all athletes in a beep test session with their results"""
+        with self.get_connection() as conn:
+            rows = conn.execute('''
+                SELECT
+                    r.result_id,
+                    r.session_id,
+                    r.athlete_id,
+                    a.name as athlete_name,
+                    r.status,
+                    r.level_completed,
+                    r.level_failed,
+                    r.shuttle_failed_on,
+                    r.vo2_max_estimate,
+                    r.failed_at
+                FROM beep_test_results r
+                JOIN athletes a ON r.athlete_id = a.athlete_id
+                WHERE r.session_id = ?
+                ORDER BY
+                    CASE r.status
+                        WHEN 'active' THEN 0
+                        WHEN 'failed' THEN 1
+                        WHEN 'passed' THEN 2
+                        ELSE 3
+                    END,
+                    a.name
+            ''', (session_id,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def start_beep_test_session(self, session_id: str) -> None:
+        """Mark beep test session as active"""
+        with self.get_connection() as conn:
+            conn.execute('''
+                UPDATE beep_test_sessions
+                SET status = 'active', started_at = ?
+                WHERE session_id = ?
+            ''', (datetime.utcnow().isoformat(), session_id))
+
+    def mark_beep_test_athlete_failed(self, session_id: str, athlete_id: str,
+                                     level_failed: int, shuttle_failed_on: int) -> None:
+        """Mark an athlete as failed at a specific level"""
+        level_completed = max(0, level_failed - 1)
+        vo2_max = self._calculate_vo2_max(level_completed)
+
+        with self.get_connection() as conn:
+            conn.execute('''
+                UPDATE beep_test_results
+                SET status = 'failed',
+                    level_completed = ?,
+                    level_failed = ?,
+                    shuttle_failed_on = ?,
+                    vo2_max_estimate = ?,
+                    failed_at = ?
+                WHERE session_id = ? AND athlete_id = ?
+            ''', (level_completed, level_failed, shuttle_failed_on, vo2_max,
+                  datetime.utcnow().isoformat(), session_id, athlete_id))
+
+    def mark_beep_test_athlete_active(self, session_id: str, athlete_id: str) -> None:
+        """Reactivate an athlete (undo failed status)"""
+        with self.get_connection() as conn:
+            conn.execute('''
+                UPDATE beep_test_results
+                SET status = 'active',
+                    level_completed = NULL,
+                    level_failed = NULL,
+                    shuttle_failed_on = NULL,
+                    vo2_max_estimate = NULL,
+                    failed_at = NULL
+                WHERE session_id = ? AND athlete_id = ?
+            ''', (session_id, athlete_id))
+
+    def complete_beep_test_session(self, session_id: str, final_level: int) -> None:
+        """Complete beep test session - mark remaining active athletes as passed"""
+        vo2_max = self._calculate_vo2_max(final_level)
+
+        with self.get_connection() as conn:
+            # Mark all still-active athletes as passed at final level
+            conn.execute('''
+                UPDATE beep_test_results
+                SET status = 'passed',
+                    level_completed = ?,
+                    vo2_max_estimate = ?
+                WHERE session_id = ? AND status = 'active'
+            ''', (final_level, vo2_max, session_id))
+
+            # Mark session as completed
+            conn.execute('''
+                UPDATE beep_test_sessions
+                SET status = 'completed', completed_at = ?
+                WHERE session_id = ?
+            ''', (datetime.utcnow().isoformat(), session_id))
+
+    def stop_beep_test_session(self, session_id: str, reason: str = '') -> None:
+        """Stop beep test session early"""
+        with self.get_connection() as conn:
+            conn.execute('''
+                UPDATE beep_test_sessions
+                SET status = 'stopped', completed_at = ?, notes = ?
+                WHERE session_id = ?
+            ''', (datetime.utcnow().isoformat(), reason, session_id))
+
+    def get_team_last_beep_test(self, team_id: str) -> Optional[Dict[str, Any]]:
+        """Get the most recent completed beep test for a team"""
+        with self.get_connection() as conn:
+            # Get last session
+            session = conn.execute('''
+                SELECT * FROM beep_test_sessions
+                WHERE team_id = ? AND status = 'completed'
+                ORDER BY completed_at DESC
+                LIMIT 1
+            ''', (team_id,)).fetchone()
+
+            if not session:
+                return None
+
+            session_dict = dict(session)
+
+            # Get highest level completed in that session
+            max_level = conn.execute('''
+                SELECT MAX(level_completed) as max_level
+                FROM beep_test_results
+                WHERE session_id = ?
+            ''', (session_dict['session_id'],)).fetchone()
+
+            session_dict['max_level_completed'] = max_level['max_level'] if max_level else 0
+
+            return session_dict
+
+    def get_athlete_beep_test_history(self, athlete_id: str) -> List[Dict[str, Any]]:
+        """Get all beep test results for an athlete"""
+        with self.get_connection() as conn:
+            rows = conn.execute('''
+                SELECT
+                    s.session_id,
+                    s.date_time,
+                    s.distance_meters,
+                    r.status,
+                    r.level_completed,
+                    r.level_failed,
+                    r.vo2_max_estimate
+                FROM beep_test_results r
+                JOIN beep_test_sessions s ON r.session_id = s.session_id
+                WHERE r.athlete_id = ?
+                ORDER BY s.date_time DESC
+            ''', (athlete_id,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def _calculate_vo2_max(self, level_completed: int) -> float:
+        """Calculate VO2 max from completed level using Léger formula"""
+        if level_completed <= 0:
+            return 0.0
+
+        # Speed = 8.5 + (0.5 × (level - 1))
+        speed_km_h = 8.5 + (0.5 * (level_completed - 1))
+
+        # VO2_max = (speed × 6.65) - 35.8
+        vo2_max = (speed_km_h * 6.65) - 35.8
+
+        return round(vo2_max, 1)
 

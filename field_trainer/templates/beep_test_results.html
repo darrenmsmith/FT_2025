@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Beep Test Results - Field Trainer{% endblock %}
+{% block content %}
+<h2 class="mb-4">
+    <i class="fas fa-trophy"></i> Beep Test Results
+    <span class="badge bg-success">COMPLETED</span>
+</h2>
+
+<div class="row">
+    <!-- Session Summary -->
+    <div class="col-lg-4">
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-info-circle"></i> Session Summary</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tr>
+                        <th>Team:</th>
+                        <td>{{ team.name }}</td>
+                    </tr>
+                    <tr>
+                        <th>Date:</th>
+                        <td>{{ session.date_time|format_datetime }}</td>
+                    </tr>
+                    <tr>
+                        <th>Distance:</th>
+                        <td>{{ session.distance_meters }}m</td>
+                    </tr>
+                    <tr>
+                        <th>Start Level:</th>
+                        <td>{{ session.start_level }}</td>
+                    </tr>
+                    <tr>
+                        <th>Devices:</th>
+                        <td>{{ session.device_count }}</td>
+                    </tr>
+                    <tr>
+                        <th>Status:</th>
+                        <td><span class="badge bg-success">{{ session.status.upper() }}</span></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- Session Stats -->
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Statistics</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Total Athletes:</span>
+                        <strong>{{ total_athletes }}</strong>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Passed:</span>
+                        <strong class="text-success">{{ passed_count }}</strong>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Failed:</span>
+                        <strong class="text-danger">{{ failed_count }}</strong>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Highest Level:</span>
+                        <strong>{{ highest_level }}</strong>
+                    </div>
+                </div>
+                <div>
+                    <div class="d-flex justify-content-between">
+                        <span>Avg VO2 Max:</span>
+                        <strong>{{ avg_vo2_max|round(1) }} mL/kg/min</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-grid gap-2 mt-3">
+            <a href="/beep-test/setup" class="btn btn-primary">
+                <i class="fas fa-plus"></i> New Beep Test
+            </a>
+            <a href="/dashboard" class="btn btn-outline-secondary">
+                <i class="fas fa-home"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+
+    <!-- Athlete Results -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-users"></i> Athlete Results</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Athlete</th>
+                                <th>Result</th>
+                                <th>Level Completed</th>
+                                <th>Failed At</th>
+                                <th>VO2 Max</th>
+                                <th>Rating</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for result in results %}
+                            <tr>
+                                <td>
+                                    <strong>{{ result.athlete_name }}</strong>
+                                </td>
+                                <td>
+                                    {% if result.status == 'passed' %}
+                                        <span class="badge bg-success">PASSED</span>
+                                    {% elif result.status == 'failed' %}
+                                        <span class="badge bg-danger">FAILED</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ result.status.upper() }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if result.level_completed %}
+                                        Level {{ result.level_completed }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if result.level_failed %}
+                                        Level {{ result.level_failed }}, Shuttle {{ result.shuttle_failed_on }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if result.vo2_max_estimate %}
+                                        <strong>{{ result.vo2_max_estimate|round(1) }}</strong> mL/kg/min
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if result.vo2_max_estimate %}
+                                        {% set rating = get_vo2_rating(result.vo2_max_estimate) %}
+                                        <span class="badge bg-{{ rating.color }}">{{ rating.label }}</span>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- VO2 Max Interpretation Guide -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="fas fa-question-circle"></i> VO2 Max Rating Guide (Adult Male)</h6>
+            </div>
+            <div class="card-body">
+                <div class="row small">
+                    <div class="col-md-6">
+                        <span class="badge bg-danger">Poor:</span> &lt; 35 mL/kg/min<br>
+                        <span class="badge bg-warning">Fair:</span> 35-40 mL/kg/min<br>
+                        <span class="badge bg-info">Average:</span> 40-45 mL/kg/min
+                    </div>
+                    <div class="col-md-6">
+                        <span class="badge bg-primary">Good:</span> 45-50 mL/kg/min<br>
+                        <span class="badge bg-success">Excellent:</span> 50-55 mL/kg/min<br>
+                        <span class="badge bg-dark">Superior:</span> &gt; 55 mL/kg/min
+                    </div>
+                </div>
+                <p class="small text-muted mb-0 mt-2">
+                    <em>Note: Ratings vary by age and gender. These are general guidelines for adult males.</em>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Optional: Add print functionality
+function printResults() {
+    window.print();
+}
+</script>
+{% endblock %}

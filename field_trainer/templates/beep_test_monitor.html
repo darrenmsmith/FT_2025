@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% block title %}Beep Test Monitor - Field Trainer{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">
+        <i class="fas fa-heartbeat"></i> Beep Test Monitor
+        {% if session.status == 'active' %}
+            <span class="badge bg-success">RUNNING</span>
+        {% elif session.status == 'setup' and session.course_deployed %}
+            <span class="badge bg-warning">READY</span>
+        {% else %}
+            <span class="badge bg-secondary">{{ session.status.upper() }}</span>
+        {% endif %}
+    </h2>
+    <div id="sessionControls">
+        {% if session.status == 'setup' and session.course_deployed %}
+            <a href="/dashboard" class="btn btn-secondary me-2">
+                <i class="fas fa-arrow-left"></i> Back
+            </a>
+            <button class="btn btn-success btn-lg" id="startBtn">
+                <i class="fas fa-play"></i> GO
+            </button>
+        {% elif session.status == 'active' %}
+            <button class="btn btn-danger btn-lg" id="endTestBtn">
+                <i class="fas fa-stop"></i> END TEST EARLY
+            </button>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Stats Bar: Horizontal across top -->
+<div class="row mb-4">
+    <!-- Prominent Level Display -->
+    <div class="col-lg-3 col-md-6 mb-3 mb-lg-0">
+        <div class="card h-100 border-primary">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-layer-group"></i> LEVEL</h5>
+            </div>
+            <div class="card-body text-center py-4">
+                <h1 class="display-1 mb-1" id="currentLevel" style="font-size: 5rem; font-weight: bold;">{{ session.start_level }}</h1>
+                <p class="text-muted mb-0" style="font-size: 1.2rem;">of 21</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shuttle Info -->
+    <div class="col-lg-3 col-md-6 mb-3 mb-lg-0">
+        <div class="card h-100 border-info">
+            <div class="card-header bg-info text-white">
+                <h6 class="mb-0"><i class="fas fa-running"></i> Shuttle</h6>
+            </div>
+            <div class="card-body text-center">
+                <h2 class="mb-2">
+                    <span id="currentShuttle">1</span> / <span id="maxShuttles">7</span>
+                </h2>
+                <p class="text-muted small mb-0">Speed: <span id="currentSpeed">8.5</span> km/h</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Time Between Beeps -->
+    <div class="col-lg-3 col-md-6 mb-3 mb-md-0">
+        <div class="card h-100 border-warning">
+            <div class="card-header bg-warning text-dark">
+                <h6 class="mb-0"><i class="fas fa-stopwatch"></i> Time Between Beeps</h6>
+            </div>
+            <div class="card-body text-center">
+                <h2 class="mb-2" id="shuttleTime">8.47 / --</h2>
+                <p class="text-muted small mb-0">seconds (max / countdown)</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Elapsed Time -->
+    <div class="col-lg-3 col-md-6">
+        <div class="card h-100 border-secondary">
+            <div class="card-header bg-secondary text-white">
+                <h6 class="mb-0"><i class="fas fa-clock"></i> Elapsed Time</h6>
+            </div>
+            <div class="card-body text-center">
+                <h2 class="mb-0" id="elapsedTime">00:00</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Athletes List: Full Width Below -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-users"></i> Athletes (<span id="activeCount">0</span> active, <span id="failedCount">0</span> failed)</h5>
+            </div>
+            <div class="card-body">
+                <div id="athletesList" class="list-group">
+                    <!-- Athletes will be loaded dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const SESSION_ID = '{{ session.session_id }}';
+const SESSION_STATUS = '{{ session.status }}';
+let startTime = null;
+let updateInterval = null;
+let testStarted = false;
+
+// Countdown timer variables
+let shuttleTimeMax = 0;
+let countdown = 0;
+let countdownInterval = null;
+let previousShuttle = 0;
+let currentPhase = 'running';  // Track current phase
+
+// Load athletes when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadAthletes();
+
+    // If already active, start polling
+    if (SESSION_STATUS === 'active') {
+        testStarted = true;
+        startTime = new Date();
+
+        // Fetch initial status to populate countdown
+        updateStatus();
+
+        updateInterval = setInterval(updateStatus, 1000);
+        setInterval(updateElapsedTime, 1000);
+
+        // Start countdown timer
+        countdownInterval = setInterval(updateCountdown, 1000);
+    }
+});
+
+// GO button handler (when status is 'setup' and course is deployed)
+{% if session.status == 'setup' and session.course_deployed %}
+document.getElementById('startBtn').addEventListener('click', async function() {
+    if (!confirm('Start the beep test? All athletes should be ready at the START line.')) return;
+
+    this.disabled = true;
+    this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
+
+    const response = await fetch('/api/beep-test/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: SESSION_ID })
+    });
+
+    const result = await response.json();
+    if (result.success) {
+        // Reload page to show active state
+        location.reload();
+    } else {
+        alert('Error starting test: ' + (result.error || 'Unknown error'));
+        this.disabled = false;
+        this.innerHTML = '<i class="fas fa-play"></i> GO';
+    }
+});
+{% endif %}
+
+async function updateStatus() {
+    try {
+        const response = await fetch(`/api/beep-test/status/${SESSION_ID}`);
+        const state = await response.json();
+
+        if (state.is_active) {
+            // Update level/shuttle display
+            document.getElementById('currentLevel').textContent = state.current_level;
+            document.getElementById('currentShuttle').textContent = state.current_shuttle;
+            document.getElementById('maxShuttles').textContent = state.max_shuttles;
+            document.getElementById('currentSpeed').textContent = state.speed_kmh.toFixed(1);
+
+            // Update current phase
+            currentPhase = state.phase || 'running';
+
+            // Check if shuttle changed - reset countdown
+            if (state.current_shuttle !== previousShuttle) {
+                previousShuttle = state.current_shuttle;
+                shuttleTimeMax = state.shuttle_time_sec;
+                countdown = Math.floor(shuttleTimeMax);
+            }
+
+            // Only show countdown during RECOVERY phase
+            if (currentPhase === 'recovery') {
+                document.getElementById('shuttleTime').textContent =
+                    `${shuttleTimeMax.toFixed(2)} / ${Math.max(0, countdown)}`;
+            } else {
+                // During RUNNING phase, just show the time without countdown
+                document.getElementById('shuttleTime').textContent =
+                    `${shuttleTimeMax.toFixed(2)} / --`;
+            }
+
+            // Reload athletes to show updated status
+            await loadAthletes();
+        } else {
+            // Test completed or stopped
+            clearInterval(updateInterval);
+            if (countdownInterval) clearInterval(countdownInterval);
+
+            // Redirect to results
+            window.location.href = `/beep-test/results/${SESSION_ID}`;
+        }
+    } catch (e) {
+        console.error('Error updating status:', e);
+    }
+}
+
+function updateCountdown() {
+    // Only decrement during RECOVERY phase
+    if (currentPhase === 'recovery' && countdown > 0) {
+        countdown--;
+        // Update display
+        document.getElementById('shuttleTime').textContent =
+            `${shuttleTimeMax.toFixed(2)} / ${Math.max(0, countdown)}`;
+    }
+}
+
+async function loadAthletes() {
+    const response = await fetch(`/api/beep-test/athletes/${SESSION_ID}`);
+    const athletes = await response.json();
+
+    // Sort: active first, failed at bottom
+    athletes.sort((a, b) => {
+        if (a.status === 'active' && b.status !== 'active') return -1;
+        if (a.status !== 'active' && b.status === 'active') return 1;
+        return a.athlete_name.localeCompare(b.athlete_name);
+    });
+
+    // Count active and failed
+    const activeCount = athletes.filter(a => a.status === 'active').length;
+    const failedCount = athletes.filter(a => a.status === 'failed').length;
+
+    document.getElementById('activeCount').textContent = activeCount;
+    document.getElementById('failedCount').textContent = failedCount;
+
+    // Render athlete list
+    let html = '';
+    athletes.forEach(athlete => {
+        const isActive = athlete.status === 'active';
+        const badgeClass = isActive ? 'bg-success' : 'bg-danger';
+        const badgeText = isActive ? 'ACTIVE' : 'FAILED';
+        const btnClass = isActive ? 'btn-danger' : 'btn-success';
+        const btnIcon = isActive ? 'fa-times' : 'fa-redo';
+        const btnText = isActive ? 'FAIL' : 'REACTIVATE';
+        const rowClass = isActive ? '' : 'opacity-50';
+
+        html += `
+            <div class="list-group-item d-flex justify-content-between align-items-center ${rowClass}">
+                <div>
+                    <h6 class="mb-1">${athlete.athlete_name}</h6>
+                    <span class="badge ${badgeClass}">${badgeText}</span>
+                    ${!isActive && athlete.level_failed ?
+                        `<span class="text-muted small ms-2">Failed at Level ${athlete.level_failed}, Shuttle ${athlete.shuttle_failed_on}</span>`
+                        : ''}
+                </div>
+                <button class="btn ${btnClass}" onclick="toggleAthlete('${athlete.athlete_id}', '${athlete.status}')">
+                    <i class="fas ${btnIcon}"></i> ${btnText}
+                </button>
+            </div>
+        `;
+    });
+
+    document.getElementById('athletesList').innerHTML = html;
+}
+
+async function toggleAthlete(athleteId, currentStatus) {
+    const response = await fetch('/api/beep-test/toggle-athlete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            session_id: SESSION_ID,
+            athlete_id: athleteId,
+            current_status: currentStatus
+        })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+        // Reload athletes to show updated status
+        await loadAthletes();
+    } else {
+        alert('Error toggling athlete: ' + (result.error || 'Unknown error'));
+    }
+}
+
+function updateElapsedTime() {
+    if (!startTime) return;
+
+    const now = new Date();
+    const elapsed = Math.floor((now - startTime) / 1000);
+    const minutes = Math.floor(elapsed / 60);
+    const seconds = elapsed % 60;
+
+    document.getElementById('elapsedTime').textContent =
+        `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
+// END TEST EARLY button handler (when status is 'active')
+{% if session.status == 'active' %}
+document.getElementById('endTestBtn').addEventListener('click', async function() {
+    if (!confirm('Are you sure you want to end the test early?')) {
+        return;
+    }
+
+    this.disabled = true;
+    this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
+
+    const response = await fetch('/api/beep-test/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            session_id: SESSION_ID,
+            reason: 'Stopped by coach'
+        })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+        clearInterval(updateInterval);
+        if (countdownInterval) clearInterval(countdownInterval);
+        // Redirect to results
+        window.location.href = `/beep-test/results/${SESSION_ID}`;
+    } else {
+        alert('Error stopping test: ' + (result.error || 'Unknown error'));
+        this.disabled = false;
+        this.innerHTML = '<i class="fas fa-stop"></i> END TEST EARLY';
+    }
+});
+{% endif %}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    if (updateInterval) {
+        clearInterval(updateInterval);
+    }
+    if (countdownInterval) {
+        clearInterval(countdownInterval);
+    }
+});
+</script>
+{% endblock %}

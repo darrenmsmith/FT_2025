@@ -87,13 +87,19 @@
                                     </p>
                                 </div>
                                 <div class="text-end">
-                                    <div class="badge bg-info fs-6">
-                                        {% if activity.total_time %}
-                                            {{ "%.2f"|format(activity.total_time) }}s
-                                        {% else %}
-                                            N/A
-                                        {% endif %}
-                                    </div>
+                                    {% if activity.activity_type == 'beep_test' %}
+                                        <div class="badge bg-success fs-6">
+                                            <i class="bi bi-heart-pulse"></i> Completed
+                                        </div>
+                                    {% else %}
+                                        <div class="badge bg-info fs-6">
+                                            {% if activity.total_time %}
+                                                {{ "%.2f"|format(activity.total_time) }}s
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
                                     <div>
                                         <small class="text-muted">{{ activity.time_ago }}</small>
                                     </div>
@@ -159,7 +165,13 @@
                                     <th style="width: 60px;">Rank</th>
                                     <th>Athlete</th>
                                     <th>Team</th>
-                                    <th style="width: 120px;">Best Time</th>
+                                    <th style="width: 120px;">
+                                        {% if course.ranking_type == 'beep_test' %}
+                                            Best Level
+                                        {% else %}
+                                            Best Time
+                                        {% endif %}
+                                    </th>
                                     <th style="width: 150px;">PR Date</th>
                                 </tr>
                             </thead>
@@ -176,13 +188,17 @@
                                     <td><strong>{{ athlete.athlete_name }}</strong></td>
                                     <td><small class="text-muted">{{ athlete.team_name }}</small></td>
                                     <td>
-                                        <span class="badge bg-info fs-6">
-                                            {% if athlete.best_time %}
+                                        {% if athlete.best_level is not none %}
+                                            <span class="badge bg-success fs-6">
+                                                Level {{ athlete.best_level }}
+                                            </span>
+                                        {% elif athlete.best_time %}
+                                            <span class="badge bg-info fs-6">
                                                 {{ "%.2f"|format(athlete.best_time) }}s
-                                            {% else %}
-                                                N/A
-                                            {% endif %}
-                                        </span>
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-secondary fs-6">N/A</span>
+                                        {% endif %}
                                     </td>
                                     <td>
                                         <small class="text-muted">
@@ -210,13 +226,17 @@
                                                 <small class="text-muted">{{ athlete.team_name }}</small>
                                             </div>
                                             <div style="width: 120px;" class="text-center">
-                                                <span class="badge bg-info fs-6">
-                                                    {% if athlete.best_time %}
+                                                {% if athlete.best_level is not none %}
+                                                    <span class="badge bg-success fs-6">
+                                                        Level {{ athlete.best_level }}
+                                                    </span>
+                                                {% elif athlete.best_time %}
+                                                    <span class="badge bg-info fs-6">
                                                         {{ "%.2f"|format(athlete.best_time) }}s
-                                                    {% else %}
-                                                        N/A
-                                                    {% endif %}
-                                                </span>
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary fs-6">N/A</span>
+                                                {% endif %}
                                             </div>
                                             <div style="width: 150px;" class="text-center">
                                                 <small class="text-muted">
@@ -349,9 +369,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         </p>
                     </div>
                     <div class="text-end">
-                        <div class="badge bg-info fs-6">
-                            ${activity.total_time ? activity.total_time.toFixed(2) + 's' : 'N/A'}
-                        </div>
+                        ${activity.activity_type === 'beep_test'
+                            ? '<div class="badge bg-success fs-6"><i class="bi bi-heart-pulse"></i> Completed</div>'
+                            : `<div class="badge bg-info fs-6">${activity.total_time ? activity.total_time.toFixed(2) + 's' : 'N/A'}</div>`
+                        }
                         <div>
                             <small class="text-muted">${activity.time_ago}</small>
                         </div>
