@@ -1,0 +1,17 @@
+{
+    "network_mode": {
+        "current": "online",
+        "auto_switch": true
+    },
+    "monitoring": {
+        "internet_check_interval": 60,
+        "internet_check_retries": 3,
+        "failback_delay": 300
+    },
+    "access_point": {
+        "enabled": false,
+        "ssid": "Field_Trainer",
+        "password": "RaspberryField2025",
+        "ip": "192.168.10.1"
+    }
+}

@@ -230,6 +230,41 @@ def connect_to_device0(node_id):
                                     else:
                                         print(f"✗ Failed to play audio: {audio_file}")
 
+                            # Process calibration command if present
+                            if "cmd" in data and data["cmd"] == "calibrate":
+                                action = data.get("action", "")
+                                if action == "set_threshold":
+                                    new_threshold = data.get("threshold")
+                                    if new_threshold:
+                                        print(f"📐 Received calibration command: set threshold to {new_threshold}")
+                                        try:
+                                            # Update touch sensor threshold
+                                            touch_sensor.threshold = new_threshold
+
+                                            # Save to calibration file
+                                            import os
+                                            os.makedirs("/opt/field_trainer/config", exist_ok=True)
+                                            ip_suffix = node_id.split('.')[-1]  # "101" from "192.168.99.101"
+                                            cal_file = f"/opt/field_trainer/config/touch_cal_device{ip_suffix}.json"
+
+                                            # Read existing calibration or create new
+                                            cal_data = {}
+                                            if os.path.exists(cal_file):
+                                                with open(cal_file, 'r') as f:
+                                                    cal_data = json.load(f)
+
+                                            # Update threshold
+                                            cal_data['threshold'] = new_threshold
+                                            cal_data['device_id'] = node_id
+
+                                            # Write back
+                                            with open(cal_file, 'w') as f:
+                                                json.dump(cal_data, f, indent=2)
+
+                                            print(f"✓ Threshold updated to {new_threshold} and saved to {cal_file}")
+                                        except Exception as e:
+                                            print(f"✗ Failed to update threshold: {e}")
+
                             # Update current action assignment and touch detection state
                             action = data.get("action")
                             course_status = data.get("course_status", "Inactive")

@@ -47,7 +47,8 @@ class TouchSensor:
         self.running = False
         self.sensor_thread = None
         self.last_touch_time = 0
-        self.touch_debounce = 0.5  # Minimum seconds between touches
+        # D0 needs lower debounce for responsive pattern completion
+        self.touch_debounce = 0.1 if device_id == "192.168.99.100" else 1.0  # Minimum seconds between touches
         
         # Calibration data
         self.baseline = {"x": 0, "y": 0, "z": 0}

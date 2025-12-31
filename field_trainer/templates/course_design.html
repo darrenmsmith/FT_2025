@@ -539,6 +539,71 @@
             </div>
         </div>
     </div>
+
+    <hr class="section-divider">
+
+    <!-- Section 4: Advanced Settings -->
+    <div class="accordion-section" id="section-4">
+        <div class="accordion-header" onclick="toggleSection(4)">
+            <div class="accordion-left">
+                <div class="accordion-info">
+                    <div class="accordion-title">Advanced Settings</div>
+                    <div class="accordion-subtitle">Custom drill behaviors and pattern modes (optional)</div>
+                </div>
+            </div>
+            <div class="accordion-right">
+                <span class="accordion-check" style="display:none;">✓</span>
+                <span class="accordion-arrow">▼</span>
+            </div>
+        </div>
+        <div class="accordion-body">
+            <!-- Course Mode -->
+            <div class="form-group">
+                <label for="courseMode">
+                    <strong>Course Mode</strong>
+                    <small class="text-muted d-block">How athletes progress through the course</small>
+                </label>
+                <select class="form-control" id="courseModeSelect" onchange="updateModeDescription()">
+                    <option value="sequential">Sequential (Standard) - Athletes follow devices in order</option>
+                    <option value="pattern">Pattern-Based - Custom drill rules (e.g., Simon Says)</option>
+                </select>
+            </div>
+
+            <!-- Mode Description -->
+            <div class="alert alert-info" id="modeDescription" style="margin-top: 12px;">
+                <strong>Sequential Mode:</strong> Athletes touch devices in the defined order (1 → 2 → 3...). This is the standard mode for most drills.
+            </div>
+
+            <!-- Behavior Config (shown for pattern mode) -->
+            <div id="behaviorConfigSection" style="display: none; margin-top: 20px;">
+                <div class="form-group">
+                    <label for="behaviorConfig">
+                        <strong>Custom Behavior Configuration</strong>
+                        <small class="text-muted d-block">JSON format - defines custom drill rules</small>
+                    </label>
+                    <textarea class="form-control" id="behaviorConfig" rows="8" placeholder='Example for Simon Says:
+{
+  "allowed_colors": ["red", "green", "blue", "yellow"],
+  "pattern_length": 4,
+  "show_pattern_duration": 3,
+  "allow_repeats": false
+}'></textarea>
+                    <small class="form-text text-muted">
+                        <strong>Common configurations:</strong><br>
+                        • <code>allowed_colors</code>: Array of colors for pattern drills<br>
+                        • <code>pattern_length</code>: Number of steps in pattern<br>
+                        • <code>show_pattern_duration</code>: Seconds to display pattern<br>
+                        • <code>allow_repeats</code>: Can same color appear twice in a row
+                    </small>
+                </div>
+
+                <!-- Validation Status -->
+                <div id="jsonValidation" style="display: none; padding: 10px; border-radius: 6px; margin-top: 8px;">
+                    <small><span id="jsonValidationText"></span></small>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Sticky Footer -->
@@ -576,6 +641,28 @@ if (courseData && (courseMode === 'edit' || courseMode === 'duplicate')) {
     if (courseData.category) document.getElementById('courseCategory').value = courseData.category;
     if (courseData.layout_instructions) document.getElementById('courseInstruction').value = courseData.layout_instructions;
     if (courseData.distance_unit) document.getElementById('distanceUnit').value = courseData.distance_unit;
+
+    // Load advanced settings
+    if (courseData.mode) {
+        document.getElementById('courseModeSelect').value = courseData.mode;
+        updateModeDescription();
+    }
+
+    // Load behavior_config if present (from first action that has it)
+    if (courseData.actions && courseData.actions.length > 0) {
+        const actionWithConfig = courseData.actions.find(a => a.behavior_config);
+        if (actionWithConfig && actionWithConfig.behavior_config) {
+            try {
+                const config = typeof actionWithConfig.behavior_config === 'string'
+                    ? JSON.parse(actionWithConfig.behavior_config)
+                    : actionWithConfig.behavior_config;
+                document.getElementById('behaviorConfig').value = JSON.stringify(config, null, 2);
+                validateJSON();
+            } catch (e) {
+                console.error('Error loading behavior config:', e);
+            }
+        }
+    }
 
     if (courseData.actions && courseData.actions.length > 0) {
         devices = courseData.actions.map(a => ({
@@ -967,6 +1054,61 @@ function setupDragging() {
         }
     });
 }
+
+// ==================== ADVANCED SETTINGS FUNCTIONS ====================
+
+function updateModeDescription() {
+    const mode = document.getElementById('courseModeSelect').value;
+    const descEl = document.getElementById('modeDescription');
+    const behaviorSection = document.getElementById('behaviorConfigSection');
+
+    if (mode === 'pattern') {
+        descEl.className = 'alert alert-warning';
+        descEl.innerHTML = '<strong>Pattern Mode:</strong> Athletes must follow custom rules (e.g., touch cones in a specific color sequence). Requires behavior configuration below.';
+        behaviorSection.style.display = 'block';
+    } else {
+        descEl.className = 'alert alert-info';
+        descEl.innerHTML = '<strong>Sequential Mode:</strong> Athletes touch devices in the defined order (1 → 2 → 3...). This is the standard mode for most drills.';
+        behaviorSection.style.display = 'none';
+    }
+}
+
+function validateJSON() {
+    const behaviorConfig = document.getElementById('behaviorConfig').value.trim();
+    const validationDiv = document.getElementById('jsonValidation');
+    const validationText = document.getElementById('jsonValidationText');
+
+    if (!behaviorConfig) {
+        validationDiv.style.display = 'none';
+        return true;
+    }
+
+    try {
+        JSON.parse(behaviorConfig);
+        validationDiv.style.display = 'block';
+        validationDiv.style.backgroundColor = '#d4edda';
+        validationDiv.style.color = '#155724';
+        validationText.innerHTML = '✓ Valid JSON format';
+        return true;
+    } catch (e) {
+        validationDiv.style.display = 'block';
+        validationDiv.style.backgroundColor = '#f8d7da';
+        validationDiv.style.color = '#721c24';
+        validationText.innerHTML = '✗ Invalid JSON: ' + e.message;
+        return false;
+    }
+}
+
+// Add real-time validation
+document.addEventListener('DOMContentLoaded', () => {
+    const behaviorConfigField = document.getElementById('behaviorConfig');
+    if (behaviorConfigField) {
+        behaviorConfigField.addEventListener('input', validateJSON);
+    }
+});
+
+// ==================== SAVE COURSE FUNCTION ====================
+
 async function saveCourse() {
     console.log('💾 SAVE COURSE - v5');
     
@@ -983,7 +1125,35 @@ async function saveCourse() {
         document.getElementById('section-1').classList.add('expanded');
         return;
     }
-    
+
+    // Get advanced settings
+    const selectedMode = document.getElementById('courseModeSelect').value;
+    const behaviorConfigRaw = document.getElementById('behaviorConfig').value.trim();
+
+    // Validate behavior config if pattern mode
+    if (selectedMode === 'pattern' && !behaviorConfigRaw) {
+        alert('Pattern mode requires behavior configuration. Please add JSON config in Advanced Settings.');
+        document.getElementById('section-4').classList.add('expanded');
+        return;
+    }
+
+    // Validate JSON if provided
+    if (behaviorConfigRaw && !validateJSON()) {
+        alert('Invalid JSON in behavior configuration. Please fix errors before saving.');
+        document.getElementById('section-4').classList.add('expanded');
+        return;
+    }
+
+    let behaviorConfig = null;
+    if (behaviorConfigRaw) {
+        try {
+            behaviorConfig = JSON.parse(behaviorConfigRaw);
+        } catch (e) {
+            alert('Invalid JSON in behavior configuration: ' + e.message);
+            return;
+        }
+    }
+
     const saveData = {
         course_name: name,
         description: document.getElementById('courseDescription').value,
@@ -992,7 +1162,7 @@ async function saveCourse() {
         distance_unit: document.getElementById('distanceUnit').value,
         num_devices: devices.length,
         diagram_svg: courseDiagram || '',
-        mode: courseMode,
+        mode: selectedMode,
         course_id: courseData?.course_id || null,
         stations: devices.map((d, i) => ({
             sequence: i,
@@ -1000,7 +1170,8 @@ async function saveCourse() {
             device_name: d.device_name,
             action: d.action,
             instruction: d.instruction,
-            distance: d.distance
+            distance: d.distance,
+            behavior_config: behaviorConfig ? JSON.stringify(behaviorConfig) : null
         }))
     };
     

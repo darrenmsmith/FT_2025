@@ -86,7 +86,6 @@
                 <table class="table">
                     <thead>
                         <tr>
-                            <th>Order</th>
                             <th>Device</th>
                             <th>Action</th>
                             <th>Distance</th>
@@ -97,8 +96,13 @@
                     <tbody>
                         {% for action in course.actions %}
                         <tr>
-                            <td>{{ action.sequence + 1 }}</td>
-                            <td>{{ action.device_name }}</td>
+                            <td>
+                                {% if action.sequence == 0 %}
+                                    <strong>Start</strong>
+                                {% else %}
+                                    <strong>Cone {{ action.sequence }}</strong>
+                                {% endif %}
+                            </td>
                             <td>
                                 <span class="badge bg-primary">{{ action.action }}</span>
                             </td>

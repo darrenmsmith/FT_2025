@@ -87,9 +87,19 @@
                                     </p>
                                 </div>
                                 <div class="text-end">
-                                    <div class="badge bg-info fs-6">
-                                        {{ "%.2f"|format(activity.total_time) }}s
-                                    </div>
+                                    {% if activity.activity_type == 'beep_test' %}
+                                        <div class="badge bg-success fs-6">
+                                            <i class="bi bi-heart-pulse"></i> Completed
+                                        </div>
+                                    {% else %}
+                                        <div class="badge bg-info fs-6">
+                                            {% if activity.total_time %}
+                                                {{ "%.2f"|format(activity.total_time) }}s
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
                                     <div>
                                         <small class="text-muted">{{ activity.time_ago }}</small>
                                     </div>
@@ -155,7 +165,13 @@
                                     <th style="width: 60px;">Rank</th>
                                     <th>Athlete</th>
                                     <th>Team</th>
-                                    <th style="width: 120px;">Best Time</th>
+                                    <th style="width: 120px;">
+                                        {% if course.ranking_type == 'beep_test' %}
+                                            Best Level
+                                        {% else %}
+                                            Best Time
+                                        {% endif %}
+                                    </th>
                                     <th style="width: 150px;">PR Date</th>
                                 </tr>
                             </thead>
@@ -172,7 +188,17 @@
                                     <td><strong>{{ athlete.athlete_name }}</strong></td>
                                     <td><small class="text-muted">{{ athlete.team_name }}</small></td>
                                     <td>
-                                        <span class="badge bg-info fs-6">{{ "%.2f"|format(athlete.best_time) }}s</span>
+                                        {% if athlete.best_level is not none %}
+                                            <span class="badge bg-success fs-6">
+                                                Level {{ athlete.best_level }}
+                                            </span>
+                                        {% elif athlete.best_time %}
+                                            <span class="badge bg-info fs-6">
+                                                {{ "%.2f"|format(athlete.best_time) }}s
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-secondary fs-6">N/A</span>
+                                        {% endif %}
                                     </td>
                                     <td>
                                         <small class="text-muted">
@@ -200,7 +226,17 @@
                                                 <small class="text-muted">{{ athlete.team_name }}</small>
                                             </div>
                                             <div style="width: 120px;" class="text-center">
-                                                <span class="badge bg-info fs-6">{{ "%.2f"|format(athlete.best_time) }}s</span>
+                                                {% if athlete.best_level is not none %}
+                                                    <span class="badge bg-success fs-6">
+                                                        Level {{ athlete.best_level }}
+                                                    </span>
+                                                {% elif athlete.best_time %}
+                                                    <span class="badge bg-info fs-6">
+                                                        {{ "%.2f"|format(athlete.best_time) }}s
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary fs-6">N/A</span>
+                                                {% endif %}
                                             </div>
                                             <div style="width: 150px;" class="text-center">
                                                 <small class="text-muted">
@@ -265,6 +301,89 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+
+    // Auto-refresh dashboard stats every 10 seconds
+    async function refreshDashboard() {
+        try {
+            const response = await fetch('/api/dashboard/stats');
+            const data = await response.json();
+
+            if (data.success) {
+                // Update stats cards
+                updateStats(data.stats);
+
+                // Update recent activity
+                updateRecentActivity(data.recent_activity);
+            }
+        } catch (error) {
+            console.error('Error refreshing dashboard:', error);
+        }
+    }
+
+    function updateStats(stats) {
+        // Update total athletes
+        document.querySelector('.row .col-md-3:nth-child(1) h2').textContent = stats.total_athletes;
+        document.querySelector('.row .col-md-3:nth-child(1) small').textContent =
+            `Across ${stats.total_teams} team${stats.total_teams != 1 ? 's' : ''}`;
+
+        // Update sessions today
+        document.querySelector('.row .col-md-3:nth-child(2) h2').textContent = stats.sessions_today;
+        document.querySelector('.row .col-md-3:nth-child(2) small').textContent =
+            `${stats.runs_today} run${stats.runs_today != 1 ? 's' : ''}`;
+
+        // Update PRs
+        document.querySelector('.row .col-md-3:nth-child(3) h2').textContent = stats.prs_this_week;
+    }
+
+    function updateRecentActivity(activities) {
+        const container = document.querySelector('.list-group-flush');
+        if (!container) return;
+
+        if (activities.length === 0) {
+            // Show empty state
+            container.parentElement.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem; color: #ccc;"></i>
+                    <p class="text-muted mt-3">No recent activity</p>
+                    <a href="/session/setup" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> Start Your First Session
+                    </a>
+                </div>
+            `;
+            return;
+        }
+
+        // Update activity list
+        container.innerHTML = activities.map(activity => `
+            <div class="list-group-item">
+                <div class="d-flex w-100 justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-1">
+                            <strong>${activity.athlete_name}</strong>
+                            ${activity.is_pr ? '<span class="badge bg-warning text-dark">🏆 PR!</span>' : ''}
+                        </h6>
+                        <p class="mb-1">
+                            <small class="text-muted">
+                                <i class="bi bi-journal-code"></i> ${activity.course_name}
+                            </small>
+                        </p>
+                    </div>
+                    <div class="text-end">
+                        ${activity.activity_type === 'beep_test'
+                            ? '<div class="badge bg-success fs-6"><i class="bi bi-heart-pulse"></i> Completed</div>'
+                            : `<div class="badge bg-info fs-6">${activity.total_time ? activity.total_time.toFixed(2) + 's' : 'N/A'}</div>`
+                        }
+                        <div>
+                            <small class="text-muted">${activity.time_ago}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Start auto-refresh (every 10 seconds)
+    setInterval(refreshDashboard, 10000);
 });
 </script>
 

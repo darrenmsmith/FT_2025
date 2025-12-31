@@ -261,6 +261,97 @@ def api_audio_play():
         REGISTRY.log(f"Audio API error: {e}", level="error")
         return jsonify({"success": False, "error": "Audio request failed"}), 500
 
+
+# ---------------------- Network Info API ----------------
+
+@app.route('/api/settings/network-info', methods=['GET'])
+def get_network_info():
+    """Get current network connection info (Ethernet/WiFi/AP Mode)"""
+    try:
+        import json
+        import os
+        import subprocess
+
+        connection_type = "Unknown"
+        connection_name = "Unknown"
+        interface = "unknown"
+
+        # Check for Ethernet (eth0) with IP address
+        try:
+            eth_result = subprocess.run(
+                ['ip', 'addr', 'show', 'eth0'],
+                capture_output=True, text=True, timeout=2
+            )
+            if eth_result.returncode == 0 and 'inet ' in eth_result.stdout:
+                # eth0 has an IP address
+                connection_type = "Ethernet"
+                connection_name = "Ethernet (eth0)"
+                interface = "eth0"
+                return jsonify({
+                    'success': True,
+                    'ssid': connection_name,
+                    'connection_type': connection_type,
+                    'interface': interface
+                })
+        except:
+            pass
+
+        # Check network manager mode (AP mode vs online)
+        network_mode = "online"
+        config_file = '/opt/data/network-config.json'
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    network_mode = config.get('network_mode', {}).get('current', 'online')
+            except:
+                pass
+
+        # If in AP (offline) mode
+        if network_mode == 'offline':
+            connection_type = "Access Point"
+            connection_name = "Field_Trainer (AP Mode)"
+            interface = "wlan1"
+            return jsonify({
+                'success': True,
+                'ssid': connection_name,
+                'connection_type': connection_type,
+                'interface': interface
+            })
+
+        # Try to get WiFi SSID from wlan1 (primary WiFi)
+        try:
+            wlan1_result = subprocess.run(
+                ['iwgetid', 'wlan1', '-r'],
+                capture_output=True, text=True, timeout=2
+            )
+            if wlan1_result.returncode == 0 and wlan1_result.stdout.strip():
+                ssid = wlan1_result.stdout.strip()
+                connection_type = "WiFi"
+                connection_name = f"{ssid} (WiFi)"
+                interface = "wlan1"
+                return jsonify({
+                    'success': True,
+                    'ssid': connection_name,
+                    'connection_type': connection_type,
+                    'interface': interface
+                })
+        except:
+            pass
+
+        # Fallback: Not connected
+        return jsonify({
+            'success': True,
+            'ssid': 'Not connected',
+            'connection_type': 'None',
+            'interface': 'none'
+        })
+
+    except Exception as e:
+        REGISTRY.log(f"Network info error: {e}", level="error")
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
 # ---------------------- Optional Device Control ----------------
 # (Enable later if you add UI controls for device LEDs/audio/time.)
 
@@ -281,6 +372,25 @@ def api_audio_play():
 #     data = request.get_json(force=True) or {}
 #     ok = REGISTRY.sync_time(data.get("node_id"), data.get("controller_ms"))
 #     return jsonify({"success": ok})
+
+@app.post("/api/send_command")
+def api_send_command():
+    """Send a command to a specific node via REGISTRY"""
+    data = request.get_json(force=True) or {}
+    node_id = data.get("node_id")
+    command = data.get("command")
+
+    if not node_id or not command:
+        return jsonify({"success": False, "error": "Missing node_id or command"}), 400
+
+    try:
+        success = REGISTRY.send_to_node(node_id, command)
+        if success:
+            return jsonify({"success": True})
+        else:
+            return jsonify({"success": False, "error": f"Failed to send command to {node_id}"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # ----------------------- Local dev entry -----------------------
 
