@@ -46,6 +46,10 @@ class Registry:
         # Course state
         self.course_status: str = "Inactive"
         self.selected_course: Optional[str] = None
+
+        # Error feedback state (Option A: blocks heartbeat LED commands during error feedback)
+        self.error_feedback_active: bool = False
+
         # courses loaded after DB init below
         self.assignments: Dict[str, str] = {}  # node_id -> action
         self.device_0_action: Optional[str] = None  # virtual Device 0 state marker
@@ -108,9 +112,17 @@ class Registry:
                         "instruction": action.get('instruction', '')
                     })
                 
+                # Include behavior_config for Simon Says
+                for i, action in enumerate(course['actions']):
+                    if action.get('behavior_config'):
+                        stations[i]['behavior_config'] = action['behavior_config']
+
                 courses_list.append({
                     "name": course['course_name'],
+                    "course_name": course['course_name'],  # Add for consistency
                     "description": course.get('description', ''),
+                    "course_type": course.get('course_type', 'sequence'),  # NEW: Load course_type
+                    "mode": course.get('mode', 'sequential'),  # NEW: Load mode
                     "stations": stations
                 })
             
@@ -120,6 +132,16 @@ class Registry:
         except Exception as e:
             self.log(f"Failed to load courses from database: {e}", level="error")
             return {"courses": []}
+
+    def reload_courses(self) -> bool:
+        """Reload courses from database (call after creating/editing courses)"""
+        try:
+            self.courses = self._load_courses_from_db() if self.db else load_courses()
+            self.log(f"Courses reloaded - {len(self.courses.get('courses', []))} courses available")
+            return True
+        except Exception as e:
+            self.log(f"Failed to reload courses: {e}", level="error")
+            return False
 
 	# ---------------- Utilities ----------------
 
@@ -161,16 +183,8 @@ class Registry:
             if writer is not None:
                 n._writer = writer
 
-        # Handle touch events (Phase 1)
-            if fields.get('touch_detected'):
-                touch_timestamp = fields.get('touch_timestamp', time.time())
-
-                # Handle asynchronously to not block heartbeat
-                threading.Thread(
-                    target=self.handle_touch_event,
-                    args=(node_id, touch_timestamp),
-                    daemon=True
-                ).start()
+        # Note: Touch events are handled in ft_heartbeat.py to avoid duplicate processing
+        # The heartbeat handler calls handle_touch_event() directly when touch_detected=True
 
     # ---------------- Snapshot for UI ----------------
 
@@ -284,6 +298,8 @@ class Registry:
                     "off": LEDState.OFF,
                     "solid_green": LEDState.SOLID_GREEN,
                     "solid_red": LEDState.SOLID_RED,
+                    "solid_blue": LEDState.SOLID_BLUE,
+                    "solid_amber": LEDState.SOLID_ORANGE,
                     "blink_amber": LEDState.BLINK_ORANGE,
                     "rainbow": LEDState.RAINBOW,
                 }
@@ -292,12 +308,26 @@ class Registry:
             self.log(f"Device 0 LED set -> {pattern}")
             return True
 
+        # Update registry FIRST to prevent heartbeat race condition
+        with self.nodes_lock:
+            if node_id in self.nodes:
+                self.nodes[node_id].led_pattern = pattern
+            else:
+                print(f"⚠️  Node {node_id} not in registry - cannot set pattern!")
+                return False
+
+        # Now send the command
         ok = self.send_to_node(node_id, {"cmd": "led", "pattern": pattern})
         if ok:
+            print(f"✅ LED pattern set: {node_id} → {pattern}")
+        else:
+            print(f"❌ send_to_node returned False for {node_id}")
+            # Revert the pattern since send failed
             with self.nodes_lock:
                 if node_id in self.nodes:
-                    self.nodes[node_id].led_pattern = pattern
+                    self.nodes[node_id].led_pattern = None
         return ok
+
     def play_audio(self, node_id: str, clip: str) -> bool:
         """
         Ask a device to play a logical clip identifier (device maps to actual file).
@@ -349,12 +379,12 @@ class Registry:
             if not course:
                 return {"success": False, "error": "Course not found"}
 
-            # Stop previous
-            self.log("Clearing previous course assignments")
+            # Stop previous course (if any)
             old_assignments = self.assignments.copy()
-            for node_id in old_assignments.keys():
-                if node_id != "192.168.99.100":
-                    self.send_to_node(node_id, {"cmd": "stop", "action": None})
+            if old_assignments:
+                for node_id in old_assignments.keys():
+                    if node_id != "192.168.99.100":
+                        self.send_to_node(node_id, {"cmd": "stop", "action": None})
 
             # Reset local state
             with self.nodes_lock:
@@ -377,7 +407,9 @@ class Registry:
             if d0:
                 self.device_0_action = d0["action"]
 
-            self.log(f"Deployed course '{course_name}' with {len(self.assignments)} stations")
+            # Log course type for debugging
+            course_type = course.get("course_type", "sequence")
+            self.log(f"Deployed course '{course_name}' with {len(self.assignments)} stations (type={course_type})")
 
             # Notify connected devices (skip Device 0)
             success = 0
@@ -387,11 +419,13 @@ class Registry:
                         success += 1
 
             # Mark unassigned devices as inactive
-            with self.nodes_lock:
-                for node_id in self.nodes.keys():
-                    if node_id not in self.assignments and node_id != "192.168.99.100":
-                        self.send_to_node(node_id, {"deploy": True, "action": None, "course": course_name, "status": "inactive"})
-                        self.log(f"Set {node_id} to inactive (not in course)")
+            # DISABLED: This can cause TCP blocking on partial deployments
+            # TODO: Make this async or add proper timeout handling
+            # with self.nodes_lock:
+            #     for node_id in self.nodes.keys():
+            #         if node_id not in self.assignments and node_id != "192.168.99.100":
+            #             self.send_to_node(node_id, {"deploy": True, "action": None, "course": course_name, "status": "inactive"})
+            #             self.log(f"Set {node_id} to inactive (not in course)")
 
             self.log(f"Deployment sent to {success}/{max(0, len(self.assignments)-1)} client devices")
             print(f"📊 DEPLOY SUMMARY:")
@@ -399,7 +433,68 @@ class Registry:
             print(f"   Devices assigned: {len(self.assignments)}")
             print(f"   Successfully notified: {success}")
             print(f"   Course status: {self.course_status}")
-            print("="*80 + "\n")            
+            print("="*80 + "\n")
+
+            # Apply course_type-specific deploy behavior
+            if course_type == "state_changing":
+                # STATE CHANGING (Simon Says): Set assigned colors → Wait → Beep
+                self.log("📍 Setting assigned colors for Simon Says pattern mode")
+                import time
+                import json
+                import requests
+
+                # Map colors to LED patterns
+                color_to_pattern = {
+                    'red': 'solid_red',
+                    'green': 'solid_green',
+                    'blue': 'solid_blue',
+                    'yellow': 'solid_yellow',
+                    'orange': 'solid_amber',
+                    'white': 'solid_white',
+                    'purple': 'solid_purple',
+                    'cyan': 'solid_cyan'
+                }
+
+                # Set each device to its assigned color
+                for station in course.get("stations", []):
+                    device_id = station.get("node_id")
+                    if device_id == "192.168.99.100":
+                        continue  # Skip Device 0
+
+                    behavior_config = station.get("behavior_config")
+                    if behavior_config:
+                        try:
+                            # Parse behavior_config (may be string or dict)
+                            if isinstance(behavior_config, str):
+                                config = json.loads(behavior_config)
+                            else:
+                                config = behavior_config
+
+                            color = config.get('color')
+                            if color:
+                                pattern = color_to_pattern.get(color.lower())
+                                if pattern:
+                                    self.set_led(device_id, pattern)
+                                    self.log(f"   {device_id} → {color.upper()} ({pattern})")
+                                    time.sleep(2.0)  # Space out LED commands
+                        except Exception as e:
+                            self.log(f"Error setting color for {device_id}: {e}", level="error")
+
+                self.log("⏱️  Waiting 5 seconds for devices to display assigned colors...")
+                time.sleep(5.0)
+                self.log("✓ Assigned colors displayed")
+
+            elif course_type == "sequence":
+                # SEQUENCE (Warm-up): Beep immediately - course is ready
+                self.log("📋 Sequence course - ready immediately")
+                import requests
+                try:
+                    requests.post('http://localhost:5000/api/audio/play',
+                                  json={'node_id': '192.168.99.100', 'clip': 'default_beep'},
+                                  timeout=2)
+                    self.log("🔊 Beep - Course ready!")
+                except Exception as e:
+                    self.log(f"Failed to play beep: {e}", level="error")
 
             return {"success": True, "course_status": self.course_status, "deployed_to": success}
 
@@ -457,6 +552,7 @@ class Registry:
                     self.send_to_node(node_id, {"cmd": "stop"})
 
             self.course_status = "Inactive"
+
             # Update server LED to amber (idle)
             if self._server_led:
                 from .ft_led import LEDState

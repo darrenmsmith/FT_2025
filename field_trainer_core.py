@@ -802,8 +802,10 @@ class Registry:
             if device_0_station:
                 self.device_0_action = device_0_station["action"]
             
-            self.log(f"Deployed course '{course_name}' with {len(self.assignments)} stations")
-            
+            # Log course type for debugging
+            course_type = course.get("course_type", "unknown")
+            self.log(f"Deployed course '{course_name}' with {len(self.assignments)} stations (type={course_type})")
+
             # Send deployment to connected devices (skip Device 0)
             success_count = 0
             for node_id, action in self.assignments.items():
@@ -825,6 +827,85 @@ class Registry:
                         
             self.log(f"Deployment sent to {success_count}/{len(self.assignments)-1} client devices")
             self.log(f"Devices not in course returned to standby")
+
+            # Apply course_type-specific deploy behavior
+            course_type = course.get("course_type", "sequence")
+
+            if course_type == "state_changing":
+                # STATE CHANGING (Simon Says): Green → Assigned colors → Wait → Beep
+                self.log("📍 State Changing course detected - setting assigned colors")
+                import time
+                import json
+
+                # Map colors to LED patterns
+                color_to_pattern = {
+                    'red': 'solid_red',
+                    'green': 'solid_green',
+                    'blue': 'solid_blue',
+                    'yellow': 'solid_yellow',
+                    'white': 'solid_white',
+                    'purple': 'solid_purple',
+                    'cyan': 'solid_cyan',
+                    'orange': 'solid_amber'
+                }
+
+                # Set each device to its assigned color
+                for station in course.get("stations", []):
+                    device_id = station.get("node_id")
+                    if device_id == "192.168.99.100":  # Skip Device 0
+                        continue
+
+                    behavior_config = station.get("behavior_config")
+                    if behavior_config:
+                        try:
+                            # Parse behavior_config (it's stored as JSON string)
+                            if isinstance(behavior_config, str):
+                                config = json.loads(behavior_config)
+                            else:
+                                config = behavior_config
+
+                            color = config.get('color')
+                            if color:
+                                pattern = color_to_pattern.get(color.lower(), 'solid_green')
+                                self.set_led(device_id, pattern)
+                                self.log(f"   {device_id} → {color.upper()} ({pattern})")
+                                time.sleep(2.0)  # Space out commands
+                        except Exception as e:
+                            self.log(f"   Failed to set color for {device_id}: {e}", level="warning")
+
+                self.log("⏱️  Waiting 10 seconds for devices to display assigned colors...")
+                time.sleep(10.0)
+
+                # Beep to signal ready
+                try:
+                    import requests
+                    requests.post(
+                        'http://localhost:5000/api/audio/play',
+                        json={'node_id': '192.168.99.100', 'clip': 'default_beep'},
+                        timeout=2
+                    )
+                    self.log("🔊 Beep - Course ready!")
+                except Exception as e:
+                    self.log(f"Beep failed: {e}", level="warning")
+
+            elif course_type == "sequence":
+                # SEQUENCE (Warm-up): Green → Beep immediately
+                self.log("📋 Sequence course - ready immediately")
+                try:
+                    import requests
+                    requests.post(
+                        'http://localhost:5000/api/audio/play',
+                        json={'node_id': '192.168.99.100', 'clip': 'default_beep'},
+                        timeout=2
+                    )
+                    self.log("🔊 Beep - Course ready!")
+                except Exception as e:
+                    self.log(f"Beep failed: {e}", level="warning")
+
+            elif course_type == "paired":
+                # PAIRED (future): TBD
+                self.log("🔗 Paired course - deploy complete")
+
             return {"success": True, "course_status": self.course_status, "deployed_to": success_count}
             
         except Exception as e:
@@ -835,23 +916,32 @@ class Registry:
         """Activate the deployed course with LED state management"""
         try:
             course_name = course_name or self.selected_course
-            
+
             if not course_name:
                 return {"success": False, "error": "No course selected"}
-                
+
             self.course_status = "Active"
             self.log(f"Activated course '{course_name}' - Circuit training ready")
-            
+
             # Send activation to assigned devices (Device 0 doesn't need TCP activation)
             success_count = 0
             for node_id in self.assignments.keys():
                 if node_id != "192.168.99.100":  # Skip Device 0
-                    if self.send_to_node(node_id, {"cmd": "start"}):
+                    if self.send_to_node(node_id, {"cmd": "start", "course_status": "Active"}):
                         success_count += 1
-            
-            # LED: Set active state (green)
-            self.led_manager.set_global_state(LEDState.COURSE_ACTIVE)
-            
+
+            # LED: Set active state (green) - UNLESS state_changing course
+            # For state_changing courses, LEDs were already set to assigned colors in deploy
+            course = next((c for c in self.courses if c.get("course_name") == course_name), None)
+            course_type = course.get("course_type", "sequence") if course else "sequence"
+
+            if course_type != "state_changing":
+                # Regular courses: Set all to green
+                self.led_manager.set_global_state(LEDState.COURSE_ACTIVE)
+            else:
+                # State changing: Keep assigned colors, don't override with green
+                self.log("   (Keeping assigned colors - not setting global green)")
+
             self.log(f"Activation sent to {success_count}/{len(self.assignments)-1} client devices")
             return {"success": True, "course_status": self.course_status}
             

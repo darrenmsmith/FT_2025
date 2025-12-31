@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+{% block title %}Setup Cones - Field Trainer{% endblock %}
+
+{% block extra_css %}
+<style>
+    .cone-diagram {
+        background: white;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    .cone-status-box {
+        display: flex;
+        align-items: center;
+        padding: 12px;
+        margin: 8px 0;
+        border-radius: 6px;
+        border-left: 4px solid #ccc;
+    }
+    .cone-status-box.ready {
+        background: #fff3cd;
+        border-left-color: #FF9800;
+    }
+    .cone-status-box.deployed {
+        background: #d4edda;
+        border-left-color: #28a745;
+    }
+    .status-indicator {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-right: 12px;
+    }
+    .status-amber { background: #FF9800; }
+    .status-green { background: #28a745; }
+    .step-progress {
+        display: flex;
+        justify-content: center;
+        margin: 20px 0;
+    }
+    .step {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: #e9ecef;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 10px;
+        font-weight: bold;
+    }
+    .step.active { background: #007bff; color: white; }
+    .step.complete { background: #28a745; color: white; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="step-progress">
+        <div class="step complete">1</div>
+        <div class="step active">2</div>
+        <div class="step">3</div>
+    </div>
+    
+    <h2 class="text-center mb-4">
+        <i class="fas fa-map-marker-alt"></i> Setup Cones
+    </h2>
+    
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5>{{ course.course_name }}</h5>
+            <p class="text-muted">{{ course.description or 'No description' }}</p>
+            <div class="row">
+                <div class="col-md-4">
+                    <strong>Category:</strong> {{ course.category }}
+                </div>
+                <div class="col-md-4">
+                    <strong>Devices:</strong> {{ course.num_devices }}
+                </div>
+                <div class="col-md-4">
+                    <strong>Distance:</strong> {{ course.total_distance }} {{ course.distance_unit }}
+                </div>
+            </div>
+
+            {% if course.mode == 'pattern' %}
+            <!-- Pattern Length Selector for Simon Says -->
+            <div class="alert alert-info mt-3">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <label for="patternLength" class="form-label mb-0">
+                            <i class="fas fa-list-ol"></i> <strong>Pattern Length:</strong>
+                        </label>
+                        <small class="text-muted d-block">How many steps in the pattern?</small>
+                    </div>
+                    <div class="col-md-6">
+                        <select id="patternLength" class="form-select form-select-lg">
+                            <option value="4" selected>4 Step Pattern</option>
+                            <option value="5">5 Step Pattern</option>
+                            <option value="6">6 Step Pattern</option>
+                            <option value="7">7 Step Pattern</option>
+                            <option value="8">8 Step Pattern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if course.mode == 'group' %}
+            <!-- Beep Test Configuration -->
+            <div class="alert alert-primary mt-3">
+                <h6 class="mb-3"><i class="fas fa-heartbeat"></i> <strong>Beep Test Configuration</strong></h6>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label mb-2">
+                            <i class="fas fa-ruler"></i> <strong>Distance:</strong>
+                        </label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="beepDistance" id="distance20m" value="20" checked>
+                            <label class="btn btn-outline-primary" for="distance20m">20 meters</label>
+                            <input type="radio" class="btn-check" name="beepDistance" id="distance15m" value="15">
+                            <label class="btn btn-outline-primary" for="distance15m">15 meters</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="deviceCount" class="form-label mb-2">
+                            <i class="fas fa-circle"></i> <strong>Device Count:</strong>
+                        </label>
+                        <select id="deviceCount" class="form-select">
+                            <option value="2">2 devices (1 at each end)</option>
+                            <option value="4" selected>4 devices (2 at each end)</option>
+                            <option value="6">6 devices (3 at each end)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <label for="startLevel" class="form-label mb-2">
+                            <i class="fas fa-flag-checkered"></i> <strong>Start Level:</strong>
+                        </label>
+                        <select id="startLevel" class="form-select">
+                            {% for level in range(1, 22) %}
+                            <option value="{{ level }}" {% if level == 1 %}selected{% endif %}>
+                                Level {{ level }} ({{ 8.0 + (level - 1) * 0.5 }} km/h)
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Diagram -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5><i class="fas fa-map"></i> Cone Layout Diagram</h5>
+        </div>
+        <div class="card-body">
+            <div class="cone-diagram" id="coneDiagram">
+                {{ course.diagram_svg|safe }}
+            </div>
+            
+            {% if course.layout_instructions %}
+            <div class="alert alert-info mt-3">
+                <i class="fas fa-info-circle"></i> 
+                <strong>Instructions:</strong> {{ course.layout_instructions }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Setup Instructions -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5><i class="fas fa-clipboard-list"></i> Setup Instructions</h5>
+        </div>
+        <div class="card-body">
+            <ol>
+                <li>Place cones according to the diagram above</li>
+                <li>Point each cone's arrow to the next cone in sequence</li>
+                <li>Verify all cones show <strong style="color: #FF9800;">AMBER</strong> LED</li>
+                <li>Click "Deploy Course" to confirm setup</li>
+                <li>All cones will turn <strong style="color: #28a745;">GREEN</strong> when ready</li>
+            </ol>
+        </div>
+    </div>
+    
+    <!-- Cone Status -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5><i class="fas fa-traffic-light"></i> Cone Status</h5>
+        </div>
+        <div class="card-body" id="coneStatusContainer">
+            <p class="text-center text-muted">
+                <i class="fas fa-spinner fa-spin"></i> Preparing cones...
+            </p>
+        </div>
+    </div>
+    
+    <!-- Actions -->
+    <div class="d-flex justify-content-between">
+        <a href="/teams" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Back
+        </a>
+        <button class="btn btn-success btn-lg" id="deployBtn" disabled>
+            <i class="fas fa-check-circle"></i> Deploy Course
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const sessionId = '{{ session_id }}';
+const courseId = '{{ course.course_id }}';
+let deploymentTimeout;
+let timeoutMinutes = {{ timeout_minutes }};
+
+// Prepare course (amber LEDs)
+async function prepareCourse() {
+    try {
+        const response = await fetch(`/session/${sessionId}/prepare-course`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            updateConeStatus(data.devices, 'amber');
+            document.getElementById('deployBtn').disabled = false;
+            
+            // Start timeout countdown
+            startDeploymentTimeout();
+        } else {
+            alert('Error preparing course: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Prepare error:', error);
+        alert('Failed to prepare course');
+    }
+}
+
+function updateConeStatus(devices, status) {
+    const container = document.getElementById('coneStatusContainer');
+    const isReady = (status === 'amber');
+    const isDeployed = (status === 'green');
+    
+    const html = devices.map(device => {
+        const deviceNum = device.device_id.split('.').pop();
+        const label = deviceNum === '100' ? 'Start (Device 0)' : `Cone ${parseInt(deviceNum) - 100}`;
+        const statusClass = isDeployed ? 'deployed' : 'ready';
+        const indicatorClass = isDeployed ? 'status-green' : 'status-amber';
+        const statusText = isDeployed ? 'GREEN - Deployed' : 'AMBER - Ready';
+        
+        return `
+            <div class="cone-status-box ${statusClass}">
+                <div class="status-indicator ${indicatorClass}"></div>
+                <div>
+                    <strong>${label}</strong>
+                    <span class="text-muted ms-3">${statusText}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    container.innerHTML = html;
+}
+
+function startDeploymentTimeout() {
+    let secondsLeft = timeoutMinutes * 60;
+    
+    const updateTimer = () => {
+        const minutes = Math.floor(secondsLeft / 60);
+        const seconds = secondsLeft % 60;
+        document.getElementById('deployBtn').innerHTML = 
+            `<i class="fas fa-check-circle"></i> Deploy Course (${minutes}:${seconds.toString().padStart(2, '0')})`;
+        
+        secondsLeft--;
+        
+        if (secondsLeft < 0) {
+            clearInterval(deploymentTimeout);
+            alert('Deployment timeout expired. Cones returning to standby.');
+            window.location.href = '/teams';
+        }
+    };
+    
+    updateTimer();
+    deploymentTimeout = setInterval(updateTimer, 1000);
+}
+
+// Deploy course (green LEDs)
+document.getElementById('deployBtn').addEventListener('click', async function() {
+    this.disabled = true;
+    this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deploying...';
+
+    clearInterval(deploymentTimeout);
+
+    // Get pattern length if Simon Says course
+    const patternLengthSelect = document.getElementById('patternLength');
+    const requestBody = {};
+    if (patternLengthSelect) {
+        requestBody.pattern_length = parseInt(patternLengthSelect.value);
+    }
+
+    // Get beep test configuration if Beep Test course
+    const deviceCountSelect = document.getElementById('deviceCount');
+    const startLevelSelect = document.getElementById('startLevel');
+    const distanceRadio = document.querySelector('input[name="beepDistance"]:checked');
+    if (deviceCountSelect && startLevelSelect && distanceRadio) {
+        requestBody.beep_test_config = {
+            distance_meters: parseInt(distanceRadio.value),
+            device_count: parseInt(deviceCountSelect.value),
+            start_level: parseInt(startLevelSelect.value)
+        };
+    }
+
+    try {
+        const response = await fetch(`/session/${sessionId}/deploy-course`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(requestBody)
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            updateConeStatus(data.devices, 'green');
+            
+            // Show success message
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-success';
+            alertDiv.innerHTML = '<i class="fas fa-check-circle"></i> <strong>Course Deployed!</strong> All cones are ready.';
+            document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.step-progress'));
+            
+            // Redirect after 2 seconds
+            setTimeout(() => {
+                window.location.href = `/session/${sessionId}/monitor`;
+            }, 2000);
+        } else {
+            alert('Error deploying course: ' + data.error);
+            this.disabled = false;
+            this.innerHTML = '<i class="fas fa-check-circle"></i> Deploy Course';
+        }
+    } catch (error) {
+        console.error('Deploy error:', error);
+        alert('Failed to deploy course');
+        this.disabled = false;
+        this.innerHTML = '<i class="fas fa-check-circle"></i> Deploy Course';
+    }
+});
+
+// Prepare on page load
+prepareCourse();
+</script>
+{% endblock %}

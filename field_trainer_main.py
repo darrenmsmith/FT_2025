@@ -102,9 +102,37 @@ def main() -> int:
         print("ERROR: Heartbeat server failed. See logs.")
         return 1
 
+    # Initialize Device 0 (D0) touch sensor
+    try:
+        from field_trainer.ft_touch import TouchSensor
+        from datetime import datetime
+
+        d0_touch_sensor = TouchSensor("192.168.99.100", config_dir="/opt/field_trainer/config")
+
+        def d0_touch_callback():
+            """Callback when D0 touch is detected"""
+            print("🟢 D0 touch detected!")
+            # Import here to avoid circular dependency
+            from coach_interface import session_service
+            timestamp = datetime.utcnow()
+            session_service.handle_touch_event("192.168.99.100", timestamp)
+
+        d0_touch_sensor.set_touch_callback(d0_touch_callback)
+
+        # Start touch detection immediately (debouncing prevents false triggers)
+        d0_touch_sensor.start_detection()
+
+        # Store reference in REGISTRY for lifecycle management
+        REGISTRY._d0_touch_sensor = d0_touch_sensor
+
+        REGISTRY.log(f"D0 TouchSensor initialized and started (hardware: {d0_touch_sensor.hardware_available})")
+    except Exception as e:
+        REGISTRY.log(f"Failed to initialize D0 TouchSensor: {e}", level="warning")
+        REGISTRY._d0_touch_sensor = None
+
     # Database initialization and course migration (Phase 1)
     REGISTRY.load_active_session()
-    
+
     # Migrate courses if database is empty
     if REGISTRY.db and len(REGISTRY.db.get_all_courses()) == 0:
         REGISTRY.log("Migrating courses to database...")

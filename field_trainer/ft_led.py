@@ -21,6 +21,10 @@ class LEDState(str, Enum):
     SOLID_GREEN = "solid_green"
     SOLID_RED = "solid_red"
     SOLID_ORANGE = "solid_orange"
+    SOLID_YELLOW = "solid_yellow"
+    SOLID_WHITE = "solid_white"
+    SOLID_PURPLE = "solid_purple"
+    SOLID_CYAN = "solid_cyan"
     BLINK_AMBER = "blink_amber"
     BLINK_ORANGE = "blink_orange"
     BLINK_BLUE = "blink_blue"
@@ -78,8 +82,20 @@ class LEDManager:
                 self._fill(128, 0, 0)
                 time.sleep(0.2)
             elif state == LEDState.SOLID_ORANGE:
-                self.fill(self.Color(255, 165, 0))
-                self.show()
+                self._fill(255, 165, 0)
+                time.sleep(0.2)
+            elif state == LEDState.SOLID_YELLOW:
+                self._fill(255, 255, 0)
+                time.sleep(0.2)
+            elif state == LEDState.SOLID_WHITE:
+                self._fill(255, 255, 255)
+                time.sleep(0.2)
+            elif state == LEDState.SOLID_PURPLE:
+                self._fill(128, 0, 128)
+                time.sleep(0.2)
+            elif state == LEDState.SOLID_CYAN:
+                self._fill(0, 255, 255)
+                time.sleep(0.2)
             elif state == LEDState.BLINK_AMBER:
                 self._fill(180, 120, 0); time.sleep(0.3)
                 self._fill(0, 0, 0);     time.sleep(0.3)

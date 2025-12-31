@@ -32,6 +32,15 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
     def setup(self) -> None:
         # Enable TCP keepalive where supported to detect dead peers
         self.request.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+        # CRITICAL: Disable Nagle's algorithm for low-latency audio sync
+        # TCP_NODELAY ensures packets are sent immediately without buffering
+        # This reduces latency from ~200ms to ~1-5ms for beep synchronization
+        try:
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except (OSError, AttributeError):
+            pass
+
         try:
             self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
             self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
@@ -88,7 +97,8 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                         battery_level=msg.get("battery_level"),
                         action=msg.get("action"),
                         # Optional new fields (devices may send these)
-                        led_pattern=msg.get("led_pattern"),
+                        # NOTE: led_pattern is NOT updated from heartbeats - only from set_led()
+                        # This prevents heartbeats from clearing manual LED overrides
                         audio_clip=msg.get("audio_clip"),
                         clock_skew_ms=msg.get("clock_skew_ms"),
                         # Phase 1: Touch event support
@@ -140,16 +150,43 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
         Map current system/node status to the contributor's LED state enums.
         States: off, mesh_connected, course_deployed, course_active,
                 software_error, network_error, course_complete
+
+        PRIORITY: Manual LED overrides (via set_led) take precedence over course status.
         """
-        # Course-based first
+        # FIRST: Check if there's a manual LED pattern override
+        n = REGISTRY.nodes.get(node_id)
+        if n and n.led_pattern:
+            # Map LED patterns to LED states for Simon Says and manual control
+            pattern_to_state = {
+                "solid_red": "software_error",        # Reuse red state
+                "solid_green": "course_active",       # Reuse green state
+                "solid_blue": "course_deployed",      # Reuse blue state
+                "solid_amber": "mesh_connected",      # Reuse amber state
+                "solid_yellow": "solid_yellow",       # New state for Simon Says
+                "solid_white": "solid_white",         # New state
+                "solid_purple": "solid_purple",       # New state
+                "solid_cyan": "solid_cyan",           # New state
+                "off": "off",
+                # Chase patterns map to themselves as states (client processes led_command.state)
+                "chase": "chase",
+                "chase_red": "chase_red",
+                "chase_green": "chase_green",
+                "chase_blue": "chase_blue",
+                "chase_yellow": "chase_yellow",
+                "chase_amber": "chase_amber",
+            }
+            # If we have a pattern override, use it instead of deriving from course
+            if n.led_pattern in pattern_to_state:
+                return pattern_to_state[n.led_pattern]
+
+        # SECOND: Course-based status (if no manual override)
         cs = REGISTRY.course_status  # "Inactive" | "Deployed" | "Active"
         if cs == "Active":
             return "course_active"
         if cs == "Deployed":
             return "course_deployed"
 
-        # Otherwise, infer from node status (basic & safe)
-        n = REGISTRY.nodes.get(node_id)
+        # THIRD: Infer from node status (basic & safe)
         if n:
             if n.status in ("Offline", "Unknown"):
                 return "network_error"
@@ -163,6 +200,13 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
 
     def _send_ok(self, node_id: str) -> None:
         n = REGISTRY.nodes.get(node_id)
+        led_state = self._derive_led_state_for(node_id)
+
+        # DEBUG: Log LED state being sent in heartbeat (only for D1-D5)
+        if node_id.startswith("192.168.99.10"):
+            n_pattern = n.led_pattern if n else None
+            print(f"💡 HB→{node_id[-3:]}: led_state={led_state}, n.led_pattern={n_pattern}")
+
         data = {
             "ack": True,
             "action": REGISTRY.assignments.get(node_id),
@@ -171,11 +215,25 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
             "master_time": REGISTRY.controller_time_ms(),
             "mesh_network": "ft_mesh",
             "server_version": VERSION,
-            "led_command": {
-                "state": self._derive_led_state_for(node_id),
+        }
+
+        # Only send led_command if NOT currently showing a chase animation OR during error feedback
+        # Chase animations are sent via direct LED commands and shouldn't be overridden by heartbeat states
+        error_feedback_active = getattr(REGISTRY, 'error_feedback_active', False)
+
+        if error_feedback_active:
+            # OPTION A: Error feedback in progress - don't send any LED commands
+            pass
+        elif n and n.led_pattern and n.led_pattern.startswith('chase'):
+            # Chase animation in progress - don't send led_command to avoid overriding it
+            pass
+        else:
+            # Normal operation - send LED state via heartbeat
+            data["led_command"] = {
+                "state": led_state,
                 "timestamp": REGISTRY.controller_time_ms() / 1000.0  # seconds float
             }
-        }
+
         # Converge optional state back to device if we have it
         if n:
             if n.led_pattern:
