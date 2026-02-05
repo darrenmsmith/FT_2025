@@ -8,6 +8,7 @@ import socket
 import json
 import time
 import sys
+import threading
 sys.path.insert(0, '/opt/field_trainer')
 from ft_touch import TouchSensor
 import argparse
@@ -15,6 +16,12 @@ from audio_manager import AudioManager
 from enum import Enum
 
 print("Imports successful")
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+HEARTBEAT_INTERVAL_SECONDS = 3  # How often to send heartbeat to server
+TOUCH_PERSISTENCE_SECONDS = 4   # How long to report touch (must be > HEARTBEAT_INTERVAL_SECONDS)
 
 class LEDState(Enum):
     """LED status states matching server"""
@@ -34,20 +41,40 @@ class ClientLEDManager:
         self.strip = None
         self.current_state = LEDState.OFF
         self.blink_state = False
+        self.animation_stop = threading.Event()  # Signal to stop current animation
+        self.animation_thread = None
 
         # Initialize LED hardware
         try:
             from rpi_ws281x import PixelStrip, Color
             self.Color = Color
-            self.strip = PixelStrip(15, 12, 800000, 10, False, 128, 0)
+
+            # Try to import ws for strip type constants
+            try:
+                from rpi_ws281x import ws
+                strip_type = ws.WS2811_STRIP_GRB
+                print("Using GRB color order")
+            except (ImportError, AttributeError):
+                # Fallback if ws not available - use default RGB
+                strip_type = None
+                print("Using default RGB color order")
+
+            # Initialize strip with or without strip_type parameter
+            if strip_type is not None:
+                self.strip = PixelStrip(15, 12, 800000, 10, False, 255, 0, strip_type)
+            else:
+                self.strip = PixelStrip(15, 12, 800000, 10, False, 255, 0)
+
             self.strip.begin()
             self.led_enabled = True
             print("LED hardware initialized")
             self.set_state(LEDState.MESH_CONNECTED)
-        except ImportError:
-            print("LED: rpi_ws281x not available")
+        except ImportError as e:
+            print(f"LED: rpi_ws281x not available: {e}")
         except Exception as e:
             print(f"LED hardware init failed: {e}")
+            import traceback
+            traceback.print_exc()
 
     def set_state(self, state: LEDState):
         """Set LED state"""
@@ -83,6 +110,190 @@ class ClientLEDManager:
 
         except Exception as e:
             print(f"LED update error: {e}")
+
+    def wheel(self, pos):
+        """Generate rainbow colors across 0-255 positions (from strandtest.py)"""
+        if pos < 85:
+            return self.Color(pos * 3, 255 - pos * 3, 0)
+        elif pos < 170:
+            pos -= 85
+            return self.Color(255 - pos * 3, 0, pos * 3)
+        else:
+            pos -= 170
+            return self.Color(0, pos * 3, 255 - pos * 3)
+
+    def theater_chase(self, color, wait_ms=50, duration_ms=3000):
+        """Movie theater light style chaser animation (from strandtest.py)"""
+        if not self.led_enabled:
+            return
+
+        iterations = int(duration_ms / (wait_ms * 3))  # Calculate iterations based on duration
+        print(f"Running theaterChase: color={color}, wait={wait_ms}ms, iterations={iterations}")
+
+        try:
+            for j in range(iterations):
+                if self.animation_stop.is_set():
+                    print("Chase animation stopped")
+                    break
+                for q in range(3):
+                    # Turn on every 3rd LED
+                    for i in range(0, 15, 3):
+                        self.strip.setPixelColor(i + q, color)
+                    self.strip.show()
+                    time.sleep(wait_ms / 1000.0)
+                    # Turn off every 3rd LED
+                    for i in range(0, 15, 3):
+                        self.strip.setPixelColor(i + q, 0)
+                    self.strip.show()  # FIX: Actually display the off state
+
+            # No need to clear LEDs - solid color command will overwrite
+            print("Chase animation completed (LEDs left in final state)")
+        except Exception as e:
+            print(f"Chase animation error: {e}")
+
+    def rainbow_animation(self, wait_ms=20, duration_ms=3000):
+        """Draw rainbow that cycles through colors on all LEDs"""
+        if not self.led_enabled:
+            return
+
+        print(f"🌈 Starting rainbow: wait={wait_ms}ms, duration={duration_ms}ms")
+
+        # Simple approach: cycle all LEDs through rainbow colors
+        try:
+            # Define rainbow colors
+            colors = [
+                self.Color(255, 0, 0),      # Red
+                self.Color(255, 127, 0),    # Orange
+                self.Color(255, 255, 0),    # Yellow
+                self.Color(0, 255, 0),      # Green
+                self.Color(0, 0, 255),      # Blue
+                self.Color(75, 0, 130),     # Indigo
+                self.Color(148, 0, 211),    # Violet
+            ]
+
+            # Calculate how many times to cycle through colors
+            time_per_color = 500  # 500ms per color
+            cycles = int(duration_ms / (time_per_color * len(colors)))
+            if cycles < 1:
+                cycles = 1
+
+            print(f"🌈 Rainbow: {len(colors)} colors, {cycles} cycles")
+
+            for cycle in range(cycles):
+                if self.animation_stop.is_set():
+                    print("🌈 Rainbow animation stopped")
+                    return
+                for color in colors:
+                    if self.animation_stop.is_set():
+                        print("🌈 Rainbow animation stopped")
+                        return
+                    # Set all LEDs to current color
+                    for i in range(15):
+                        self.strip.setPixelColor(i, color)
+                    self.strip.show()
+                    time.sleep(time_per_color / 1000.0)
+
+            print(f"🌈 Rainbow animation completed {cycles} cycles through {len(colors)} colors")
+        except Exception as e:
+            print(f"❌ Rainbow animation error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def set_solid_color(self, color):
+        """Set all LEDs to a solid color"""
+        if not self.led_enabled:
+            return
+
+        try:
+            for i in range(15):
+                self.strip.setPixelColor(i, color)
+            self.strip.show()
+        except Exception as e:
+            print(f"Solid color error: {e}")
+
+    def process_led_pattern(self, pattern, duration=None, delay=None):
+        """Process LED pattern command from server (chase, rainbow, solid colors)"""
+        if not self.led_enabled:
+            return
+
+        # Default values
+        if duration is None:
+            duration = 3000  # 3 seconds default
+        if delay is None:
+            delay = 50  # 50ms default
+
+        print(f"💡 Processing pattern: {pattern}, duration={duration}ms, delay={delay}ms")
+
+        # Stop any ongoing animation
+        if self.animation_thread and self.animation_thread.is_alive():
+            print("Stopping previous animation...")
+            self.animation_stop.set()
+            self.animation_thread.join(timeout=1.0)
+
+        # Clear stop flag for new animation
+        self.animation_stop.clear()
+
+        try:
+            # Handle chase patterns - run in background thread
+            if pattern.startswith("chase_"):
+                color_name = pattern.replace("chase_", "")
+                color_map = {
+                    "red": self.Color(255, 0, 0),
+                    "green": self.Color(0, 255, 0),
+                    "blue": self.Color(0, 0, 255),
+                    "yellow": self.Color(255, 255, 0),
+                    "amber": self.Color(255, 165, 0),
+                    "orange": self.Color(255, 165, 0),
+                    "white": self.Color(255, 255, 255),
+                    "purple": self.Color(128, 0, 255),
+                    "cyan": self.Color(0, 255, 255),
+                }
+                color = color_map.get(color_name, self.Color(255, 255, 255))
+                self.animation_thread = threading.Thread(
+                    target=self.theater_chase,
+                    args=(color, delay, duration),
+                    daemon=True
+                )
+                self.animation_thread.start()
+                print(f"✓ Chase {color_name} started in background")
+                return
+
+            # Handle rainbow pattern - run in background thread
+            if pattern == "rainbow":
+                self.animation_thread = threading.Thread(
+                    target=self.rainbow_animation,
+                    args=(delay, duration),
+                    daemon=True
+                )
+                self.animation_thread.start()
+                print(f"✓ Rainbow started in background")
+                return
+
+            # Handle solid colors - immediate, no threading needed
+            solid_color_map = {
+                "solid_red": self.Color(255, 0, 0),
+                "solid_green": self.Color(0, 255, 0),
+                "solid_blue": self.Color(0, 0, 255),
+                "solid_yellow": self.Color(255, 255, 0),
+                "solid_amber": self.Color(255, 165, 0),
+                "solid_orange": self.Color(255, 165, 0),
+                "solid_white": self.Color(255, 255, 255),
+                "solid_purple": self.Color(128, 0, 255),
+                "solid_cyan": self.Color(0, 255, 255),
+                "off": self.Color(0, 0, 0),
+            }
+
+            if pattern in solid_color_map:
+                self.set_solid_color(solid_color_map[pattern])
+                print(f"✓ Solid color {pattern} set")
+                return
+
+            # Unknown pattern - turn off
+            print(f"⚠️ Unknown pattern: {pattern}, turning off")
+            self.set_solid_color(self.Color(0, 0, 0))
+
+        except Exception as e:
+            print(f"Pattern processing error: {e}")
 
     def process_led_command(self, led_command):
         """Process LED command from server"""
@@ -173,16 +384,21 @@ def connect_to_device0(node_id):
                 }
 
                 # Phase 1: Add touch event reporting
+                # Keep reporting touch for TOUCH_PERSISTENCE_SECONDS to ensure server receives it
+                # (must be > HEARTBEAT_INTERVAL_SECONDS to guarantee at least 1 report)
                 global last_touch_time
                 current_time = time.time()
-                if last_touch_time > 0 and (current_time - last_touch_time) < 5.0:
-                    # Touch occurred within last 5 seconds, report it
+                if last_touch_time > 0 and (current_time - last_touch_time) < TOUCH_PERSISTENCE_SECONDS:
+                    # Touch occurred within persistence window, keep reporting it
                     heartbeat["touch_detected"] = True
                     heartbeat["touch_timestamp"] = last_touch_time
-                    last_touch_time = 0  # Reset after reporting
+                    # Don't reset immediately - keep reporting for full persistence window
                 else:
                     heartbeat["touch_detected"] = False
                     heartbeat["touch_timestamp"] = None
+                    # Reset after persistence window has passed
+                    if last_touch_time > 0 and (current_time - last_touch_time) >= TOUCH_PERSISTENCE_SECONDS:
+                        last_touch_time = 0
 
                 sock.send((json.dumps(heartbeat) + "\n").encode())
 
@@ -203,20 +419,13 @@ def connect_to_device0(node_id):
                             # Process direct LED command (test format)
                             if "cmd" in data and data["cmd"] == "led":
                                 pattern = data.get("pattern", "off")
-                                print(f"💡 Received LED command: {pattern}")
-                                # Map pattern to LED state
-                                state_map = {
-                                    "off": LEDState.OFF,
-                                    "solid_green": LEDState.COURSE_ACTIVE,
-                                    "solid_blue": LEDState.COURSE_DEPLOYED,  # True blue
-                                    "solid_red": LEDState.SOFTWARE_ERROR,
-                                    "solid_amber": LEDState.MESH_CONNECTED,
-                                    "blink_amber": LEDState.MESH_CONNECTED,
-                                    "rainbow": LEDState.COURSE_COMPLETE  # Purple
-                                }
-                                led_state = state_map.get(pattern, LEDState.OFF)
-                                led_manager.set_state(led_state)
-                                print(f"✓ LED set to: {pattern}")
+                                duration = data.get("duration")  # milliseconds
+                                delay = data.get("delay")  # milliseconds
+                                print(f"💡 Received LED command: {pattern}, duration={duration}, delay={delay}")
+
+                                # Use new pattern processor for animations and solid colors
+                                led_manager.process_led_pattern(pattern, duration=duration, delay=delay)
+                                print(f"✓ LED pattern processed: {pattern}")
 
                             # Process audio command if present
                             if "cmd" in data and data["cmd"] == "audio":
@@ -294,7 +503,7 @@ def connect_to_device0(node_id):
                         except json.JSONDecodeError as e:
                             print(f"JSON decode error for message '{message}': {e}")
 
-                time.sleep(5)
+                time.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
         except ConnectionRefusedError:
             print("Connection refused - Device 0 server not available")

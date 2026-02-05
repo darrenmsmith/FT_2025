@@ -33,7 +33,7 @@ SERVER_LED_BRIGHTNESS: int = int(os.getenv("FIELD_TRAINER_LED_BRIGHTNESS", "32")
 
 # ---------------- Audio (server-side Device 0) ----------------
 # Enable controller audio playback via mpg123
-ENABLE_SERVER_AUDIO: bool = bool(int(os.getenv("FIELD_TRAINER_ENABLE_SERVER_AUDIO", "0")))
+ENABLE_SERVER_AUDIO: bool = bool(int(os.getenv("FIELD_TRAINER_ENABLE_SERVER_AUDIO", "1")))
 
 # Optional overrides (ft_audio has sane defaults if you leave these unset)
 AUDIO_DIR: str = os.getenv("FIELD_TRAINER_AUDIO_DIR", "/opt/field_trainer/audio")

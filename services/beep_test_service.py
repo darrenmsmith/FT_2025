@@ -99,6 +99,10 @@ class BeepTestService:
         self.device_ids: List[str] = []
         self.current_phase: str = 'running'  # 'running' or 'recovery'
 
+        # Timing tracking
+        self.test_start_time: Optional[float] = None  # When test started (timestamp)
+        self.shuttle_start_time: Optional[float] = None  # When current shuttle started
+
         # Timing table (selected based on distance)
         self.timing_table: List[Dict[str, Any]] = []
 
@@ -114,26 +118,14 @@ class BeepTestService:
             print(f"🎬 START BEEP TEST - Session ID: {session_id}")
             print(f"{'='*80}\n")
 
-            # Get session details from REGULAR sessions table (integrated approach)
-            session = self.db.get_session(session_id)
+            # Get session details from beep_test_sessions table
+            session = self.db.get_beep_test_session(session_id)
             if not session:
                 return {'success': False, 'error': 'Session not found'}
 
-            # Get beep test config from pattern_config field
-            import json
-            config = {}
-            if session.get('pattern_config'):
-                try:
-                    config = json.loads(session['pattern_config'])
-                except:
-                    pass
-
-            if not config:
-                return {'success': False, 'error': 'No beep test configuration found'}
-
-            distance_meters = config.get('distance_meters', 20)
-            device_count = config.get('device_count', 4)
-            start_level = config.get('start_level', 1)
+            distance_meters = session.get('distance_meters', 20)
+            device_count = session.get('device_count', 4)
+            start_level = session.get('start_level', 1)
 
             # Get athletes
             athletes = self.db.get_beep_test_athletes(session_id)
@@ -161,8 +153,8 @@ class BeepTestService:
             else:
                 self.timing_table = LEGER_20M_TABLE
 
-            # Calculate device IDs based on device count
-            self.device_ids = [f"192.168.99.{100 + i}" for i in range(1, device_count + 1)]
+            # Calculate device IDs based on device count (include Device 0)
+            self.device_ids = [f"192.168.99.{100 + i}" for i in range(0, device_count)]
 
             print(f"\n✅ Timing configuration:")
             print(f"   Using {self.distance_meters}m Léger table")
@@ -187,17 +179,17 @@ class BeepTestService:
                     else:
                         print(f"   ⚠️  {device_id} - NOT connected")
 
-            if len(connected_devices) < 2:
+            if len(connected_devices) < 1:
                 return {
                     'success': False,
-                    'error': f'Only {len(connected_devices)} devices connected. Minimum 2 required.'
+                    'error': f'No devices connected. Device 0 (gateway) required for audio beeps.'
                 }
 
             print(f"\n✅ Device check: {len(connected_devices)}/{device_count} devices ready")
 
-            # Mark session as active in regular sessions table
+            # Mark session as active in beep_test_sessions table
             with self.db.get_connection() as conn:
-                conn.execute('UPDATE sessions SET status = ? WHERE session_id = ?', ('active', session_id))
+                conn.execute('UPDATE beep_test_sessions SET status = ? WHERE session_id = ?', ('active', session_id))
             print(f"✅ Session marked as active in database")
 
             # Set all devices to solid_green LED (active test in progress)
@@ -208,6 +200,7 @@ class BeepTestService:
             print(f"✅ All devices showing solid_green (test active)")
 
             # Start background timing thread (it will handle all beeps including the first one)
+            self.test_start_time = time.time()  # Record test start time
             self.stop_timer_event.clear()
             self.timer_thread = threading.Thread(
                 target=self._beep_timer_thread,
@@ -268,6 +261,7 @@ class BeepTestService:
                 print(f"🔊 Level {self.current_level}, Shuttle {self.current_shuttle}/{total_shuttles}")
                 self.registry.log(f"🏃 Shuttle {self.current_shuttle}/{total_shuttles} (Level {self.current_level})")
                 self.current_phase = 'running'
+                self.shuttle_start_time = time.time()  # Record shuttle start time
                 self._play_beep(beep_count=1)
 
                 # Wait for shuttle time (RUNNING phase)
@@ -280,6 +274,7 @@ class BeepTestService:
                 # Recovery time: Athletes walk back and prepare (equal to shuttle time)
                 print(f"   ⏱  Recovery time: {shuttle_time:.2f}s (walk back)")
                 self.current_phase = 'recovery'
+                self.shuttle_start_time = time.time()  # Reset timer for recovery countdown
                 time.sleep(shuttle_time)
 
                 # Increment shuttle and reset phase for next shuttle
@@ -441,10 +436,10 @@ class BeepTestService:
                 self.timer_thread.join(timeout=2.0)
                 print(f"✅ Timer thread stopped")
 
-            # Stop session in regular sessions table (use 'incomplete' status)
+            # Stop session in beep_test_sessions table (use 'stopped' status)
             with self.db.get_connection() as conn:
-                conn.execute('UPDATE sessions SET status = ? WHERE session_id = ?', ('incomplete', session_id))
-            print(f"✅ Session marked as incomplete in database")
+                conn.execute('UPDATE beep_test_sessions SET status = ? WHERE session_id = ?', ('stopped', session_id))
+            print(f"✅ Session marked as stopped in database")
 
             # Reset LEDs to amber (standby)
             print(f"💡 Resetting LEDs to amber...")
@@ -485,9 +480,9 @@ class BeepTestService:
             # Stop timer
             self.stop_timer_event.set()
 
-            # Complete session in regular sessions table
+            # Complete session in beep_test_sessions table
             with self.db.get_connection() as conn:
-                conn.execute('UPDATE sessions SET status = ? WHERE session_id = ?', ('completed', self.active_session_id))
+                conn.execute('UPDATE beep_test_sessions SET status = ? WHERE session_id = ?', ('completed', self.active_session_id))
             print(f"✅ Session marked as completed in database")
 
             # Reset LEDs to amber
@@ -527,6 +522,22 @@ class BeepTestService:
 
         level_data = self.timing_table[self.current_level - 1] if self.current_level <= len(self.timing_table) else None
 
+        # Calculate elapsed time since test started
+        elapsed_seconds = int(time.time() - self.test_start_time) if self.test_start_time else 0
+
+        # Calculate countdown for current shuttle/recovery
+        shuttle_countdown = 0
+        if self.shuttle_start_time and level_data:
+            time_elapsed_in_shuttle = time.time() - self.shuttle_start_time
+            shuttle_time = level_data['shuttle_time_sec']
+
+            if self.current_phase == 'running':
+                # During running, countdown from shuttle time
+                shuttle_countdown = max(0, shuttle_time - time_elapsed_in_shuttle)
+            else:  # recovery
+                # During recovery, countdown from shuttle time (recovery time equals shuttle time)
+                shuttle_countdown = max(0, shuttle_time - time_elapsed_in_shuttle)
+
         return {
             'is_active': True,
             'session_id': self.active_session_id,
@@ -535,5 +546,7 @@ class BeepTestService:
             'max_shuttles': level_data['shuttles'] if level_data else 0,
             'speed_kmh': level_data['speed_kmh'] if level_data else 0,
             'shuttle_time_sec': level_data['shuttle_time_sec'] if level_data else 0,
-            'phase': self.current_phase  # 'running' or 'recovery'
+            'phase': self.current_phase,  # 'running' or 'recovery'
+            'elapsed_seconds': elapsed_seconds,  # Total time since test started
+            'shuttle_countdown': round(shuttle_countdown, 1)  # Countdown for current shuttle/recovery
         }

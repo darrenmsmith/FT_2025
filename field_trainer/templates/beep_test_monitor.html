@@ -6,17 +6,17 @@
         <i class="fas fa-heartbeat"></i> Beep Test Monitor
         {% if session.status == 'active' %}
             <span class="badge bg-success">RUNNING</span>
-        {% elif session.status == 'setup' and session.course_deployed %}
+        {% elif session.status == 'setup' %}
             <span class="badge bg-warning">READY</span>
         {% else %}
             <span class="badge bg-secondary">{{ session.status.upper() }}</span>
         {% endif %}
     </h2>
     <div id="sessionControls">
-        {% if session.status == 'setup' and session.course_deployed %}
-            <a href="/dashboard" class="btn btn-secondary me-2">
+        {% if session.status == 'setup' %}
+            <button onclick="window.history.back()" class="btn btn-secondary me-2">
                 <i class="fas fa-arrow-left"></i> Back
-            </a>
+            </button>
             <button class="btn btn-success btn-lg" id="startBtn">
                 <i class="fas fa-play"></i> GO
             </button>
@@ -65,8 +65,8 @@
                 <h6 class="mb-0"><i class="fas fa-stopwatch"></i> Time Between Beeps</h6>
             </div>
             <div class="card-body text-center">
-                <h2 class="mb-2" id="shuttleTime">8.47 / --</h2>
-                <p class="text-muted small mb-0">seconds (max / countdown)</p>
+                <h2 class="mb-2" id="shuttleTime">-- / --</h2>
+                <p class="text-muted small mb-0">seconds (running / rest)</p>
             </div>
         </div>
     </div>
@@ -106,39 +106,21 @@
 <script>
 const SESSION_ID = '{{ session.session_id }}';
 const SESSION_STATUS = '{{ session.status }}';
-let startTime = null;
 let updateInterval = null;
-let testStarted = false;
-
-// Countdown timer variables
-let shuttleTimeMax = 0;
-let countdown = 0;
-let countdownInterval = null;
-let previousShuttle = 0;
-let currentPhase = 'running';  // Track current phase
 
 // Load athletes when page loads
 document.addEventListener('DOMContentLoaded', function() {
     loadAthletes();
 
-    // If already active, start polling
+    // If already active, start polling (server provides all timing data)
     if (SESSION_STATUS === 'active') {
-        testStarted = true;
-        startTime = new Date();
-
-        // Fetch initial status to populate countdown
-        updateStatus();
-
-        updateInterval = setInterval(updateStatus, 1000);
-        setInterval(updateElapsedTime, 1000);
-
-        // Start countdown timer
-        countdownInterval = setInterval(updateCountdown, 1000);
+        updateStatus();  // Fetch initial status
+        updateInterval = setInterval(updateStatus, 1000);  // Poll every second
     }
 });
 
-// GO button handler (when status is 'setup' and course is deployed)
-{% if session.status == 'setup' and session.course_deployed %}
+// GO button handler (when status is 'setup')
+{% if session.status == 'setup' %}
 document.getElementById('startBtn').addEventListener('click', async function() {
     if (!confirm('Start the beep test? All athletes should be ready at the START line.')) return;
 
@@ -175,24 +157,28 @@ async function updateStatus() {
             document.getElementById('maxShuttles').textContent = state.max_shuttles;
             document.getElementById('currentSpeed').textContent = state.speed_kmh.toFixed(1);
 
-            // Update current phase
-            currentPhase = state.phase || 'running';
-
-            // Check if shuttle changed - reset countdown
-            if (state.current_shuttle !== previousShuttle) {
-                previousShuttle = state.current_shuttle;
-                shuttleTimeMax = state.shuttle_time_sec;
-                countdown = Math.floor(shuttleTimeMax);
+            // Update elapsed time from server
+            if (state.elapsed_seconds !== undefined) {
+                const minutes = Math.floor(state.elapsed_seconds / 60);
+                const seconds = state.elapsed_seconds % 60;
+                document.getElementById('elapsedTime').textContent =
+                    `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
             }
 
-            // Only show countdown during RECOVERY phase
-            if (currentPhase === 'recovery') {
+            // Update shuttle countdown from server
+            const countdown = state.shuttle_countdown || 0;
+
+            // Show countdown based on phase:
+            // - RUNNING phase: countdown shows on LEFT (running time) with 1 decimal
+            // - RECOVERY phase: countdown shows on RIGHT (rest time) as whole number
+            if (state.phase === 'recovery') {
+                // During recovery/rest: show rest countdown on right (whole number)
                 document.getElementById('shuttleTime').textContent =
-                    `${shuttleTimeMax.toFixed(2)} / ${Math.max(0, countdown)}`;
+                    `-- / ${Math.ceil(countdown)}`;
             } else {
-                // During RUNNING phase, just show the time without countdown
+                // During running: show running countdown on left (1 decimal)
                 document.getElementById('shuttleTime').textContent =
-                    `${shuttleTimeMax.toFixed(2)} / --`;
+                    `${countdown.toFixed(1)} / --`;
             }
 
             // Reload athletes to show updated status
@@ -200,7 +186,6 @@ async function updateStatus() {
         } else {
             // Test completed or stopped
             clearInterval(updateInterval);
-            if (countdownInterval) clearInterval(countdownInterval);
 
             // Redirect to results
             window.location.href = `/beep-test/results/${SESSION_ID}`;
@@ -210,15 +195,7 @@ async function updateStatus() {
     }
 }
 
-function updateCountdown() {
-    // Only decrement during RECOVERY phase
-    if (currentPhase === 'recovery' && countdown > 0) {
-        countdown--;
-        // Update display
-        document.getElementById('shuttleTime').textContent =
-            `${shuttleTimeMax.toFixed(2)} / ${Math.max(0, countdown)}`;
-    }
-}
+// Countdown is now handled server-side in updateStatus()
 
 async function loadAthletes() {
     const response = await fetch(`/api/beep-test/athletes/${SESSION_ID}`);
@@ -289,17 +266,7 @@ async function toggleAthlete(athleteId, currentStatus) {
     }
 }
 
-function updateElapsedTime() {
-    if (!startTime) return;
-
-    const now = new Date();
-    const elapsed = Math.floor((now - startTime) / 1000);
-    const minutes = Math.floor(elapsed / 60);
-    const seconds = elapsed % 60;
-
-    document.getElementById('elapsedTime').textContent =
-        `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-}
+// Elapsed time is now handled server-side in updateStatus()
 
 // END TEST EARLY button handler (when status is 'active')
 {% if session.status == 'active' %}
@@ -324,7 +291,6 @@ document.getElementById('endTestBtn').addEventListener('click', async function()
 
     if (result.success) {
         clearInterval(updateInterval);
-        if (countdownInterval) clearInterval(countdownInterval);
         // Redirect to results
         window.location.href = `/beep-test/results/${SESSION_ID}`;
     } else {

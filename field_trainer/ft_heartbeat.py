@@ -75,6 +75,9 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                     else:
                         display_status = "Standby"
                     
+                    # FIX: Do NOT accept led_pattern from device heartbeats
+                    # LED patterns flow server → device only, set via REGISTRY.set_led()
+                    # Devices were sending None, clearing server-assigned colors
                     REGISTRY.upsert_node(
                         node_id=node_id,
                         ip=peer_ip,
@@ -87,16 +90,14 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                         audio_working=msg.get("audio_working", False),
                         battery_level=msg.get("battery_level"),
                         action=msg.get("action"),
-                        # Optional new fields (devices may send these)
-                        led_pattern=msg.get("led_pattern"),
-                        audio_clip=msg.get("audio_clip"),
+                        # led_pattern: REMOVED - server controls this via set_led(), not devices
+                        # audio_clip: REMOVED - server controls this via play_audio(), not devices
                         clock_skew_ms=msg.get("clock_skew_ms"),
                         # Phase 1: Touch event support
                         touch_detected=msg.get("touch_detected", False),
                         touch_timestamp=msg.get("touch_timestamp"),
                     )                    
                     # Handle touch events (Phase 1)
-                    print(f"📨 Heartbeat from {node_id}: touch_detected={msg.get('touch_detected')}, timestamp={msg.get('touch_timestamp')}")
                     if msg.get('touch_detected'):
                         touch_timestamp = msg.get('touch_timestamp', time.time())
                         # Handle asynchronously to not block heartbeat
@@ -173,10 +174,9 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
             "master_time": REGISTRY.controller_time_ms(),
             "mesh_network": "ft_mesh",
             "server_version": VERSION,
-            "led_command": {
-                "state": self._derive_led_state_for(node_id),
-                "timestamp": REGISTRY.controller_time_ms() / 1000.0  # seconds float
-            }
+            # NOTE: led_command removed - clients prioritize it over led_pattern
+            # This was causing assigned colors to be overridden by course_active (green)
+            # led_pattern is sufficient for controlling LEDs
         }
         # Converge optional state back to device if we have it
         if n:

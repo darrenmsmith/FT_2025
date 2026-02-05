@@ -43,25 +43,14 @@ def monitor(session_id):
 @beep_test_bp.route('/beep-test/results/<session_id>')
 def results(session_id):
     """Beep test results page"""
-    # Get session from regular sessions table (integrated approach)
-    session = db.get_session(session_id)
+    # Get session from beep_test_sessions table
+    session = db.get_beep_test_session(session_id)
     if not session:
         return "Session not found", 404
 
-    # Parse beep test config from pattern_config JSON field
-    import json
-    config = {}
-    if session.get('pattern_config'):
-        try:
-            config = json.loads(session['pattern_config'])
-        except:
-            pass
-
-    # Add config fields to session dict for template compatibility
-    session['distance_meters'] = config.get('distance_meters', 20)
-    session['start_level'] = config.get('start_level', 1)
-    session['device_count'] = config.get('device_count', 4)
-    session['date_time'] = session.get('created_at')  # Map created_at to date_time for template
+    # Session already has the fields we need (distance_meters, start_level, device_count)
+    # Just add date_time mapping for template compatibility
+    session['date_time'] = session.get('created_at') or session.get('date_time')
 
     # Get team
     team = db.get_team(session['team_id'])

@@ -32,7 +32,7 @@ class DatabaseManager:
     @contextmanager
     def get_connection(self):
         """Context manager for database connections"""
-        conn = sqlite3.connect(self.db_path, timeout=10.0)  # 10 second timeout for locks
+        conn = sqlite3.connect(self.db_path, timeout=20.0)  # 20 second timeout for locks (increased for concurrent touch operations)
         conn.row_factory = sqlite3.Row  # Enable dict-like access
         conn.execute('PRAGMA journal_mode=WAL')  # Enable Write-Ahead Logging for better concurrency
         try:

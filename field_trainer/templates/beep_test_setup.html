@@ -103,6 +103,88 @@
             </div>
         </div>
 
+        <!-- Cone Layout Diagram -->
+        <div class="card mb-3">
+            <div class="card-header bg-success text-white">
+                <h5><i class="fas fa-map-marked-alt"></i> Course Setup</h5>
+            </div>
+            <div class="card-body">
+                <p class="small mb-3"><strong>Equipment Needed:</strong></p>
+                <ul class="small mb-3">
+                    <li>Cones or markers for two parallel lines</li>
+                    <li>Measuring tape (15m or 20m)</li>
+                    <li>Flat, non-slip surface</li>
+                </ul>
+
+                <!-- SVG Diagram -->
+                <div class="text-center mb-3">
+                    <svg viewBox="0 0 300 180" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa;">
+                        <!-- Title -->
+                        <text x="150" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Top View</text>
+
+                        <!-- Start Line -->
+                        <line x1="50" y1="60" x2="250" y2="60" stroke="#198754" stroke-width="3"/>
+                        <text x="150" y="50" text-anchor="middle" font-size="12" fill="#198754" font-weight="bold">START LINE</text>
+
+                        <!-- Finish Line -->
+                        <line x1="50" y1="140" x2="250" y2="140" stroke="#dc3545" stroke-width="3"/>
+                        <text x="150" y="155" text-anchor="middle" font-size="12" fill="#dc3545" font-weight="bold">FINISH LINE</text>
+
+                        <!-- Devices/Cones at Start -->
+                        <circle cx="70" cy="60" r="6" fill="#0d6efd"/>
+                        <text x="70" y="78" text-anchor="middle" font-size="10" fill="#666">D1</text>
+
+                        <circle cx="150" cy="60" r="6" fill="#0d6efd"/>
+                        <text x="150" y="78" text-anchor="middle" font-size="10" fill="#666">D2</text>
+
+                        <circle cx="230" cy="60" r="6" fill="#0d6efd"/>
+                        <text x="230" y="78" text-anchor="middle" font-size="10" fill="#666">D3</text>
+
+                        <!-- Devices/Cones at Finish -->
+                        <circle cx="70" cy="140" r="6" fill="#0d6efd"/>
+                        <text x="70" y="132" text-anchor="middle" font-size="10" fill="#666">D4</text>
+
+                        <circle cx="150" cy="140" r="6" fill="#0d6efd"/>
+                        <text x="150" y="132" text-anchor="middle" font-size="10" fill="#666">D5</text>
+
+                        <circle cx="230" cy="140" r="6" fill="#0d6efd"/>
+                        <text x="230" y="132" text-anchor="middle" font-size="10" fill="#666">D6</text>
+
+                        <!-- Distance Arrow -->
+                        <line x1="30" y1="60" x2="30" y2="140" stroke="#333" stroke-width="2" marker-start="url(#arrowstart)" marker-end="url(#arrowend)"/>
+                        <text x="15" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#333" transform="rotate(-90 15 100)">
+                            <tspan id="distanceLabel">20m</tspan>
+                        </text>
+
+                        <!-- Arrow markers -->
+                        <defs>
+                            <marker id="arrowstart" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+                                <polygon points="5,5 0,2 0,8" fill="#333"/>
+                            </marker>
+                            <marker id="arrowend" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+                                <polygon points="5,5 10,2 10,8" fill="#333"/>
+                            </marker>
+                        </defs>
+
+                        <!-- Athletes representation -->
+                        <circle cx="90" cy="100" r="4" fill="#ffc107"/>
+                        <circle cx="110" cy="100" r="4" fill="#ffc107"/>
+                        <circle cx="130" cy="100" r="4" fill="#ffc107"/>
+                        <text x="150" y="100" text-anchor="start" font-size="10" fill="#666">← Athletes</text>
+                    </svg>
+                </div>
+
+                <p class="small mb-2"><strong>Setup Instructions:</strong></p>
+                <ol class="small mb-0">
+                    <li>Measure and mark two parallel lines (15m or 20m apart)</li>
+                    <li>Place devices/cones evenly along each line</li>
+                    <li>Athletes start behind the START line</li>
+                    <li>Athletes run to the FINISH line at each beep</li>
+                    <li>At least one foot must cross the line before next beep</li>
+                </ol>
+            </div>
+        </div>
+
         <!-- Beep Test Info -->
         <div class="card">
             <div class="card-header bg-primary text-white">
@@ -120,6 +202,15 @@
                 <p class="mb-0">Athletes run between two lines at progressively faster speeds. Click FAIL when an athlete can't keep pace.</p>
             </div>
         </div>
+
+        <script>
+        // Update distance label when distance selection changes
+        document.querySelectorAll('input[name="distance"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                document.getElementById('distanceLabel').textContent = this.value + 'm';
+            });
+        });
+        </script>
     </div>
 </div>
 
@@ -149,6 +240,19 @@
 let athleteQueue = [];
 let absentAthletes = new Set();
 let lastTestData = null;
+
+// Check for team_id in URL query parameters and pre-select
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const teamId = urlParams.get('team_id');
+
+    if (teamId) {
+        const teamSelect = document.getElementById('teamSelect');
+        teamSelect.value = teamId;
+        // Trigger change event to load athletes
+        teamSelect.dispatchEvent(new Event('change'));
+    }
+});
 
 // Load athletes when team selected
 document.getElementById('teamSelect').addEventListener('change', async function() {

@@ -104,7 +104,37 @@ def main() -> int:
 
     # Database initialization and course migration (Phase 1)
     REGISTRY.load_active_session()
-    
+
+    # Apply database schema migrations
+    try:
+        from field_trainer.db_migrations import apply_migrations
+        apply_migrations('/opt/data/field_trainer.db')
+    except Exception as e:
+        REGISTRY.log(f"Schema migration error: {e}", level="warning")
+
+    # Restore built-in courses (Simon Says, Warmup Rounds, Beep Test)
+    REGISTRY.log("Checking built-in courses...")
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, '/opt/restore_builtin_courses.py'],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            # Count how many were created vs skipped
+            created = result.stdout.count('Creating...')
+            skipped = result.stdout.count('Already exists')
+            if created > 0:
+                REGISTRY.log(f"Built-in courses: created {created}, already existed {skipped}")
+            else:
+                REGISTRY.log(f"Built-in courses: all {skipped} already exist")
+        else:
+            REGISTRY.log(f"Built-in course restore failed: {result.stderr}", level="warning")
+    except Exception as e:
+        REGISTRY.log(f"Built-in course restore error: {e}", level="warning")
+
     # Migrate courses if database is empty
     if REGISTRY.db and len(REGISTRY.db.get_all_courses()) == 0:
         REGISTRY.log("Migrating courses to database...")
@@ -114,13 +144,13 @@ def main() -> int:
         REGISTRY.log("Course migration complete")
     
     # Start coach interface (Phase 1)
-    
+
     try:
         import coach_interface as coach_app
-        
+
         # Call the registration function from coach_interface
         coach_app.register_touch_handler()
-        
+
         def run_coach_interface():
             coach_app.app.run(host='0.0.0.0', port=5001, use_reloader=False, debug=False)
         coach_thread = threading.Thread(target=run_coach_interface, daemon=True)
@@ -128,6 +158,29 @@ def main() -> int:
         REGISTRY.log("Coach interface started on port 5001")
     except Exception as e:
         REGISTRY.log(f"Failed to start coach interface: {e}", level="error")
+
+    # Initialize D0 (server) touch sensor
+    try:
+        from field_trainer.ft_touch import TouchSensor
+        from datetime import datetime
+
+        # Create touch sensor for D0
+        d0_touch_sensor = TouchSensor("192.168.99.100")
+
+        # Set callback to handle D0 touches
+        def d0_touch_callback():
+            """Handle touch event on D0 (server device)"""
+            import time as time_module
+            timestamp_float = time_module.time()  # Use float timestamp like client cones
+            timestamp_dt = datetime.utcnow()  # For logging only
+            REGISTRY.handle_touch_event("192.168.99.100", timestamp_float)
+            REGISTRY.log(f"D0 touch detected at {timestamp_dt.strftime('%H:%M:%S.%f')[:-3]}", source="D0_touch")
+
+        d0_touch_sensor.set_touch_callback(d0_touch_callback)
+        d0_touch_sensor.start_detection()
+        REGISTRY.log(f"D0 touch sensor initialized (hardware available: {d0_touch_sensor.hardware_available})")
+    except Exception as e:
+        REGISTRY.log(f"D0 touch sensor init failed: {e}", level="warning")
 
     # Small guard; swap for an explicit "ready" event if you add one later.
     time.sleep(0.25)

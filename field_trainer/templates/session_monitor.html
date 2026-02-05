@@ -127,6 +127,29 @@
     </div>
 </div>
 
+<!-- Continue to Next Athlete Modal -->
+<div class="modal fade" id="nextAthleteModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-user-clock"></i> <span id="modalTitle">Athlete Finished</span>
+                </h5>
+            </div>
+            <div class="modal-body text-center py-4">
+                <div id="modalMessage" class="mb-3" style="font-size: 1.1rem;">
+                    <p><strong id="athleteName"></strong> has finished.</p>
+                </div>
+            </div>
+            <div class="modal-footer justify-content-center">
+                <button type="button" class="btn btn-success btn-lg" id="continueNextAthleteBtn">
+                    <i class="fas fa-arrow-right"></i> Continue to Next Athlete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -221,6 +244,8 @@ if (continueBtn) {
 let courseMode = 'sequential';  // Track course mode globally
 let patternLength = null;  // Track pattern length for continue button
 let patternData = null;  // Track pattern data for step-based layout
+let previousRunStatuses = {};  // Track previous run statuses to detect changes
+let waitingForCoach = false;  // Track if we're waiting for coach to click continue
 
 function updateCourseLayout() {
     const container = document.getElementById('courseLayoutContainer');
@@ -277,8 +302,10 @@ function getColorCode(color) {
 
 async function refreshStatus() {
     try {
+        console.log('refreshStatus called');
         const response = await fetch(`/api/session/${sessionId}/status`);
         const data = await response.json();
+        console.log('Session data:', data.session.status, 'Course mode:', data.course_mode);
 
         // Store course mode and pattern length for use in updateProgress
         courseMode = data.course_mode || 'sequential';
@@ -288,6 +315,39 @@ async function refreshStatus() {
         updateCourseLayout();  // Update layout based on pattern mode
         updateProgress(data.session);
         updateDeviceStatus(data.waiting_for_device);
+
+        // Check if we need to show "Continue to Next Athlete" modal (pattern mode only)
+        if (courseMode === 'pattern' && data.session.status === 'active') {
+            const runs = data.session.runs;
+
+            // Count athletes by status
+            const queuedAthletes = runs.filter(r => r.status === 'queued');
+            const runningAthletes = runs.filter(r => r.status === 'running');
+            const finishedAthletes = runs.filter(r => r.status === 'completed' || r.status === 'incomplete');
+
+            console.log(`Status check: queued=${queuedAthletes.length}, running=${runningAthletes.length}, finished=${finishedAthletes.length}, waitingForCoach=${waitingForCoach}`);
+
+            // If we have queued athletes AND no running athletes AND at least one finished
+            // This means we're paused waiting for coach
+            if (!waitingForCoach && queuedAthletes.length > 0 && runningAthletes.length === 0 && finishedAthletes.length > 0) {
+                // Find the most recently finished athlete (last in finished list)
+                const lastFinished = finishedAthletes[finishedAthletes.length - 1];
+
+                // Find the next queued athlete (first in queue)
+                const nextAthlete = queuedAthletes[0];
+
+                console.log(`🚨 PAUSE DETECTED: ${lastFinished.athlete_name} finished (${lastFinished.status}), next is ${nextAthlete.athlete_name}`);
+
+                // Show modal with next athlete's name
+                waitingForCoach = true;
+                showNextAthleteModal(lastFinished.athlete_name, lastFinished.status, nextAthlete.athlete_name);
+            }
+
+            // Also update previous status tracking for future use
+            for (const run of runs) {
+                previousRunStatuses[run.run_id] = run.status;
+            }
+        }
 
         if (data.session.status === 'completed' || data.session.status === 'incomplete' || data.session.status === 'failed') {
             clearInterval(refreshInterval);
@@ -470,6 +530,75 @@ function showCompletionMessage() {
     `;
     document.querySelector('.card-body').insertAdjacentHTML('afterbegin', alertHtml);
 }
+
+// Next Athlete Modal Functions
+let modalShown = false;  // Track if modal is currently shown
+
+function showNextAthleteModal(athleteName, status, nextAthleteName) {
+    if (modalShown) return;  // Prevent double-showing
+
+    console.log(`Showing modal for ${athleteName} (${status}), next is ${nextAthleteName}`);
+    modalShown = true;
+
+    // Reset button state before showing modal
+    const btn = document.getElementById('continueNextAthleteBtn');
+    btn.disabled = false;
+    btn.innerHTML = `<i class="fas fa-arrow-right"></i> Continue to ${nextAthleteName}`;
+
+    // Update modal content based on success/failure
+    document.getElementById('athleteName').textContent = athleteName;
+
+    const modalTitle = document.getElementById('modalTitle');
+    if (status === 'completed') {
+        modalTitle.innerHTML = '<i class="fas fa-check-circle"></i> Athlete Succeeded';
+    } else if (status === 'incomplete') {
+        modalTitle.innerHTML = '<i class="fas fa-times-circle"></i> Athlete Failed';
+    } else {
+        modalTitle.innerHTML = '<i class="fas fa-user-clock"></i> Athlete Finished';
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('nextAthleteModal'));
+    modal.show();
+}
+
+async function continueToNextAthlete() {
+    const btn = document.getElementById('continueNextAthleteBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Continuing...';
+
+    // IMMEDIATELY hide modal and reset flags (don't wait for API)
+    const modal = bootstrap.Modal.getInstance(document.getElementById('nextAthleteModal'));
+    modal.hide();
+    modalShown = false;
+    waitingForCoach = false;
+
+    console.log('Modal closed, making API call to advance to next athlete');
+
+    try {
+        const response = await fetch(`/session/${sessionId}/next-athlete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            console.log('Successfully advanced to next athlete');
+            // Refresh status to show next athlete's pattern
+            refreshStatus();
+        } else {
+            alert('Error advancing to next athlete: ' + result.error);
+            // Don't re-enable button - session might be in bad state
+        }
+    } catch (error) {
+        console.error('Error continuing to next athlete:', error);
+        alert('Failed to continue to next athlete');
+        // Don't re-enable button - session might be in bad state
+    }
+}
+
+// Attach event listener to continue button
+document.getElementById('continueNextAthleteBtn').addEventListener('click', continueToNextAthlete);
 
 {% if session.status == 'active' %}
     refreshInterval = setInterval(refreshStatus, 2000);

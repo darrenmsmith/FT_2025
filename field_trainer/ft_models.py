@@ -9,8 +9,8 @@ from typing import Any, Dict, Optional
 
 
 def utcnow_iso() -> str:
-    """Return current UTC time in ISO 8601 (seconds precision)."""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    """Return current local time in ISO 8601 (seconds precision)."""
+    return datetime.now().isoformat(timespec="seconds")
 
 
 @dataclass

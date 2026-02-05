@@ -1,9 +1,35 @@
 # Field Trainer .gitignore
 
+# Runtime data
+data/field_trainer.db
+data/field_trainer.db.backup*
+data/*.backup*
+data/network-status.json
+data/logs/
+data/backups/
+*.log
+
+# Backup files
+backups/
+*.backup
+*.backup2
+*.old
+*.conflicted
+*.current_backup
+coach_interface.py.current_backup
+
+# Analysis docs (dev-only)
+BUILD_SCRIPTS_REVIEW.md
+DEVELOPMENT_WORKFLOW.md
+DISTRIBUTABLE_BUILD_ANALYSIS.md
+DISTRIBUTABLE_BUILD_STATUS.md
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+*.pyo
 *.so
 .Python
 build/
@@ -48,17 +74,9 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Field Trainer specific
-# Runtime data (don't commit)
-data/logs/
-data/backups/
-*.log
-
-# Configuration with secrets (create .env.example instead)
+# Configuration with secrets
 .env.local
 config/secrets.conf
-
-# Device-specific configuration
 config/device_*.conf
 
 # Test data
@@ -100,5 +118,4 @@ dmypy.json
 
 # Development/temporary files
 *.broken
-*.backup
 *_report.md

@@ -98,11 +98,11 @@
                     </div>
                     <div class="col-md-6">
                         <select id="patternLength" class="form-select form-select-lg">
-                            <option value="4" selected>4 Step Pattern</option>
-                            <option value="5">5 Step Pattern</option>
-                            <option value="6">6 Step Pattern</option>
-                            <option value="7">7 Step Pattern</option>
-                            <option value="8">8 Step Pattern</option>
+                            <option value="4" {% if pattern_length == 4 %}selected{% endif %}>4 Step Pattern</option>
+                            <option value="5" {% if pattern_length == 5 %}selected{% endif %}>5 Step Pattern</option>
+                            <option value="6" {% if pattern_length == 6 %}selected{% endif %}>6 Step Pattern</option>
+                            <option value="7" {% if pattern_length == 7 %}selected{% endif %}>7 Step Pattern</option>
+                            <option value="8" {% if pattern_length == 8 %}selected{% endif %}>8 Step Pattern</option>
                         </select>
                     </div>
                 </div>

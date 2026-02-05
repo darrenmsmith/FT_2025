@@ -36,8 +36,10 @@ from athlete_routes import athlete_bp
 
 # Register sessions blueprint
 from routes.sessions_bp import sessions_bp
+from routes.beep_test_bp import beep_test_bp
 app.register_blueprint(sessions_bp)
 app.register_blueprint(athlete_bp)
+app.register_blueprint(beep_test_bp)
 
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
 

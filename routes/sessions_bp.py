@@ -43,18 +43,32 @@ def create_session():
     try:
         data = request.get_json()
         team_id = data['team_id']
-        course_id = data['course_id']
+        course_id = int(data['course_id'])  # Convert to int for database lookup
         athlete_queue = data['athlete_queue']  # List of athlete_ids in order
         audio_voice = data.get('audio_voice', 'male')
-        
-        # Create session
+
+        # Get course details to check type
+        course = db.get_course(course_id)
+        if not course:
+            return jsonify({'success': False, 'error': 'Course not found'}), 404
+
+        # Check if this is a Beep Test course
+        if course.get('course_type') == 'beep_test':
+            # Redirect to beep test setup with team pre-selected
+            # Beep test has its own flow with dynamic layout based on configuration
+            return jsonify({
+                'success': True,
+                'redirect': f'/beep-test/setup?team_id={team_id}'
+            })
+
+        # Regular course - create session and proceed to cone setup
         session_id = db.create_session(
             team_id=team_id,
             course_id=course_id,
             athlete_queue=athlete_queue,
             audio_voice=audio_voice
         )
-        
+
         # Store in global state
         active_session_state['session_id'] = session_id
 
@@ -81,12 +95,24 @@ def session_setup_cones(session_id):
     # Get timeout from preferences
     prefs = db.get_coach_preferences()
     timeout_minutes = prefs.get('deployment_timeout', 300) // 60
-    
+
+    # Extract pattern_length from session's pattern_config (for Simon Says)
+    pattern_length = 4  # Default
+    if session.get('pattern_config'):
+        import json
+        try:
+            config = json.loads(session['pattern_config']) if isinstance(session['pattern_config'], str) else session['pattern_config']
+            pattern_length = config.get('pattern_length', 4)
+        except:
+            pass
+
     return render_template(
         'session_setup_cones.html',
         session_id=session_id,
+        session=session,
         course=course,
-        timeout_minutes=timeout_minutes
+        timeout_minutes=timeout_minutes,
+        pattern_length=pattern_length
     )
 
 
@@ -170,12 +196,35 @@ def session_status(session_id):
 
     # Get pattern data for pattern mode (to show step-by-step layout)
     pattern_data = None
-    if course_mode == 'pattern' and session_service.session_state.get('active_runs'):
-        # Get pattern from ACTIVE athlete's run_info (each athlete has unique pattern!)
-        for run_id, run_info in session_service.session_state.get('active_runs', {}).items():
-            if run_info.get('is_active', False) and 'pattern_data' in run_info:
-                pattern_data = run_info['pattern_data']
-                break
+    if course_mode == 'pattern':
+        # Try to get pattern from active session first (session is running)
+        if session_service.session_state.get('active_runs'):
+            # Get pattern from ACTIVE athlete's run_info (each athlete has unique pattern!)
+            for run_id, run_info in session_service.session_state.get('active_runs', {}).items():
+                if run_info.get('is_active', False) and 'pattern_data' in run_info:
+                    pattern_data = run_info['pattern_data']
+                    # DEBUG: Log what pattern is being sent to UI
+                    if pattern_data and pattern_data.get('pattern'):
+                        pattern_str = ' → '.join([f"{step['color'].upper()} ({step['device_id'].split('.')[-1]})"
+                                                 for step in pattern_data['pattern']])
+                        print(f"📱 UI Pattern Data (active): {pattern_str}")
+                    break
+
+        # If no active pattern, check pre-generated patterns (session is in 'setup' status)
+        if not pattern_data and hasattr(session_service, 'pre_generated_patterns'):
+            pre_gen = session_service.pre_generated_patterns.get(session_id)
+            if pre_gen and pre_gen.get('athlete_patterns'):
+                # Get first athlete's pattern (first run in queue)
+                first_run = session['runs'][0] if session['runs'] else None
+                if first_run:
+                    first_pattern = pre_gen['athlete_patterns'].get(first_run['run_id'])
+                    if first_pattern:
+                        pattern_data = first_pattern
+                        # DEBUG: Log what pattern is being sent to UI
+                        if pattern_data and pattern_data.get('pattern'):
+                            pattern_str = ' → '.join([f"{step['color'].upper()} ({step['device_id'].split('.')[-1]})"
+                                                     for step in pattern_data['pattern']])
+                            print(f"📱 UI Pattern Data (pre-generated): {pattern_str}")
 
     return jsonify({
         'session': session,
@@ -206,11 +255,39 @@ def stop_session(session_id):
     try:
         data = request.get_json() or {}
         reason = data.get('reason', 'Stopped by coach')
-        
+
         result = session_service.stop_session(session_id, reason)
         return jsonify(result)
     except Exception as e:
         print(f"❌ Stop session error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@sessions_bp.route('/<session_id>/next-athlete', methods=['POST'])
+def next_athlete(session_id):
+    """Continue to Next Athlete button - advance to next athlete in pattern mode"""
+    try:
+        print(f"\n{'='*80}")
+        print(f"👥 NEXT ATHLETE BUTTON CLICKED")
+        print(f"   Session ID: {session_id}")
+        print(f"{'='*80}\n")
+
+        # Call the move to next athlete function
+        has_next_athlete = session_service._move_to_next_athlete()
+
+        if has_next_athlete:
+            print(f"   ✅ Advanced to next athlete")
+            return jsonify({'success': True, 'message': 'Advanced to next athlete'})
+        else:
+            # No more athletes - session should complete
+            print(f"   🎉 No more athletes - completing session")
+            session_service._complete_session(session_id)
+            return jsonify({'success': True, 'message': 'Session completed - no more athletes'})
+
+    except Exception as e:
+        print(f"❌ Next athlete error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -290,12 +367,15 @@ def deploy_course(session_id):
                 # Count number of colored devices in course
                 colored_device_count = len([a for a in db.get_course_actions(course['course_id']) if a['device_id'] != '192.168.99.100'])
 
-                # Force allow_repeats=True if pattern_length > number of devices
-                # (Can't have 6-step pattern with 4 devices without repeats!)
-                allow_repeats = course_config.get('allow_repeats', True)
+                # Set allow_repeats based on pattern_length vs number of devices
                 if int(pattern_length) > colored_device_count:
+                    # MUST allow repeats - can't have 6-step pattern with 4 devices without repeats
                     allow_repeats = True
                     print(f"   ⚠️  Pattern length ({pattern_length}) > devices ({colored_device_count}), forcing allow_repeats=True")
+                else:
+                    # Pattern length <= devices - each cone should appear exactly once (no repeats)
+                    allow_repeats = False
+                    print(f"   ✓ Pattern length ({pattern_length}) <= devices ({colored_device_count}), setting allow_repeats=False")
 
                 # Create pattern_config override
                 pattern_config = {
@@ -326,7 +406,7 @@ def deploy_course(session_id):
                 devices.append({'device_id': device_id, 'device_name': action['device_name']})
                 device_ids_seen.add(device_id)
         
-        # Deploy the course first (loads into REGISTRY)
+        # Deploy the course first (loads into REGISTRY on admin interface)
         course_name = course['course_name']
         import requests
         try:
@@ -335,77 +415,34 @@ def deploy_course(session_id):
                 json={'course_name': course_name},
                 timeout=5
             )
-            print(f"Deploy API: {deploy_resp.status_code}")
+            print(f"Deploy API (admin): {deploy_resp.status_code}")
         except Exception as e:
             print(f"Deploy API error: {e}")
-        
-        # Activate course using existing REGISTRY method
-        REGISTRY.activate_course(course_name)
+
+        # Activate course on admin interface (port 5000) - this controls the devices
+        try:
+            activate_resp = requests.post(
+                'http://localhost:5000/api/course/activate',
+                json={'course_name': course_name},
+                timeout=5
+            )
+            print(f"Activate API (admin): {activate_resp.status_code}")
+            if activate_resp.status_code == 200:
+                print("✅ Course activated on admin REGISTRY (devices will receive LED commands)")
+        except Exception as e:
+            print(f"❌ Activate API error: {e}")
+
+        # DON'T activate in local coach REGISTRY - it has no device connections
+        # Only the admin REGISTRY (port 5000) can control devices via heartbeat
+
+        # LED commands are now sent by the admin interface (port 5000) via the activate API
+        # The coach interface (port 5001) has no device connections and should not send LED commands
 
         # Check if this is a Simon Says course (mode='pattern')
         is_simon_says = course.get('mode') == 'pattern'
 
         if is_simon_says:
-            # Simon Says: Set cones directly to assigned colors
-            import time
-            import json
-
-            print("📍 Simon Says Deploy:")
-            print("   Setting cones to assigned colors...")
-
-            # Set each device to its assigned color from behavior_config
-            for action in actions:
-                device_id = action['device_id']
-                behavior_config = action.get('behavior_config', '')
-
-                # Skip home base (Device 0)
-                if device_id == '192.168.99.100':
-                    continue
-
-                # Parse behavior_config as JSON: {"color": "red"}
-                color = None
-                if behavior_config:
-                    try:
-                        if isinstance(behavior_config, str):
-                            config_dict = json.loads(behavior_config)
-                        else:
-                            config_dict = behavior_config
-                        color = config_dict.get('color')
-                    except (json.JSONDecodeError, AttributeError) as e:
-                        print(f"   ⚠️  Failed to parse behavior_config for {device_id}: {e}")
-                        continue
-
-                # Map color name to LED pattern
-                if color:
-                    pattern_map = {
-                        'red': 'solid_red',
-                        'green': 'solid_green',
-                        'blue': 'solid_blue',
-                        'yellow': 'solid_yellow',
-                        'orange': 'solid_orange',
-                        'white': 'solid_white',
-                        'purple': 'solid_purple',
-                        'cyan': 'solid_cyan'
-                    }
-                    led_pattern = pattern_map.get(color.lower(), 'solid_green')
-                    try:
-                        REGISTRY.set_led(device_id, pattern=led_pattern)
-                        print(f"      {device_id} → {color.upper()} ({led_pattern})")
-                        time.sleep(2.0)  # Delay between commands
-                    except Exception as e:
-                        print(f"   ⚠️  Failed to set {device_id} to {color}: {e}")
-
-            # Wait for heartbeat delivery (up to 10 seconds for all devices)
-            print("   ⏱️  Waiting 12 seconds for devices to display assigned colors...")
-            time.sleep(12.0)
-            print("   ✅ Deploy complete - cones should be at assigned colors")
-        else:
-            # Regular courses: Set all devices to GREEN
-            for device in devices:
-                try:
-                    REGISTRY.set_led(device['device_id'], pattern='solid_green')
-                except Exception as e:
-                    print(f"⚠️  Failed to set {device['device_id']} to green: {e}")
+            print("📍 Simon Says course detected - colors will be set by admin interface")
         
         # Mark course as deployed
         db.mark_course_deployed(session_id)
@@ -418,7 +455,7 @@ def deploy_course(session_id):
             try:
                 import requests
                 color_response = requests.post(
-                    f'http://localhost:5001/api/session/{session_id}/set-simon-colors',
+                    f'http://localhost:5001/session/{session_id}/set-simon-colors',
                     timeout=30
                 )
                 print(f"   Color setting response: {color_response.status_code}")
@@ -428,6 +465,118 @@ def deploy_course(session_id):
                     print(f"   ⚠️  Color setting returned: {color_response.text}")
             except Exception as e:
                 print(f"   ❌ Failed to set colors: {e}")
+
+            # GENERATE PATTERNS FOR ALL ATHLETES NOW (before session starts)
+            print("\n🎲 Generating patterns for all athletes...")
+            try:
+                from field_trainer.pattern_generator import pattern_generator
+                import json
+
+                # Get colored devices from course actions
+                colored_devices = []
+                for action in actions:
+                    if action['device_id'] == '192.168.99.100':  # Skip start device
+                        continue
+
+                    behavior_config = action.get('behavior_config')
+                    if behavior_config:
+                        try:
+                            config = json.loads(behavior_config) if isinstance(behavior_config, str) else behavior_config
+                            color = config.get('color')
+                            if color:
+                                colored_devices.append({
+                                    'device_id': action['device_id'],
+                                    'device_name': action['device_name'],
+                                    'color': color
+                                })
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                if colored_devices:
+                    # Get pattern config from session (with override from pattern_length dropdown)
+                    session_pattern_config_str = session.get('pattern_config')
+                    pattern_length = 4
+                    allow_repeats = True
+                    error_feedback_duration = 4.0
+                    debounce_ms = 1000
+
+                    if session_pattern_config_str:
+                        try:
+                            config = json.loads(session_pattern_config_str) if isinstance(session_pattern_config_str, str) else session_pattern_config_str
+                            pattern_length = config.get('pattern_length', 4)
+                            allow_repeats = config.get('allow_repeats', True)
+                            error_feedback_duration = config.get('error_feedback_duration', 4.0)
+                            debounce_ms = config.get('debounce_ms', 1000)
+                        except:
+                            pass
+
+                    # Get all athletes/runs for this session
+                    all_runs = db.get_session_runs(session_id)
+
+                    # Initialize session_state structure for pre-generated patterns
+                    if not hasattr(session_service, 'pre_generated_patterns'):
+                        session_service.pre_generated_patterns = {}
+
+                    session_service.pre_generated_patterns[session_id] = {
+                        'pattern_config': {
+                            'colored_devices': colored_devices,
+                            'pattern_length': pattern_length,
+                            'allow_repeats': allow_repeats,
+                            'error_feedback_duration': error_feedback_duration,
+                            'debounce_ms': debounce_ms
+                        },
+                        'athlete_patterns': {}
+                    }
+
+                    # Generate unique pattern for each athlete
+                    previous_pattern = None
+                    for idx, run in enumerate(all_runs):
+                        # Generate pattern, avoiding consecutive duplicates
+                        max_attempts = 100
+                        for attempt in range(max_attempts):
+                            pattern = pattern_generator.generate_simon_says_pattern(
+                                colored_devices,
+                                sequence_length=pattern_length,
+                                allow_repeats=allow_repeats
+                            )
+
+                            # Check if this pattern is same as previous athlete's pattern
+                            if previous_pattern is None or not session_service._patterns_match(pattern, previous_pattern):
+                                break  # Found unique pattern
+
+                        pattern_description = pattern_generator.get_pattern_description(pattern)
+                        pattern_device_ids = pattern_generator.get_pattern_device_ids(pattern)
+
+                        # Store pattern for this athlete
+                        pattern_data = {
+                            'pattern': pattern,
+                            'description': pattern_description,
+                            'device_ids': pattern_device_ids,
+                            'colored_devices': colored_devices
+                        }
+
+                        session_service.pre_generated_patterns[session_id]['athlete_patterns'][run['run_id']] = pattern_data
+
+                        # Log pattern to System Log for coach
+                        REGISTRY.log(f"📋 {run['athlete_name']}: {pattern_description}", source="session")
+                        print(f"   ✓ Pattern for {run['athlete_name']}: {pattern_description}")
+
+                        # Create segments for this run so boxes appear in UI immediately
+                        try:
+                            db.create_pattern_segments_for_run(run['run_id'], pattern_device_ids)
+                            print(f"   ✓ Created segments for {run['athlete_name']}")
+                        except Exception as seg_error:
+                            print(f"   ⚠️  Failed to create segments for {run['athlete_name']}: {seg_error}")
+
+                        previous_pattern = pattern
+
+                    print(f"   ✅ Generated {len(all_runs)} unique patterns and created segments")
+                else:
+                    print(f"   ⚠️  No colored devices found for pattern generation")
+            except Exception as e:
+                print(f"   ❌ Failed to generate patterns: {e}")
+                import traceback
+                traceback.print_exc()
 
         return jsonify({
             'success': True,
@@ -497,12 +646,12 @@ def set_simon_colors(session_id):
                         REGISTRY.set_led(device_id, pattern=led_pattern)
                         print(f"      {device_id} → {color.upper()} ({led_pattern})")
                         colors_set.append({'device': device_id, 'color': color})
-                        time.sleep(2.0)  # Spacing between commands
+                        time.sleep(0.1)  # Small delay for command processing
                 except Exception as e:
                     print(f"      ⚠️  Error with {device_id}: {e}")
 
-        print(f"\n   ⏱️  Waiting 12 seconds for colors to display...")
-        time.sleep(12.0)
+        print(f"\n   ⏱️  Waiting for colors to be sent...")
+        time.sleep(0.5)
         print(f"   ✅ Colors set complete\n")
 
         return jsonify({
@@ -564,6 +713,9 @@ def repeat_session(session_id):
         course_id = session['course_id']
         audio_voice = session.get('audio_voice', 'male')
 
+        # Get pattern_config from original session (preserve pattern length for Simon Says)
+        pattern_config_str = session.get('pattern_config')  # Already JSON string or None
+
         # Get athlete queue from original runs (exclude absent athletes)
         athlete_queue = []
         for run in session['runs']:
@@ -573,18 +725,30 @@ def repeat_session(session_id):
         if not athlete_queue:
             return jsonify({'success': False, 'error': 'No athletes to repeat session with'}), 400
 
-        # Create new session
+        # Create new session with SAME pattern_config (preserves pattern length)
         new_session_id = db.create_session(
             team_id=team_id,
             course_id=course_id,
             athlete_queue=athlete_queue,
-            audio_voice=audio_voice
+            audio_voice=audio_voice,
+            pattern_config=pattern_config_str
         )
 
         # Store in global state
         active_session_state['session_id'] = new_session_id
 
-        REGISTRY.log(f"Session {session_id[:8]} repeated as {new_session_id[:8]}")
+        # Log with pattern length if applicable
+        log_msg = f"Session {session_id[:8]} repeated as {new_session_id[:8]}"
+        if pattern_config_str:
+            import json
+            try:
+                config = json.loads(pattern_config_str)
+                pattern_length = config.get('pattern_length')
+                if pattern_length:
+                    log_msg += f" ({pattern_length} colors)"
+            except:
+                pass
+        REGISTRY.log(log_msg)
 
         return jsonify({
             'success': True,
@@ -655,10 +819,23 @@ def continue_session(session_id):
 
         # Create pattern_config override with incremented length
         next_length = current_length + 1
+
+        # Count colored devices in course (exclude D0)
+        colored_devices_count = sum(1 for action in course['actions']
+                                    if action['sequence'] > 0)
+
+        # Determine allow_repeats: must be True if pattern length > number of devices
+        # (Pattern generator already prevents consecutive repeats)
+        if next_length > colored_devices_count:
+            allow_repeats = True
+            print(f"   ℹ️  Pattern length ({next_length}) > devices ({colored_devices_count}), enabling allow_repeats")
+        else:
+            allow_repeats = pattern_config.get('allow_repeats', True)
+
         import json
         pattern_config_override = json.dumps({
             'pattern_length': next_length,
-            'allow_repeats': pattern_config.get('allow_repeats', True),
+            'allow_repeats': allow_repeats,
             'error_feedback_duration': pattern_config.get('error_feedback_duration', 4.0),
             'debounce_ms': pattern_config.get('debounce_ms', 1000)
         })
@@ -675,74 +852,14 @@ def continue_session(session_id):
         # Store in global state
         active_session_state['session_id'] = new_session_id
 
-        REGISTRY.log(f"Session {session_id[:8]} continued to {next_length} cones as {new_session_id[:8]} ({len(successful_athletes)} athletes)")
+        repeat_mode = "with repeats" if allow_repeats else "no repeats"
+        REGISTRY.log(f"Session {session_id[:8]} continued to {next_length} cones ({repeat_mode}) as {new_session_id[:8]} ({len(successful_athletes)} athletes)")
 
-        # Deactivate the old session's course first (important!)
-        # This ensures the new session can properly deploy/activate the course
-        try:
-            REGISTRY.deactivate_course()
-            print(f"✓ Deactivated course from previous session {session_id[:8]}")
-        except Exception as deactivate_error:
-            print(f"⚠️  Course deactivation warning: {deactivate_error}")
-
-        # Small delay to let deactivation propagate
-        import time
-        time.sleep(0.5)
-
-        # Deploy and activate the course (assigns colors to cones)
-        # Call REGISTRY methods directly instead of HTTP API (faster, no timeout issues)
-        course_name = course['course_name']
-        try:
-            # Deploy the course directly (loads into REGISTRY)
-            # This sets each cone to its assigned color with 2-second delays between each
-            print(f"📤 Deploying course: {course_name}")
-            deploy_result = REGISTRY.deploy_course(course_name)
-            print(f"✓ Deploy result: {deploy_result}")
-
-            if not deploy_result.get('success'):
-                raise Exception(f"Deploy failed: {deploy_result.get('error')}")
-
-            # CRITICAL: Wait for all cone colors to be displayed
-            # Deploy sends colors with 2s delay between each (4 cones = ~8s)
-            # Need to wait for the LAST color command to complete
-            print(f"⏳ Waiting for cone colors to display...")
-            time.sleep(3.0)  # Wait for colors to settle
-
-            # Activate course (enables touch detection)
-            print(f"📤 Activating course: {course_name}")
-            activate_result = REGISTRY.activate_course(course_name)
-            print(f"✓ Activate result: {activate_result}")
-
-            if not activate_result.get('success'):
-                raise Exception(f"Activate failed: {activate_result.get('error')}")
-
-            # Wait for activation {"cmd": "start"} to propagate to all devices
-            print(f"⏳ Waiting for activation to propagate...")
-            time.sleep(2.0)
-            print(f"✓ Course deployed and activated - cones showing assigned colors")
-        except Exception as deploy_error:
-            print(f"❌ Course deploy/activate error: {deploy_error}")
-            import traceback
-            traceback.print_exc()
-            # Don't continue - this is critical
-            return jsonify({'success': False, 'error': f'Course activation failed: {str(deploy_error)}'}), 500
-
-        # Auto-start the session (generates pattern, displays it)
-        try:
-            print(f"📤 Calling start_session for: {new_session_id[:8]}")
-            session_service.start_session(new_session_id)
-            REGISTRY.log(f"Session {new_session_id[:8]} auto-started (continue to {next_length})")
-            print(f"✓ Session started successfully")
-        except Exception as start_error:
-            print(f"❌ Auto-start failed: {start_error}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({'success': False, 'error': f'Session start failed: {str(start_error)}'}), 500
-
+        # Redirect to setup-cones page so coach can review athletes before starting
         return jsonify({
             'success': True,
             'new_session_id': new_session_id,
-            'redirect_url': url_for('sessions.session_monitor', session_id=new_session_id),
+            'redirect_url': url_for('sessions.session_setup_cones', session_id=new_session_id),
             'pattern_length': next_length,
             'athlete_count': len(successful_athletes)
         })

@@ -51,6 +51,10 @@ class Registry:
         self.assignments: Dict[str, str] = {}  # node_id -> action
         self.device_0_action: Optional[str] = None  # virtual Device 0 state marker
 
+        # Touch deduplication: track processed (device_id, timestamp) pairs
+        self._processed_touches: Dict[str, float] = {}  # {device_id: timestamp}
+        self._touch_dedup_lock = threading.Lock()
+
         # Optional server-side LED control (Device 0 hardware)
         self._server_led: Optional[LEDManager] = None
         if ENABLE_SERVER_LED:
@@ -88,9 +92,12 @@ class Registry:
         
         # Load courses from database (after DB init)
         self.courses = self._load_courses_from_db() if self.db else load_courses()
-        
+
         # Touch event handler (set by coach_interface)
         self._touch_handler = None
+
+        # Error feedback state (blocks touches during error animation)
+        self.error_feedback_active = False
 
     def _load_courses_from_db(self) -> Dict[str, Any]:
         """Load courses from database in JSON-compatible format for deployment"""
@@ -283,11 +290,16 @@ class Registry:
 
     # ---- LED / Audio / Time (public API; safe even if devices ignore) ----
 
-    def set_led(self, node_id: str, pattern: str) -> bool:
+    def set_led(self, node_id: str, pattern: str, duration: float = None) -> bool:
         """
         Update LED pattern on a device.
         For Device 0, also drive the optional server LED (if enabled on this host).
-        Known patterns: off, solid_green, solid_red, solid_amber, rainbow
+        Known patterns: off, solid_green, solid_red, solid_amber, rainbow, chase_*
+
+        Args:
+            node_id: Device IP address
+            pattern: LED pattern name (solid_red, chase_blue, etc.)
+            duration: Duration in seconds for animations (chase, blink, etc.). None = use client default.
         """
         if node_id == "192.168.99.100":
             if self._server_led:
@@ -305,7 +317,23 @@ class Registry:
             self.log(f"Device 0 LED set -> {pattern}")
             return True
 
-        ok = self.send_to_node(node_id, {"cmd": "led", "pattern": pattern})
+        # Build LED command payload
+        payload = {"cmd": "led", "pattern": pattern}
+
+        # Add duration and delay for animations (based on working strandtest.py timings)
+        if pattern.startswith("chase"):
+            if duration is None:
+                duration = 20000  # milliseconds - how long to run
+            payload["delay"] = 50  # milliseconds - matches theaterChase wait_ms from strandtest.py
+        elif pattern == "rainbow":
+            if duration is None:
+                duration = 20000  # milliseconds - how long to run
+            payload["delay"] = 20  # milliseconds - matches rainbow wait_ms from strandtest.py
+
+        if duration is not None:
+            payload["duration"] = duration
+
+        ok = self.send_to_node(node_id, payload)
         if ok:
             with self.nodes_lock:
                 if node_id in self.nodes:
@@ -397,6 +425,9 @@ class Registry:
             success = 0
             for node_id, action in self.assignments.items():
                 if node_id != "192.168.99.100":
+                    # Send LED command to set to amber (standby/deployed state)
+                    self.send_to_node(node_id, {"cmd": "led", "pattern": "solid_amber"})
+                    # Send deployment data
                     if self.send_to_node(node_id, {"deploy": True, "action": action, "course": course_name}):
                         success += 1
 
@@ -448,6 +479,9 @@ class Registry:
             success = 0
             for node_id in self.assignments.keys():
                 if node_id != "192.168.99.100":
+                    # Send LED command to change to green
+                    self.send_to_node(node_id, {"cmd": "led", "pattern": "solid_green"})
+                    # Send activation command
                     if self.send_to_node(node_id, {"cmd": "start", "course_status": "Active"}):
                         success += 1
 
@@ -524,7 +558,38 @@ class Registry:
         """
         Called when device reports touch event
         Forwards to coach interface for timing logic
+
+        Deduplicates touches: clients report same touch for 3 seconds (reliability),
+        but we only process each unique (device_id, timestamp) once.
         """
+        # DEDUPLICATE: Check if we've already processed this exact touch
+        with self._touch_dedup_lock:
+            last_timestamp = self._processed_touches.get(device_id)
+
+            # If same timestamp (within 10ms tolerance for float comparison), skip
+            # This prevents the same touch from being processed multiple times
+            # (client reports same touch for 4 seconds across multiple heartbeats)
+            if last_timestamp is not None and abs(timestamp - last_timestamp) < 0.01:
+                print(f"🔇 DEDUPLICATING: Touch on {device_id} at {timestamp} already processed (duplicate from persistent reporting)")
+                return
+
+            # DEBOUNCE: Reject NEW touches within 3 seconds on same device
+            # This prevents double-bounces from registering as multiple touches
+            if last_timestamp is not None and (timestamp - last_timestamp) < 3.0:
+                print(f"🔇 DEBOUNCING: Touch on {device_id} at {timestamp} too soon after previous touch at {last_timestamp} ({timestamp - last_timestamp:.2f}s < 3s)")
+                return
+
+            # Clean up old entries (keep only last 10 seconds)
+            # Also remove any non-float entries (from before type fix)
+            current_time = time.time()
+            to_remove = [dev_id for dev_id, ts in self._processed_touches.items()
+                        if not isinstance(ts, (int, float)) or current_time - ts > 10.0]
+            for dev_id in to_remove:
+                del self._processed_touches[dev_id]
+
+            # Record this touch as processed
+            self._processed_touches[device_id] = timestamp
+
         print(f"\n{'='*80}")
         print(f"👆 HANDLE_TOUCH_EVENT CALLED")
         print(f"   Device: {device_id}")
@@ -536,7 +601,7 @@ class Registry:
 
         touch_time = datetime.utcnow()
         self.log(f"Touch event: {device_id} at {touch_time.isoformat()}")
-        
+
         if self._touch_handler:
             try:
                 print(f"   📞 Calling touch handler...")
@@ -550,7 +615,7 @@ class Registry:
         else:
             print(f"   ⚠️  No touch handler registered - ignoring touch")
             self.log("No touch handler registered - touch event ignored", level="warning")
-    
+
         print(f"{'='*80}\n")
 
     def load_active_session(self) -> None:
