@@ -2,23 +2,25 @@
 {% block title %}Beep Test Monitor - Field Trainer{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2 class="mb-0">
-        <i class="fas fa-heartbeat"></i> Beep Test Monitor
+    <div>
+        <h2 class="mb-1">
+            <i class="fas fa-heartbeat"></i> Beep Test
+        </h2>
         {% if session.status == 'active' %}
             <span class="badge bg-success">RUNNING</span>
         {% elif session.status == 'setup' and session.course_deployed %}
-            <span class="badge bg-warning">READY</span>
+            <span class="badge bg-secondary">SETUP</span>
         {% else %}
             <span class="badge bg-secondary">{{ session.status.upper() }}</span>
         {% endif %}
-    </h2>
+    </div>
     <div id="sessionControls">
         {% if session.status == 'setup' and session.course_deployed %}
-            <a href="/dashboard" class="btn btn-secondary me-2">
-                <i class="fas fa-arrow-left"></i> Back
-            </a>
-            <button class="btn btn-success btn-lg" id="startBtn">
-                <i class="fas fa-play"></i> GO
+            <button class="btn btn-secondary me-2" onclick="window.history.back()" style="padding: 12px 24px; font-size: 1.1rem;">
+                Back
+            </button>
+            <button class="btn btn-success" id="startBtn" style="padding: 20px 60px; font-size: 2rem; font-weight: bold;">
+                GO
             </button>
         {% elif session.status == 'active' %}
             <button class="btn btn-danger btn-lg" id="endTestBtn">
@@ -116,6 +118,7 @@ let countdown = 0;
 let countdownInterval = null;
 let previousShuttle = 0;
 let currentPhase = 'running';  // Track current phase
+let previousPhase = 'running';  // Track phase changes
 
 // Load athletes when page loads
 document.addEventListener('DOMContentLoaded', function() {
@@ -143,7 +146,8 @@ document.getElementById('startBtn').addEventListener('click', async function() {
     if (!confirm('Start the beep test? All athletes should be ready at the START line.')) return;
 
     this.disabled = true;
-    this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
+    this.innerHTML = 'Starting...';
+    this.style.fontSize = '1.5rem';
 
     const response = await fetch('/api/beep-test/start', {
         method: 'POST',
@@ -158,7 +162,8 @@ document.getElementById('startBtn').addEventListener('click', async function() {
     } else {
         alert('Error starting test: ' + (result.error || 'Unknown error'));
         this.disabled = false;
-        this.innerHTML = '<i class="fas fa-play"></i> GO';
+        this.innerHTML = 'GO';
+        this.style.fontSize = '2rem';
     }
 });
 {% endif %}
@@ -178,6 +183,14 @@ async function updateStatus() {
             // Update current phase
             currentPhase = state.phase || 'running';
 
+            // Check if phase changed to recovery - reset countdown for recovery period
+            if (currentPhase === 'recovery' && previousPhase !== 'recovery') {
+                shuttleTimeMax = state.shuttle_time_sec;
+                countdown = Math.floor(shuttleTimeMax);
+                console.log('Phase changed to RECOVERY - resetting countdown to', countdown);
+            }
+            previousPhase = currentPhase;
+
             // Check if shuttle changed - reset countdown
             if (state.current_shuttle !== previousShuttle) {
                 previousShuttle = state.current_shuttle;
@@ -185,14 +198,15 @@ async function updateStatus() {
                 countdown = Math.floor(shuttleTimeMax);
             }
 
-            // Only show countdown during RECOVERY phase
+            // Display countdown based on phase
             if (currentPhase === 'recovery') {
+                // RECOVERY (double beep): max on left, countdown on right
                 document.getElementById('shuttleTime').textContent =
                     `${shuttleTimeMax.toFixed(2)} / ${Math.max(0, countdown)}`;
             } else {
-                // During RUNNING phase, just show the time without countdown
+                // RUNNING (single beep): countdown on left, -- on right
                 document.getElementById('shuttleTime').textContent =
-                    `${shuttleTimeMax.toFixed(2)} / --`;
+                    `${Math.max(0, countdown)} / --`;
             }
 
             // Reload athletes to show updated status
@@ -211,12 +225,20 @@ async function updateStatus() {
 }
 
 function updateCountdown() {
-    // Only decrement during RECOVERY phase
-    if (currentPhase === 'recovery' && countdown > 0) {
+    // Decrement countdown every second during active test
+    if (countdown > 0) {
         countdown--;
-        // Update display
-        document.getElementById('shuttleTime').textContent =
-            `${shuttleTimeMax.toFixed(2)} / ${Math.max(0, countdown)}`;
+
+        // Update display based on current phase
+        if (currentPhase === 'recovery') {
+            // RECOVERY: max on left, countdown on right
+            document.getElementById('shuttleTime').textContent =
+                `${shuttleTimeMax.toFixed(2)} / ${Math.max(0, countdown)}`;
+        } else {
+            // RUNNING: countdown on left, -- on right
+            document.getElementById('shuttleTime').textContent =
+                `${Math.max(0, countdown)} / --`;
+        }
     }
 }
 

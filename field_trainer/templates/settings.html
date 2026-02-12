@@ -156,13 +156,26 @@
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <label for="test_led_color" class="form-label">LED Color</label>
+                    <label for="test_led_color" class="form-label">LED Color / Pattern</label>
                     <select class="form-select" id="test_led_color">
-                        <option value="orange">Orange</option>
-                        <option value="blue">Blue</option>
-                        <option value="green">Green</option>
-                        <option value="yellow">Yellow</option>
-                        <option value="red">Red</option>
+                        <optgroup label="Solid Colors">
+                            <option value="orange">Orange</option>
+                            <option value="blue">Blue</option>
+                            <option value="green">Green</option>
+                            <option value="yellow">Yellow</option>
+                            <option value="red">Red</option>
+                            <option value="white">White</option>
+                            <option value="purple">Purple</option>
+                        </optgroup>
+                        <optgroup label="Chase Animations">
+                            <option value="chase_red">Chase Red</option>
+                            <option value="chase_green">Chase Green</option>
+                            <option value="chase_blue">Chase Blue</option>
+                            <option value="chase_yellow">Chase Yellow</option>
+                            <option value="chase_amber">Chase Amber</option>
+                            <option value="chase_white">Chase White</option>
+                            <option value="chase_purple">Chase Purple</option>
+                        </optgroup>
                     </select>
                 </div>
                 <div class="col-md-4 d-flex align-items-end">
@@ -186,6 +199,17 @@
                 </select>
             </div>
             <small class="form-text text-muted">Default LED color when ready</small>
+        </div>
+
+        <div class="mb-3">
+            <label for="chase_pattern" class="form-label fw-bold">Chase Animation Pattern</label>
+            <div style="width: 50%;">
+                <select class="form-select" id="chase_pattern">
+                    <option value="alternating">Pattern 1: Alternating LEDs (Default)</option>
+                    <option value="triple_flash">Pattern 2: Triple Flash</option>
+                </select>
+            </div>
+            <small class="form-text text-muted">Animation pattern for all chase effects (chase_green, chase_red, etc.)</small>
         </div>
     </div>
 </div>

@@ -67,16 +67,26 @@ class AudioManager:
         """
         Play a clip by logical name (without extension). Returns True if started.
         Requires `mpg123` installed on the controller.
+        Uses same method as client cones for consistency.
         """
         path = self._clip_path(clip_name)
         if not path:
             return False
 
         vol = self._volume_to_mpg123_scale(volume_percent if volume_percent is not None else self.settings.volume_percent)
-        cmd = f"mpg123 -q -f {vol} {shlex.quote(path)}"
+
+        # Use same command structure as client cones (audio_manager.py)
+        cmd = [
+            'mpg123',
+            '-q',  # Quiet mode
+            '-a', 'default',  # Use default ALSA device
+            '-f', str(vol),  # Volume control via output scaling
+            path
+        ]
+
         try:
-            # Fire-and-forget so we don't block the server thread
-            subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Fire-and-forget using Popen (non-blocking for server)
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except Exception:
             return False

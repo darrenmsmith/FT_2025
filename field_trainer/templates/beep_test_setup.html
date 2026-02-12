@@ -150,6 +150,18 @@ let athleteQueue = [];
 let absentAthletes = new Set();
 let lastTestData = null;
 
+// Check for team_id URL parameter and auto-select team
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const teamId = urlParams.get('team_id');
+    if (teamId) {
+        const teamSelect = document.getElementById('teamSelect');
+        teamSelect.value = teamId;
+        // Trigger change event to load athletes
+        teamSelect.dispatchEvent(new Event('change'));
+    }
+});
+
 // Load athletes when team selected
 document.getElementById('teamSelect').addEventListener('change', async function() {
     const teamId = this.value;

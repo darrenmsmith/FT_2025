@@ -122,6 +122,7 @@ class DatabaseManager:
                     status TEXT NOT NULL DEFAULT 'setup',
                     audio_voice TEXT DEFAULT 'male',
                     notes TEXT,
+                    pattern_config TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (team_id) REFERENCES teams(team_id),
                     FOREIGN KEY (course_id) REFERENCES courses(course_id),
@@ -144,6 +145,7 @@ class DatabaseManager:
                     started_at TIMESTAMP,
                     completed_at TIMESTAMP,
                     total_time REAL,
+                    timer_start_at TIMESTAMP,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
                     FOREIGN KEY (athlete_id) REFERENCES athletes(athlete_id),
                     FOREIGN KEY (course_id) REFERENCES courses(course_id),
@@ -165,6 +167,7 @@ class DatabaseManager:
                     expected_min_time REAL NOT NULL,
                     expected_max_time REAL NOT NULL,
                     actual_time REAL,
+                    cumulative_time REAL,
                     touch_detected BOOLEAN DEFAULT 0,
                     touch_timestamp TIMESTAMP,
                     alert_raised BOOLEAN DEFAULT 0,
@@ -1706,3 +1709,20 @@ class DatabaseManager:
 
         return round(vo2_max, 1)
 
+
+    def get_course_svg_content(self, course_id):
+        """Load SVG content from file based on course diagram_svg filename"""
+        import os
+        
+        course = self.get_course(course_id)
+        if not course or not course.get('diagram_svg'):
+            return None
+        
+        svg_filename = course['diagram_svg']
+        svg_path = f'/opt/static/svg/courses/{svg_filename}'
+        
+        if os.path.exists(svg_path):
+            with open(svg_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        
+        return None

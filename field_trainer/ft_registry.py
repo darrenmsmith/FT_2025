@@ -46,6 +46,8 @@ class Registry:
         # Course state
         self.course_status: str = "Inactive"
         self.selected_course: Optional[str] = None
+        self.error_feedback_active: bool = False  # Flag for Simon Says error feedback animation
+        self.pattern_display_active: bool = False  # Flag to block touches during pattern display
 
         # courses loaded after DB init below
         self.assignments: Dict[str, str] = {}  # node_id -> action
@@ -393,11 +395,22 @@ class Registry:
 
             self.log(f"Deployed course '{course_name}' with {len(self.assignments)} stations")
 
+            # Determine heartbeat interval based on course mode from database
+            course_mode = "sequential"  # default
+            if self.db:
+                db_course = self.db.get_course(course_name)
+                if db_course:
+                    course_mode = db_course.get("mode", "sequential")
+
+            # Pattern mode (Simon Says) needs faster heartbeat (3s), sequential uses 5s
+            heartbeat_interval = 3 if course_mode == "pattern" else 5
+            self.log(f"Course mode: {course_mode}, heartbeat interval: {heartbeat_interval}s")
+
             # Notify connected devices (skip Device 0)
             success = 0
             for node_id, action in self.assignments.items():
                 if node_id != "192.168.99.100":
-                    if self.send_to_node(node_id, {"deploy": True, "action": action, "course": course_name}):
+                    if self.send_to_node(node_id, {"deploy": True, "action": action, "course": course_name, "heartbeat_interval": heartbeat_interval}):
                         success += 1
 
             # Mark unassigned devices as inactive

@@ -25,17 +25,33 @@ beep_service = BeepTestService(db, REGISTRY)
 
 @beep_test_bp.route('/beep-test/setup')
 def setup():
-    """Beep test setup page"""
-    teams = db.get_all_teams()
-    return render_template('beep_test_setup.html', teams=teams)
+    """Beep test setup page - DEPRECATED: Now uses regular session flow"""
+    # Redirect to regular session setup instead
+    from flask import redirect, url_for
+    return redirect(url_for('sessions.session_setup'))
 
 
 @beep_test_bp.route('/beep-test/monitor/<session_id>')
 def monitor(session_id):
-    """Beep test monitor page"""
-    session = db.get_beep_test_session(session_id)
+    """Beep test monitor page (integrated approach using regular sessions table)"""
+    # Get session from regular sessions table
+    session = db.get_session(session_id)
     if not session:
         return "Session not found", 404
+
+    # Parse beep test config from pattern_config JSON field
+    import json
+    config = {}
+    if session.get('pattern_config'):
+        try:
+            config = json.loads(session['pattern_config'])
+        except:
+            pass
+
+    # Add config fields to session dict for template compatibility
+    session['distance_meters'] = config.get('distance_meters', 20)
+    session['start_level'] = config.get('start_level', 1)
+    session['device_count'] = config.get('device_count', 4)
 
     return render_template('beep_test_monitor.html', session=session)
 
@@ -100,21 +116,43 @@ def results(session_id):
 
 @beep_test_bp.route('/api/beep-test/create-session', methods=['POST'])
 def api_create_session():
-    """Create a new beep test session"""
+    """Create a new beep test session (integrated approach using regular sessions table)"""
     data = request.json
 
     try:
-        # Create session
-        session_id = db.create_beep_test_session(
+        import json
+
+        # Get beep test course ID (course_type = 'beep_test')
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT course_id FROM courses WHERE course_type = 'beep_test' LIMIT 1"
+            ).fetchone()
+            if not row:
+                return jsonify({'success': False, 'error': 'Beep Test course not found in database'}), 500
+            course_id = row[0]
+
+        # Store beep test config in pattern_config JSON field
+        beep_config = {
+            'distance_meters': data['distance_meters'],
+            'device_count': data['device_count'],
+            'start_level': data['start_level']
+        }
+
+        # Create session in REGULAR sessions table (integrated approach)
+        session_id = db.create_session(
             team_id=data['team_id'],
-            distance_meters=data['distance_meters'],
-            device_count=data['device_count'],
-            start_level=data['start_level']
+            course_id=course_id,
+            athlete_queue=data['athlete_ids'],
+            audio_voice='male',  # Default
+            pattern_config=json.dumps(beep_config)
         )
 
-        # Add athletes
+        # Add athletes to beep_test_results table for tracking
         for athlete_id in data['athlete_ids']:
             db.add_athlete_to_beep_test(session_id, athlete_id)
+
+        # Auto-deploy beep test (no cone setup needed)
+        db.mark_course_deployed(session_id)
 
         return jsonify({
             'success': True,

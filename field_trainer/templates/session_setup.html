@@ -25,7 +25,7 @@
                         <select class="form-select" id="courseSelect" required>
                             <option value="">-- Select Course --</option>
                             {% for course in courses %}
-                                <option value="{{ course.course_id }}">{{ course.course_name }}</option>
+                                <option value="{{ course.course_id }}" data-course-type="{{ course.course_type }}">{{ course.course_name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -129,21 +129,21 @@ document.getElementById('createSessionBtn').addEventListener('click', async func
     const teamId = document.getElementById('teamSelect').value;
     const courseId = document.getElementById('courseSelect').value;
     const audioVoice = document.querySelector('input[name="audioVoice"]:checked').value;
-    
+
     if (!teamId || !courseId || athleteQueue.length === 0) {
         alert('Please select team, course, and order athletes');
         return;
     }
-    
+
     this.disabled = true;
     this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
-    
+
     const response = await fetch('/session/create', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({team_id: teamId, course_id: courseId, athlete_queue: athleteQueue, audio_voice: audioVoice})
     });
-    
+
     const result = await response.json();
     if (result.success) {
         window.location.href = result.redirect;

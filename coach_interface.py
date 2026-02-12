@@ -39,6 +39,10 @@ from routes.sessions_bp import sessions_bp
 app.register_blueprint(sessions_bp)
 app.register_blueprint(athlete_bp)
 
+# Register Beep Test blueprint
+from routes.beep_test_bp import beep_test_bp
+app.register_blueprint(beep_test_bp)
+
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
 
 # Configure logging
@@ -792,9 +796,9 @@ def api_deploy_course(session_id):
             print(f"Deploy API: {deploy_resp.status_code}")
         except Exception as e:
             print(f"Deploy API error: {e}")
-        
-        # Activate course using existing REGISTRY method
-        REGISTRY.activate_course(course_name)
+
+        # NOTE: Do NOT activate here - activation happens when GO is pressed
+        # Activating here sends {"cmd": "start"} which overrides colors
 
         # Check if Simon Says - DON'T set to green, we'll set assigned colors separately
         is_simon_says = course.get('mode') == 'pattern'
@@ -820,7 +824,7 @@ def api_deploy_course(session_id):
             try:
                 import requests
                 color_response = requests.post(
-                    f'http://localhost:5001/api/session/{session_id}/set-simon-colors',
+                    f'http://localhost:5001/session/{session_id}/set-simon-colors',
                     timeout=30
                 )
                 print(f"   Response: {color_response.status_code}")
@@ -861,10 +865,16 @@ def view_course(course_id):
     course = db.get_course(course_id)
     if not course:
         return "Course not found", 404
-    
+
+    # Load SVG content from file if filename is stored
+    if course.get('diagram_svg'):
+        svg_content = db.get_course_svg_content(course_id)
+        if svg_content:
+            course['diagram_svg'] = svg_content
+
     actions = db.get_course_actions(course_id)
     course['actions'] = actions
-    
+
     return render_template('course_view.html', course=course)
 
 @app.route('/courses/design')
@@ -877,11 +887,21 @@ def course_design():
     if edit_id:
         course = db.get_course(int(edit_id))
         course['actions'] = db.get_course_actions(int(edit_id))
+        # Load SVG content from file for editing
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(edit_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
     elif duplicate_id:
         course = db.get_course(int(duplicate_id))
         course['actions'] = db.get_course_actions(int(duplicate_id))
         course['course_name'] = f"{course['course_name']} (Copy)"
         course['is_builtin'] = 0
+        # Load SVG content from file for duplication
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(duplicate_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
 
     return render_template('course_design_v5.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
 
@@ -895,11 +915,21 @@ def course_design_v2():
     if edit_id:
         course = db.get_course(int(edit_id))
         course['actions'] = db.get_course_actions(int(edit_id))
+        # Load SVG content from file for editing
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(edit_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
     elif duplicate_id:
         course = db.get_course(int(duplicate_id))
         course['actions'] = db.get_course_actions(int(duplicate_id))
         course['course_name'] = f"{course['course_name']} (Copy)"
         course['is_builtin'] = 0
+        # Load SVG content from file for duplication
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(duplicate_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
 
     return render_template('course_design_v2.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
 
@@ -913,11 +943,21 @@ def course_design_v3():
     if edit_id:
         course = db.get_course(int(edit_id))
         course['actions'] = db.get_course_actions(int(edit_id))
+        # Load SVG content from file for editing
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(edit_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
     elif duplicate_id:
         course = db.get_course(int(duplicate_id))
         course['actions'] = db.get_course_actions(int(duplicate_id))
         course['course_name'] = f"{course['course_name']} (Copy)"
         course['is_builtin'] = 0
+        # Load SVG content from file for duplication
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(duplicate_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
 
     return render_template('course_design_v3.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
 
@@ -931,11 +971,21 @@ def course_design_v4():
     if edit_id:
         course = db.get_course(int(edit_id))
         course['actions'] = db.get_course_actions(int(edit_id))
+        # Load SVG content from file for editing
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(edit_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
     elif duplicate_id:
         course = db.get_course(int(duplicate_id))
         course['actions'] = db.get_course_actions(int(duplicate_id))
         course['course_name'] = f"{course['course_name']} (Copy)"
         course['is_builtin'] = 0
+        # Load SVG content from file for duplication
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(duplicate_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
 
     return render_template('course_design_v4.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
 
@@ -1007,6 +1057,28 @@ def save_course():
         # Calculate total distance
         total_distance = sum(a.get('distance', 0) for a in actions)
 
+        # Handle SVG diagram - save to file instead of database
+        svg_filename = None
+        svg_content = data.get('diagram_svg')
+        if svg_content:
+            import os
+            import re
+
+            # Generate filename from course name (sanitize)
+            safe_name = re.sub(r'[^\w\s-]', '', data['course_name']).strip()
+            safe_name = re.sub(r'[-\s]+', '_', safe_name).lower()
+            svg_filename = f"{safe_name}.svg"
+
+            # Save SVG to file
+            svg_dir = '/opt/static/svg/courses'
+            os.makedirs(svg_dir, exist_ok=True)
+            svg_path = os.path.join(svg_dir, svg_filename)
+
+            with open(svg_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+
+            print(f"   ✓ Saved SVG diagram to {svg_path}")
+
         # Prepare course data for import
         course_data = {
             'course_name': data['course_name'],
@@ -1016,7 +1088,7 @@ def save_course():
             'num_devices': data.get('num_devices', len(actions)),
             'distance_unit': data.get('distance_unit', 'yards'),
             'total_distance': total_distance,
-            'diagram_svg': data.get('diagram_svg'),
+            'diagram_svg': svg_filename,  # Store filename, not content
             'layout_instructions': data.get('instruction', ''),
             'version': '2.0',
             'actions': actions
@@ -1222,11 +1294,21 @@ def course_design_v5():
     if edit_id:
         course = db.get_course(int(edit_id))
         course['actions'] = db.get_course_actions(int(edit_id))
+        # Load SVG content from file for editing
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(edit_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
     elif duplicate_id:
         course = db.get_course(int(duplicate_id))
         course['actions'] = db.get_course_actions(int(duplicate_id))
         course['course_name'] = f"{course['course_name']} (Copy)"
         course['is_builtin'] = 0
+        # Load SVG content from file for duplication
+        if course.get('diagram_svg'):
+            svg_content = db.get_course_svg_content(int(duplicate_id))
+            if svg_content:
+                course['diagram_svg'] = svg_content
 
     return render_template('course_design_v5.html', course=course, mode='edit' if edit_id else 'duplicate' if duplicate_id else 'new')
 
@@ -1733,7 +1815,9 @@ def test_led():
             'chase_green': 'chase_green',
             'chase_blue': 'chase_blue',
             'chase_yellow': 'chase_yellow',
-            'chase_amber': 'chase_amber'
+            'chase_amber': 'chase_amber',
+            'chase_white': 'chase_white',
+            'chase_purple': 'chase_purple'
         }
 
         pattern = color_map.get(color, 'solid_amber')

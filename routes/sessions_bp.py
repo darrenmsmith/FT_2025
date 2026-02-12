@@ -77,11 +77,17 @@ def session_setup_cones(session_id):
     course = db.get_course(session['course_id'])
     if not course:
         return "Course not found", 404
-    
+
+    # Load SVG content from file if filename is stored
+    if course.get('diagram_svg'):
+        svg_content = db.get_course_svg_content(session['course_id'])
+        if svg_content:
+            course['diagram_svg'] = svg_content
+
     # Get timeout from preferences
     prefs = db.get_coach_preferences()
     timeout_minutes = prefs.get('deployment_timeout', 300) // 60
-    
+
     return render_template(
         'session_setup_cones.html',
         session_id=session_id,
@@ -116,10 +122,14 @@ def session_monitor(session_id):
     session = db.get_session(session_id)
     if not session:
         return "Session not found", 404
-    
+
     team = db.get_team(session['team_id'])
     course = db.get_course(session['course_id'])
-    
+
+    # Redirect Beep Test sessions to beep test monitor
+    if course.get('course_type') == 'beep_test':
+        return redirect(url_for('beep_test.monitor', session_id=session_id))
+
     return render_template(
         'session_monitor.html',
         session=session,
@@ -257,6 +267,10 @@ def prepare_course(session_id):
 @sessions_bp.route('/<session_id>/deploy-course', methods=['POST'])
 def deploy_course(session_id):
     """Deploy course - set devices to GREEN and activate"""
+    import time
+    import json
+    import requests
+
     print(f"\n{'='*80}")
     print(f"🔵 SESSIONS_BP.DEPLOY_COURSE CALLED (Blueprint route)")
     print(f"   Session ID: {session_id}")
@@ -267,12 +281,40 @@ def deploy_course(session_id):
         print(f"   Course: {course['course_name']}")
         print(f"   Mode: {course.get('mode')}")
 
+        # Get request data
+        from flask import request
+        request_data = request.get_json() or {}
+
+        # For Beep Test courses, save configuration and setup athletes
+        if course.get('course_type') == 'beep_test':
+            beep_config = request_data.get('beep_test_config')
+            if beep_config:
+                print(f"   📊 Beep Test config specified: {beep_config}")
+
+                # Update session with beep test config
+                with db.get_connection() as conn:
+                    conn.execute('''
+                        UPDATE sessions
+                        SET pattern_config = ?
+                        WHERE session_id = ?
+                    ''', (json.dumps(beep_config), session_id))
+
+                print(f"   ✅ Beep Test config saved to session")
+
+            # Add athletes to beep_test_results table for tracking
+            print(f"   👥 Adding athletes to beep test tracking...")
+            for run in session['runs']:
+                if run['status'] != 'absent':
+                    try:
+                        db.add_athlete_to_beep_test(session_id, run['athlete_id'])
+                        print(f"      ✅ Added athlete: {run['athlete_name']}")
+                    except Exception as e:
+                        print(f"      ⚠️  Failed to add athlete {run['athlete_name']}: {e}")
+
+            print(f"   ✅ Beep Test athletes ready")
+
         # For Simon Says courses, check if pattern_length was specified
         if course.get('mode') == 'pattern':
-            from flask import request
-            import json
-
-            request_data = request.get_json() or {}
             pattern_length = request_data.get('pattern_length')
 
             if pattern_length:
@@ -328,7 +370,6 @@ def deploy_course(session_id):
         
         # Deploy the course first (loads into REGISTRY)
         course_name = course['course_name']
-        import requests
         try:
             deploy_resp = requests.post(
                 'http://localhost:5000/api/course/deploy',
@@ -338,7 +379,7 @@ def deploy_course(session_id):
             print(f"Deploy API: {deploy_resp.status_code}")
         except Exception as e:
             print(f"Deploy API error: {e}")
-        
+
         # Activate course using existing REGISTRY method
         REGISTRY.activate_course(course_name)
 
@@ -346,14 +387,9 @@ def deploy_course(session_id):
         is_simon_says = course.get('mode') == 'pattern'
 
         if is_simon_says:
-            # Simon Says: Set cones directly to assigned colors
-            import time
-            import json
-
-            print("📍 Simon Says Deploy:")
-            print("   Setting cones to assigned colors...")
-
-            # Set each device to its assigned color from behavior_config
+            # Simon Says: Set cones to assigned colors
+            print("\n📍 Simon Says - Setting assigned colors...")
+            # Set each device to its assigned color
             for action in actions:
                 device_id = action['device_id']
                 behavior_config = action.get('behavior_config', '')
@@ -389,18 +425,18 @@ def deploy_course(session_id):
                     }
                     led_pattern = pattern_map.get(color.lower(), 'solid_green')
                     try:
+                        # Send LED command - it will persist (heartbeat doesn't override)
                         REGISTRY.set_led(device_id, pattern=led_pattern)
-                        print(f"      {device_id} → {color.upper()} ({led_pattern})")
-                        time.sleep(2.0)  # Delay between commands
+                        print(f"   ✅ {device_id} → {color.upper()} ({led_pattern})")
                     except Exception as e:
-                        print(f"   ⚠️  Failed to set {device_id} to {color}: {e}")
+                        print(f"   ❌ Failed to set {device_id} to {color}: {e}")
 
-            # Wait for heartbeat delivery (up to 10 seconds for all devices)
-            print("   ⏱️  Waiting 12 seconds for devices to display assigned colors...")
-            time.sleep(12.0)
-            print("   ✅ Deploy complete - cones should be at assigned colors")
+            print(f"\n   ✅ Simon Says colors set - should persist indefinitely")
         else:
-            # Regular courses: Set all devices to GREEN
+            # Regular courses: Activate then set to GREEN
+            print("\n🟢 Regular course - activating and setting green...")
+            REGISTRY.activate_course(course_name)
+            time.sleep(0.5)  # Brief delay for activation to process
             for device in devices:
                 try:
                     REGISTRY.set_led(device['device_id'], pattern='solid_green')
@@ -412,22 +448,8 @@ def deploy_course(session_id):
 
         REGISTRY.log(f"Course deployed: {course['course_name']}")
 
-        # If Simon Says, IMMEDIATELY set assigned colors after deploy
-        if is_simon_says:
-            print("\n🎨 Simon Says detected - setting assigned colors NOW...")
-            try:
-                import requests
-                color_response = requests.post(
-                    f'http://localhost:5001/api/session/{session_id}/set-simon-colors',
-                    timeout=30
-                )
-                print(f"   Color setting response: {color_response.status_code}")
-                if color_response.status_code == 200:
-                    print(f"   ✅ Assigned colors set successfully")
-                else:
-                    print(f"   ⚠️  Color setting returned: {color_response.text}")
-            except Exception as e:
-                print(f"   ❌ Failed to set colors: {e}")
+        # Colors already set above (lines 354-407) - no need to call set-simon-colors again
+        # That was causing a duplicate 12+ second delay
 
         return jsonify({
             'success': True,

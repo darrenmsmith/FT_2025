@@ -161,8 +161,8 @@ class BeepTestService:
             else:
                 self.timing_table = LEGER_20M_TABLE
 
-            # Calculate device IDs based on device count
-            self.device_ids = [f"192.168.99.{100 + i}" for i in range(1, device_count + 1)]
+            # Calculate device IDs based on device count (including Device 0)
+            self.device_ids = ["192.168.99.100"] + [f"192.168.99.{100 + i}" for i in range(1, device_count + 1)]
 
             print(f"\n✅ Timing configuration:")
             print(f"   Using {self.distance_meters}m Léger table")
@@ -268,6 +268,12 @@ class BeepTestService:
                 print(f"🔊 Level {self.current_level}, Shuttle {self.current_shuttle}/{total_shuttles}")
                 self.registry.log(f"🏃 Shuttle {self.current_shuttle}/{total_shuttles} (Level {self.current_level})")
                 self.current_phase = 'running'
+
+                # Set all devices to GREEN for RUNNING phase
+                print(f"   💡 LEDs → GREEN (running)")
+                for device_id in self.device_ids:
+                    self.registry.set_led(device_id, 'solid_green')
+
                 self._play_beep(beep_count=1)
 
                 # Wait for shuttle time (RUNNING phase)
@@ -280,6 +286,12 @@ class BeepTestService:
                 # Recovery time: Athletes walk back and prepare (equal to shuttle time)
                 print(f"   ⏱  Recovery time: {shuttle_time:.2f}s (walk back)")
                 self.current_phase = 'recovery'
+
+                # Set all devices to AMBER for RECOVERY phase
+                print(f"   💡 LEDs → AMBER (recovery)")
+                for device_id in self.device_ids:
+                    self.registry.set_led(device_id, 'solid_amber')
+
                 time.sleep(shuttle_time)
 
                 # Increment shuttle and reset phase for next shuttle
@@ -446,6 +458,22 @@ class BeepTestService:
                 conn.execute('UPDATE sessions SET status = ? WHERE session_id = ?', ('incomplete', session_id))
             print(f"✅ Session marked as incomplete in database")
 
+            # Deactivate course and return to standby
+            print(f"🏁 Deactivating course - returning to standby...")
+            self.registry.course_status = "Deployed"  # Keep course deployed, just not active
+
+            # Send stop command to all devices
+            for device_id in self.device_ids:
+                if device_id != "192.168.99.100":
+                    self.registry.send_to_node(device_id, {
+                        "cmd": "stop",
+                        "action": None,
+                        "course_status": "Deployed"
+                    })
+
+            # Clear assignments
+            self.registry.assignments.clear()
+
             # Reset LEDs to amber (standby)
             print(f"💡 Resetting LEDs to amber...")
             for device_id in self.device_ids:
@@ -489,6 +517,22 @@ class BeepTestService:
             with self.db.get_connection() as conn:
                 conn.execute('UPDATE sessions SET status = ? WHERE session_id = ?', ('completed', self.active_session_id))
             print(f"✅ Session marked as completed in database")
+
+            # Deactivate course and return to standby
+            print(f"🏁 Deactivating course - returning to standby...")
+            self.registry.course_status = "Deployed"  # Keep course deployed, just not active
+
+            # Send stop command to all devices
+            for device_id in self.device_ids:
+                if device_id != "192.168.99.100":
+                    self.registry.send_to_node(device_id, {
+                        "cmd": "stop",
+                        "action": None,
+                        "course_status": "Deployed"
+                    })
+
+            # Clear assignments
+            self.registry.assignments.clear()
 
             # Reset LEDs to amber
             print(f"💡 Resetting LEDs to amber...")

@@ -85,6 +85,7 @@ function populateSettings(settings) {
 
     // Device behavior
     document.getElementById('ready_led_color').value = settings.ready_led_color || 'orange';
+    document.getElementById('chase_pattern').value = settings.chase_pattern || 'alternating';
     // ready_audio_target was removed from UI
 
     // Network configuration
@@ -387,6 +388,41 @@ function attachEventListeners() {
             } catch (error) {
                 console.error('[Settings] Error auto-saving ready_led_color:', error);
                 showStatus('Error saving ready LED color', 'danger');
+            }
+        });
+    }
+
+    // Auto-save chase pattern
+    const chasePattern = document.getElementById('chase_pattern');
+    if (chasePattern) {
+        chasePattern.addEventListener('change', async function() {
+            const key = 'chase_pattern';
+            const value = this.value;
+
+            console.log(`[Settings] Auto-saving chase_pattern: ${value}`);
+
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ key, value })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    console.log(`[Settings] ✓ Chase pattern saved: ${value}`);
+                    const patternName = value === 'alternating' ? 'Alternating LEDs' : 'Triple Flash';
+                    showStatus(`Chase pattern changed to ${patternName}`, 'success');
+                    originalSettings[key] = value;
+                } else {
+                    console.error('[Settings] Failed to save chase_pattern:', data.error);
+                    showStatus('Failed to save chase pattern', 'danger');
+                }
+            } catch (error) {
+                console.error('[Settings] Error auto-saving chase_pattern:', error);
+                showStatus('Error saving chase pattern', 'danger');
             }
         });
     }

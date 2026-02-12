@@ -25,6 +25,22 @@ class LEDState(Enum):
     SOFTWARE_ERROR = "software_error"      # Red solid
     NETWORK_ERROR = "network_error"        # Red blinking
     COURSE_COMPLETE = "course_complete"    # Rainbow animation
+    # Simon Says solid color states
+    SOLID_RED = "solid_red"
+    SOLID_GREEN = "solid_green"
+    SOLID_BLUE = "solid_blue"
+    SOLID_YELLOW = "solid_yellow"
+    SOLID_WHITE = "solid_white"
+    SOLID_PURPLE = "solid_purple"
+    SOLID_CYAN = "solid_cyan"
+    # Simon Says chase animation states
+    CHASE_RED = "chase_red"
+    CHASE_GREEN = "chase_green"
+    CHASE_BLUE = "chase_blue"
+    CHASE_YELLOW = "chase_yellow"
+    CHASE_AMBER = "chase_amber"
+    CHASE_WHITE = "chase"
+    CHASE_PURPLE = "chase_purple"
 
 class ClientLEDManager:
     """Client-side LED management"""
@@ -34,6 +50,9 @@ class ClientLEDManager:
         self.strip = None
         self.current_state = LEDState.OFF
         self.blink_state = False
+        self.animation_running = False  # Flag to prevent LED changes during animations
+        self.pending_state = None  # State to apply after animation completes
+        self.chase_pattern = 'alternating'  # Default chase pattern
 
         # Initialize LED hardware
         try:
@@ -54,6 +73,15 @@ class ClientLEDManager:
         if not self.led_enabled:
             return
 
+        # Store pending LED commands during chase animations (except for new chase commands)
+        if self.animation_running and state not in [LEDState.CHASE_RED, LEDState.CHASE_GREEN,
+                                                      LEDState.CHASE_BLUE, LEDState.CHASE_YELLOW,
+                                                      LEDState.CHASE_AMBER, LEDState.CHASE_WHITE,
+                                                      LEDState.CHASE_PURPLE]:
+            self.pending_state = state
+            print(f"⏸️  Storing LED command for after animation: {state.value}")
+            return
+
         self.current_state = state
 
         try:
@@ -71,6 +99,28 @@ class ClientLEDManager:
                 color = self.Color(255, 0, 0)    # Red
             elif state == LEDState.COURSE_COMPLETE:
                 color = self.Color(128, 0, 255)  # Purple
+            # Simon Says colors
+            elif state == LEDState.SOLID_RED:
+                color = self.Color(255, 0, 0)    # Red
+            elif state == LEDState.SOLID_GREEN:
+                color = self.Color(0, 255, 0)    # Green
+            elif state == LEDState.SOLID_BLUE:
+                color = self.Color(0, 0, 255)    # Blue
+            elif state == LEDState.SOLID_YELLOW:
+                color = self.Color(255, 255, 0)  # Yellow
+            elif state == LEDState.SOLID_WHITE:
+                color = self.Color(255, 255, 255)  # White
+            elif state == LEDState.SOLID_PURPLE:
+                color = self.Color(128, 0, 255)  # Purple
+            elif state == LEDState.SOLID_CYAN:
+                color = self.Color(0, 255, 255)  # Cyan
+            # Simon Says chase animations
+            elif state in [LEDState.CHASE_RED, LEDState.CHASE_GREEN, LEDState.CHASE_BLUE,
+                          LEDState.CHASE_YELLOW, LEDState.CHASE_AMBER, LEDState.CHASE_WHITE,
+                          LEDState.CHASE_PURPLE]:
+                # Chase patterns are animated - start the animation
+                self._start_chase_animation(state)
+                return  # Animation handles its own display
             else:
                 color = self.Color(0, 0, 0)
 
@@ -84,12 +134,114 @@ class ClientLEDManager:
         except Exception as e:
             print(f"LED update error: {e}")
 
+    def _start_chase_animation(self, state: LEDState):
+        """Start a chase animation in a background thread"""
+        import threading
+
+        # Map chase state to color
+        chase_colors = {
+            LEDState.CHASE_RED: self.Color(255, 0, 0),
+            LEDState.CHASE_GREEN: self.Color(0, 255, 0),
+            LEDState.CHASE_BLUE: self.Color(0, 0, 255),
+            LEDState.CHASE_YELLOW: self.Color(255, 255, 0),
+            LEDState.CHASE_AMBER: self.Color(255, 165, 0),
+            LEDState.CHASE_WHITE: self.Color(255, 255, 255),
+            LEDState.CHASE_PURPLE: self.Color(128, 0, 255)
+        }
+
+        color = chase_colors.get(state, self.Color(255, 255, 255))
+
+        def alternating_pattern():
+            """Pattern 1: Alternating LEDs (odd/even switching)"""
+            cycles = 10  # Number of alternations
+            delay = 0.15  # seconds per cycle
+
+            for cycle in range(cycles):
+                # Clear all LEDs
+                for i in range(15):
+                    self.strip.setPixelColor(i, self.Color(0, 0, 0))
+
+                # Light up even LEDs (0, 2, 4, 6, ...)
+                if cycle % 2 == 0:
+                    for i in range(0, 15, 2):
+                        self.strip.setPixelColor(i, color)
+                # Light up odd LEDs (1, 3, 5, 7, ...)
+                else:
+                    for i in range(1, 15, 2):
+                        self.strip.setPixelColor(i, color)
+
+                self.strip.show()
+                time.sleep(delay)
+
+            # Clear at end
+            for i in range(15):
+                self.strip.setPixelColor(i, self.Color(0, 0, 0))
+            self.strip.show()
+
+        def triple_flash_pattern():
+            """Pattern 2: Triple Flash (all LEDs flash 3 times)"""
+            flashes = 3
+            on_time = 0.1  # seconds
+            off_time = 0.1  # seconds
+
+            for flash in range(flashes):
+                # All on
+                for i in range(15):
+                    self.strip.setPixelColor(i, color)
+                self.strip.show()
+                time.sleep(on_time)
+
+                # All off
+                for i in range(15):
+                    self.strip.setPixelColor(i, self.Color(0, 0, 0))
+                self.strip.show()
+                time.sleep(off_time)
+
+        def animate():
+            """Run chase animation based on configured pattern"""
+            self.animation_running = True  # Block LED commands during animation
+            print(f"Starting chase animation: {state.value}")
+            try:
+                # Get chase pattern from settings (default to alternating)
+                pattern = getattr(self, 'chase_pattern', 'alternating')
+
+                if pattern == 'triple_flash':
+                    triple_flash_pattern()
+                else:  # default to alternating
+                    alternating_pattern()
+
+                print(f"Chase animation complete: {state.value}")
+
+            except Exception as e:
+                print(f"Chase animation error: {e}")
+            finally:
+                self.animation_running = False  # Re-enable LED commands
+                print(f"✓ Animation lock released")
+
+                # Apply pending LED state if one was received during animation
+                if self.pending_state:
+                    print(f"▶️  Applying pending LED command: {self.pending_state.value}")
+                    pending = self.pending_state
+                    self.pending_state = None
+                    self.set_state(pending)
+
+        # Run animation in background thread
+        thread = threading.Thread(target=animate, daemon=True)
+        thread.start()
+
     def process_led_command(self, led_command):
         """Process LED command from server"""
         if not led_command or not self.led_enabled:
             return
 
         try:
+            # Update chase pattern if provided
+            if 'chase_pattern' in led_command:
+                pattern = led_command['chase_pattern']
+                if pattern in ['alternating', 'triple_flash']:
+                    self.chase_pattern = pattern
+                    print(f"Chase pattern updated to: {pattern}")
+
             state_name = led_command.get("state", "off")
             led_state = LEDState(state_name)
             self.set_state(led_state)
@@ -136,6 +288,7 @@ def connect_to_device0(node_id):
     # Track current action assignment (use list for mutable reference in lambda)
     current_action = [None]
     touch_detection_active = [False]
+    heartbeat_interval = [5]  # Default 5 seconds, can be changed by deployment
 
     # Set touch callback with audio manager and current action
     touch_sensor.set_touch_callback(lambda: touch_detected_callback(audio_manager, current_action[0]))
@@ -200,23 +353,57 @@ def connect_to_device0(node_id):
                             if "led_command" in data:
                                 led_manager.process_led_command(data["led_command"])
 
+                            # Process led_pattern from heartbeat (Simon Says assigned colors)
+                            if "led_pattern" in data:
+                                pattern = data["led_pattern"]
+                                # Use same state_map as direct commands
+                                state_map = {
+                                    "off": LEDState.OFF,
+                                    "solid_green": LEDState.SOLID_GREEN,
+                                    "solid_blue": LEDState.SOLID_BLUE,
+                                    "solid_red": LEDState.SOLID_RED,
+                                    "solid_yellow": LEDState.SOLID_YELLOW,
+                                    "solid_white": LEDState.SOLID_WHITE,
+                                    "solid_purple": LEDState.SOLID_PURPLE,
+                                    "solid_cyan": LEDState.SOLID_CYAN,
+                                    "solid_amber": LEDState.MESH_CONNECTED,
+                                    "chase_red": LEDState.CHASE_RED,
+                                    "chase_green": LEDState.CHASE_GREEN,
+                                    "chase_blue": LEDState.CHASE_BLUE,
+                                    "chase_yellow": LEDState.CHASE_YELLOW
+                                }
+                                led_state = state_map.get(pattern, LEDState.OFF)
+                                led_manager.set_state(led_state)
+
                             # Process direct LED command (test format)
                             if "cmd" in data and data["cmd"] == "led":
                                 pattern = data.get("pattern", "off")
                                 print(f"💡 Received LED command: {pattern}")
-                                # Map pattern to LED state
+                                # Map pattern to LED state - UPDATED for Simon Says with chase support
                                 state_map = {
                                     "off": LEDState.OFF,
-                                    "solid_green": LEDState.COURSE_ACTIVE,
-                                    "solid_blue": LEDState.COURSE_DEPLOYED,  # True blue
-                                    "solid_red": LEDState.SOFTWARE_ERROR,
+                                    "solid_green": LEDState.SOLID_GREEN,
+                                    "solid_blue": LEDState.SOLID_BLUE,
+                                    "solid_red": LEDState.SOLID_RED,
+                                    "solid_yellow": LEDState.SOLID_YELLOW,
+                                    "solid_white": LEDState.SOLID_WHITE,
+                                    "solid_purple": LEDState.SOLID_PURPLE,
+                                    "solid_cyan": LEDState.SOLID_CYAN,
                                     "solid_amber": LEDState.MESH_CONNECTED,
                                     "blink_amber": LEDState.MESH_CONNECTED,
-                                    "rainbow": LEDState.COURSE_COMPLETE  # Purple
+                                    "rainbow": LEDState.COURSE_COMPLETE,
+                                    # Chase patterns for Simon Says
+                                    "chase_red": LEDState.CHASE_RED,
+                                    "chase_green": LEDState.CHASE_GREEN,
+                                    "chase_blue": LEDState.CHASE_BLUE,
+                                    "chase_yellow": LEDState.CHASE_YELLOW,
+                                    "chase_amber": LEDState.CHASE_AMBER,
+                                    "chase": LEDState.CHASE_WHITE,
+                                    "chase_purple": LEDState.CHASE_PURPLE
                                 }
                                 led_state = state_map.get(pattern, LEDState.OFF)
                                 led_manager.set_state(led_state)
-                                print(f"✓ LED set to: {pattern}")
+                                print(f"✓ LED set to: {pattern} -> {led_state.value}")
 
                             # Process audio command if present
                             if "cmd" in data and data["cmd"] == "audio":
@@ -265,6 +452,13 @@ def connect_to_device0(node_id):
                                         except Exception as e:
                                             print(f"✗ Failed to update threshold: {e}")
 
+                            # Update heartbeat interval if deployment message includes it
+                            if "heartbeat_interval" in data:
+                                new_interval = data["heartbeat_interval"]
+                                if new_interval != heartbeat_interval[0]:
+                                    heartbeat_interval[0] = new_interval
+                                    print(f"📡 Heartbeat interval changed to {new_interval}s")
+
                             # Update current action assignment and touch detection state
                             action = data.get("action")
                             course_status = data.get("course_status", "Inactive")
@@ -294,7 +488,7 @@ def connect_to_device0(node_id):
                         except json.JSONDecodeError as e:
                             print(f"JSON decode error for message '{message}': {e}")
 
-                time.sleep(5)
+                time.sleep(heartbeat_interval[0])
 
         except ConnectionRefusedError:
             print("Connection refused - Device 0 server not available")

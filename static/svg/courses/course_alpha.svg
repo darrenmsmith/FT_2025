@@ -1,0 +1,89 @@
+<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Grid background (50x50 yards) -->
+  <defs>
+    <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+      <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="500" height="500" fill="white"/>
+  <rect width="500" height="500" fill="url(#grid)"/>
+  
+  <!-- Distance labels -->
+  <text x="250" y="30" text-anchor="middle" font-size="14" fill="#666">50 yards →</text>
+  
+  <!-- Course Alpha Path (same as Course A) -->
+  <!-- Start Cone (Device 0) -->
+  <g id="cone-start">
+    <circle cx="100" cy="250" r="20" fill="white" stroke="#4CAF50" stroke-width="3"/>
+    <text x="100" y="255" text-anchor="middle" font-size="16" font-weight="bold" fill="#4CAF50">S</text>
+    <!-- Green arrow -->
+    <path d="M 120 250 L 145 250 L 140 245 M 145 250 L 140 255" 
+          stroke="#4CAF50" stroke-width="3" fill="none"/>
+  </g>
+  
+  <!-- Cone 1 (Device 1) -->
+  <g id="cone-1">
+    <circle cx="200" cy="250" r="20" fill="white" stroke="#FF9800" stroke-width="3"/>
+    <text x="200" y="255" text-anchor="middle" font-size="16" font-weight="bold" fill="#FF9800">1</text>
+    <!-- Orange arrow -->
+    <path d="M 220 250 L 245 250 L 240 245 M 245 250 L 240 255" 
+          stroke="#FF9800" stroke-width="3" fill="none"/>
+    <text x="160" y="240" font-size="12" fill="#666">5 yd</text>
+  </g>
+  
+  <!-- Cone 2 (Device 2) -->
+  <g id="cone-2">
+    <circle cx="300" cy="200" r="20" fill="white" stroke="#FF9800" stroke-width="3"/>
+    <text x="300" y="205" text-anchor="middle" font-size="16" font-weight="bold" fill="#FF9800">2</text>
+    <!-- Orange arrow pointing down-left -->
+    <path d="M 285 215 L 265 235 L 270 233 M 265 235 L 267 230" 
+          stroke="#FF9800" stroke-width="3" fill="none"/>
+    <text x="250" y="220" font-size="12" fill="#666">5 yd</text>
+  </g>
+  
+  <!-- Cone 3 (Device 3) -->
+  <g id="cone-3">
+    <circle cx="300" cy="300" r="20" fill="white" stroke="#FF9800" stroke-width="3"/>
+    <text x="300" y="305" text-anchor="middle" font-size="16" font-weight="bold" fill="#FF9800">3</text>
+    <!-- Orange arrow pointing right -->
+    <path d="M 320 300 L 345 300 L 340 295 M 345 300 L 340 305" 
+          stroke="#FF9800" stroke-width="3" fill="none"/>
+    <text x="250" y="310" font-size="12" fill="#666">5 yd</text>
+  </g>
+  
+  <!-- Cone 4 (Device 4) -->
+  <g id="cone-4">
+    <circle cx="400" cy="300" r="20" fill="white" stroke="#FF9800" stroke-width="3"/>
+    <text x="400" y="305" text-anchor="middle" font-size="16" font-weight="bold" fill="#FF9800">4</text>
+    <!-- Orange arrow pointing up -->
+    <path d="M 400 280 L 400 255 L 395 260 M 400 255 L 405 260" 
+          stroke="#FF9800" stroke-width="3" fill="none"/>
+    <text x="350" y="310" font-size="12" fill="#666">5 yd</text>
+  </g>
+  
+  <!-- Cone 5 (Device 5) -->
+  <g id="cone-5">
+    <circle cx="400" cy="200" r="20" fill="white" stroke="#FF9800" stroke-width="3"/>
+    <text x="400" y="205" text-anchor="middle" font-size="16" font-weight="bold" fill="#FF9800">5</text>
+    <!-- Orange arrow pointing left -->
+    <path d="M 380 200 L 355 200 L 360 195 M 355 200 L 360 205" 
+          stroke="#FF9800" stroke-width="3" fill="none"/>
+    <text x="400" y="190" font-size="12" fill="#666">5 yd</text>
+  </g>
+  
+  <!-- Path line -->
+  <path d="M 120 250 L 180 250 L 285 215 L 285 285 L 315 300 L 380 300 L 400 280 L 400 220 L 380 200 L 320 200" 
+        stroke="#2196F3" stroke-width="2" stroke-dasharray="5,5" fill="none" opacity="0.5"/>
+  
+  <!-- Legend -->
+  <g id="legend" transform="translate(20, 430)">
+    <text x="0" y="0" font-size="12" font-weight="bold" fill="#333">Legend:</text>
+    <circle cx="10" cy="20" r="8" fill="white" stroke="#4CAF50" stroke-width="2"/>
+    <text x="25" y="25" font-size="11" fill="#666">Start/Finish</text>
+    <circle cx="110" cy="20" r="8" fill="white" stroke="#FF9800" stroke-width="2"/>
+    <text x="125" y="25" font-size="11" fill="#666">Numbered Cones</text>
+    <path d="M 220 20 L 245 20 L 240 15 M 245 20 L 240 25" 
+          stroke="#FF9800" stroke-width="2" fill="none"/>
+    <text x="250" y="25" font-size="11" fill="#666">Arrow direction</text>
+  </g>
+</svg>

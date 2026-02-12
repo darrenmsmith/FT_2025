@@ -173,17 +173,17 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
             "master_time": REGISTRY.controller_time_ms(),
             "mesh_network": "ft_mesh",
             "server_version": VERSION,
-            "led_command": {
-                "state": self._derive_led_state_for(node_id),
-                "timestamp": REGISTRY.controller_time_ms() / 1000.0  # seconds float
-            }
         }
-        # Converge optional state back to device if we have it
-        if n:
-            if n.led_pattern:
-                data["led_pattern"] = n.led_pattern
-            if n.audio_clip:
-                data["audio_clip"] = n.audio_clip
+
+        # Send led_pattern if one is set (for Simon Says assigned colors)
+        # This preserves explicit LED commands set via set_led()
+        if n and n.led_pattern:
+            data["led_pattern"] = n.led_pattern
+
+        # Converge optional audio state back to device if we have it
+        if n and n.audio_clip:
+            data["audio_clip"] = n.audio_clip
+
         self._send(data)
 
     def _send(self, data: Dict[str, Any]) -> None:

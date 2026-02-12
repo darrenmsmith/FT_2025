@@ -261,10 +261,17 @@ class LEDManager:
 
     def get_led_command(self, node_id: str) -> Dict[str, Any]:
         """Get LED command for heartbeat response"""
+        # Get chase pattern from settings
+        from field_trainer.ft_settings import SettingsManager
+        settings_mgr = SettingsManager()
+        settings = settings_mgr.load_settings()
+        chase_pattern = settings.get('chase_pattern', 'alternating')
+
         return {
             "led_command": {
                 "state": self.current_global_state.value,
-                "timestamp": self.last_command_time
+                "timestamp": self.last_command_time,
+                "chase_pattern": chase_pattern
             }
         }
 

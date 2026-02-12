@@ -36,12 +36,22 @@ class SessionService:
         # Mark session as active
         print(f"Step 1: Marking session as active...")
         self.db.start_session(session_id)
-        
+
+        # Load session and course info (needed for device sequence and mode)
+        print(f"Step 2: Loading course info...")
+        session = self.db.get_session(session_id)
+        course = self.db.get_course(session['course_id'])
+
+        # NOTE: Course already activated during deploy phase (sessions_bp.py)
+        # Skip activation here to avoid resetting colors
+        # self.registry.activate_course(course['course_name'])
+        print(f"   ✅ Course already activated - ready for touches")
+
         # Get first queued run
         first_run = self.db.get_next_queued_run(session_id)
         if not first_run:
             return {'success': False, 'error': 'No athletes in queue'}
-        
+
         # Start first run
         start_time = datetime.utcnow()
         self.db.start_run(first_run['run_id'], start_time)
@@ -49,11 +59,7 @@ class SessionService:
         # Small delay to ensure segments are committed before touches arrive
         time.sleep(0.1)
 
-        # Get session and course (segments will be created after pattern generation)
-        session = self.db.get_session(session_id)
-
         # Get course device sequence for multi-athlete tracking
-        course = self.db.get_course(session['course_id'])
         device_sequence = [action['device_id'] for action in course['actions']
                           if action['device_id'] != '192.168.99.100']
 
@@ -410,9 +416,17 @@ class SessionService:
         Returns:
             True if there's a next athlete, False if all athletes are done
         """
+        import traceback
+
         print(f"\n{'='*60}")
-        print(f"⏭️  MOVING TO NEXT ATHLETE")
+        print(f"⏭️  MOVING TO NEXT ATHLETE - ENTRY")
         print(f"{'='*60}")
+
+        # DEBUG: Show call stack to see who called us
+        print(f"\n📞 Call stack:")
+        for line in traceback.format_stack()[:-1]:
+            if '/opt/' in line:
+                print(f"   {line.strip()}")
 
         # Find current active athlete and next waiting athlete
         current_run_id = None
@@ -420,25 +434,52 @@ class SessionService:
 
         athlete_list = list(self.session_state['active_runs'].items())
 
+        # DEBUG: Show all athletes and their states
+        print(f"\n📋 Athlete queue status:")
+        print(f"   Total athletes in active_runs: {len(athlete_list)}")
+        for i, (rid, rinfo) in enumerate(athlete_list):
+            active_marker = "👉 ACTIVE" if rinfo.get('is_active', False) else ""
+            status = f"finished={rinfo.get('finished', False)}" if 'finished' in rinfo else "no status"
+            print(f"   {i+1}. {rinfo['athlete_name']} - run_id: {rid[:8]}... {active_marker} ({status})")
+
         for idx, (run_id, run_info) in enumerate(athlete_list):
             if run_info.get('is_active', False):
                 current_run_id = run_id
                 # Mark current as inactive
                 run_info['is_active'] = False
-                print(f"✓ Current athlete: {run_info['athlete_name']} (finished)")
+                print(f"\n✓ Current athlete: {run_info['athlete_name']} (finished)")
+                print(f"  Index in queue: {idx} of {len(athlete_list)}")
 
                 # Find next athlete
+                print(f"\n🔍 Looking for next athlete:")
+                print(f"   Current index: {idx}")
+                print(f"   Next index would be: {idx + 1}")
+                print(f"   Total athletes: {len(athlete_list)}")
+                print(f"   Check: {idx + 1} < {len(athlete_list)} = {idx + 1 < len(athlete_list)}")
+
                 if idx + 1 < len(athlete_list):
                     next_run_id = athlete_list[idx + 1][0]
                     next_run_info = athlete_list[idx + 1][1]
                     next_run_info['is_active'] = True
-                    print(f"✓ Next athlete: {next_run_info['athlete_name']}")
+                    print(f"   ✅ Found next athlete: {next_run_info['athlete_name']}")
+                    print(f"   Index in queue: {idx + 1} of {len(athlete_list)}")
                 else:
-                    print(f"✓ No more athletes - session complete!")
+                    print(f"   ❌ No next athlete (current is last in queue)")
                 break
 
         if not next_run_id:
-            # No more athletes
+            # No more athletes - clear flag before returning
+            print(f"\n❌ NO MORE ATHLETES FOUND!")
+            print(f"   Total athletes in queue: {len(athlete_list)}")
+            print(f"   Current athlete index: {athlete_list.index((current_run_id, self.session_state['active_runs'][current_run_id])) if current_run_id else 'unknown'}")
+
+            # CRITICAL: Clear flag before session completes
+            print(f"\n🔓 Clearing pattern_display_active - session ending")
+            self.registry.pattern_display_active = False
+
+            print(f"{'='*60}")
+            print(f"⏭️  MOVING TO NEXT ATHLETE - EXIT (returning False - no more athletes)")
+            print(f"{'='*60}\n")
             return False
 
         # Get next athlete's pattern
@@ -447,7 +488,17 @@ class SessionService:
 
         if not pattern_data:
             print(f"⚠️  No pattern data for next athlete!")
+            # CRITICAL: Clear flag before returning with error
+            print(f"🔓 Clearing pattern_display_active - error condition")
+            self.registry.pattern_display_active = False
             return False
+
+        # SAFETY CHECK: Ensure touches are blocked (should already be set by caller)
+        if not getattr(self.registry, 'pattern_display_active', False):
+            print(f"   ⚠️  WARNING: pattern_display_active not set by caller! Setting now...")
+            self.registry.pattern_display_active = True
+        else:
+            print(f"   ✅ Touches already blocked by caller (during feedback)")
 
         # Restore all devices to assigned colors (2 second pause between athletes)
         print(f"\n🔄 Restoring assigned colors between athletes...")
@@ -471,9 +522,19 @@ class SessionService:
         timer_start = datetime.utcnow()
         next_run_info['timer_start'] = timer_start
         # Store timer_start in database for cumulative timing
-        self.db.update_run_timer_start(next_run_info['run_id'], timer_start)
+        self.db.update_run_timer_start(next_run_id, timer_start)  # Use next_run_id (the dict key)
         print(f"⏱️  Timer started for {next_run_info['athlete_name']}")
 
+        # CRITICAL: Clear pattern_display_active NOW - transition complete!
+        # This is done HERE (not in _display_pattern_sequence) to prevent gaps
+        print(f"\n{'='*60}")
+        print(f"🔓 UNBLOCKING TOUCHES - Athlete transition complete")
+        print(f"{'='*60}")
+        self.registry.pattern_display_active = False
+        print(f"   ✅ pattern_display_active = FALSE - touches now enabled for {next_run_info['athlete_name']}")
+
+        print(f"\n{'='*60}")
+        print(f"⏭️  MOVING TO NEXT ATHLETE - EXIT (returning True)")
         print(f"{'='*60}\n")
         return True
 
@@ -534,13 +595,31 @@ class SessionService:
         """
         import requests
         import time
-        
+
         session_id = self.session_state.get('session_id')
-        
+
         if not session_id:
             self.registry.log(f"Touch on {device_id} but no active session", level="warning")
             return
-        
+
+        # Get course mode first to determine if we need pattern display blocking
+        course_mode = self.session_state.get('course_mode', 'sequential')
+
+        # CRITICAL: Block touches during pattern display - ONLY for pattern mode (Simon Says)
+        # Sequential modes (Warm-up, Beep Test) should NOT be blocked by this flag
+        if course_mode == 'pattern':
+            pattern_display_flag = getattr(self.registry, 'pattern_display_active', False)
+            print(f"\n🔍 Touch event received (pattern mode) - pattern_display_active: {pattern_display_flag}")
+
+            if pattern_display_flag:
+                print(f"\n🚫 TOUCH IGNORED - Pattern display in progress")
+                print(f"   Device: {device_id}")
+                print(f"   Reason: Pattern is being displayed to athlete, touches blocked")
+                print(f"   Wait for pattern display to complete before touching")
+                return
+        else:
+            print(f"\n🔍 Touch event received (mode: {course_mode}) - no pattern blocking")
+
         print(f"\n{'='*80}")
         print(f"👆 MULTI-ATHLETE TOUCH HANDLER")
         print(f"   Device: {device_id}")
@@ -556,10 +635,19 @@ class SessionService:
 
         if course_mode == 'pattern':
             # In pattern mode, find the currently active athlete
+            print(f"\n🔍 Looking for active athlete:")
+            print(f"   Active runs: {len(self.session_state.get('active_runs', {}))}")
             for run_id, run_info in self.session_state.get('active_runs', {}).items():
-                if run_info.get('is_active', False):
+                is_active = run_info.get('is_active', False)
+                print(f"   - {run_info.get('athlete_name')}: is_active={is_active}")
+                if is_active:
                     active_athlete_name = run_info.get('athlete_name')
                     break
+
+            if active_athlete_name:
+                print(f"   ✅ Found active athlete: {active_athlete_name}")
+            else:
+                print(f"   ⚠️  No active athlete found!")
 
         # Log with athlete context if available
         if active_athlete_name:
@@ -569,7 +657,8 @@ class SessionService:
 
         # SPECIAL HANDLING: D0 touch in pattern mode = pattern completion/submit
         if device_id == "192.168.99.100" and course_mode == 'pattern':
-            print(f"🟢 D0 TOUCHED - Pattern completion attempt")
+            print(f"\n🟢 D0 TOUCHED - Pattern completion attempt")
+            print(f"   Timestamp: {timestamp}")
 
             # Find which athlete completed the pattern (most recent active)
             if not self.session_state.get('active_runs'):
@@ -619,6 +708,18 @@ class SessionService:
                 print(f"{'='*80}\n")
                 return
 
+            # CRITICAL: ATOMIC CHECK-AND-SET to prevent race conditions
+            # If another thread already started processing, abort this thread
+            if getattr(self.registry, 'pattern_display_active', False):
+                print(f"   ⚠️  RACE CONDITION PREVENTED!")
+                print(f"   Another thread is already processing completion - this thread ABORTS")
+                print(f"{'='*80}\n")
+                return
+
+            # NOW set the flag - first thread wins, others blocked above
+            self.registry.pattern_display_active = True
+            print(f"   🚫 PATTERN COMPLETE - Touches blocked immediately for transition (this thread wins)")
+
             # Pattern complete! Play beep to confirm submission
             try:
                 self.registry.play_audio("192.168.99.100", "default_beep")
@@ -631,6 +732,11 @@ class SessionService:
             print(f"   🎉 Chase GREEN for success...")
 
             try:
+                # SAFETY CHECK: pattern_display_active should already be True (set above)
+                if not getattr(self.registry, 'pattern_display_active', False):
+                    print(f"   ⚠️  WARNING: pattern_display_active not set! Setting now...")
+                    self.registry.pattern_display_active = True
+
                 # Block heartbeat LED commands during success feedback
                 self.registry.error_feedback_active = True
                 print(f"   🚫 Success feedback active - heartbeat LED commands blocked")
@@ -649,12 +755,12 @@ class SessionService:
                 # BUG FIX #2: Restore assigned colors after success feedback
                 print(f"   🧹 Restoring assigned colors after success...")
                 for dev in colored_devices:
-                    node = self.registry.nodes.get(dev['device_id'])
-                    if node:
-                        # Restore to assigned color (or amber if session ending)
-                        color = dev.get('color', 'red')
-                        node.led_pattern = f"solid_{color.lower()}"
-                        print(f"      {dev['device_id']} → restored to {color.upper()}")
+                    color = dev.get('color', 'red')
+                    solid_pattern = f"solid_{color.lower()}"
+                    # CRITICAL: Actually SEND the command to client cones, don't just set registry state
+                    self.registry.set_led(dev['device_id'], solid_pattern)
+                    print(f"      {dev['device_id']} → {color.upper()} ({solid_pattern})")
+                    time.sleep(0.1)  # Brief delay between commands
 
                 # Re-enable heartbeat LED commands
                 self.registry.error_feedback_active = False
@@ -692,6 +798,8 @@ class SessionService:
                 self.db.complete_run(run_id, datetime.utcnow(), total_time=completion_time)
                 print(f"   ✅ Run completed for {run_info['athlete_name']}")
 
+                print(f"\n🔄 About to call _move_to_next_athlete() after SUCCESS...")
+
                 # Move to next athlete or complete session
                 # NOTE: _move_to_next_athlete() will handle marking current as inactive
                 has_next_athlete = self._move_to_next_athlete()
@@ -715,6 +823,8 @@ class SessionService:
         # PATTERN MODE VALIDATION
         course_mode = self.session_state.get('course_mode', 'sequential')
         if course_mode == 'pattern':
+            print(f"\n🔵 CONE TOUCHED in pattern mode - Device: {device_id}")
+
             # Pattern mode: Find currently active athlete
             run_id = None
             run_info = None
@@ -728,6 +838,9 @@ class SessionService:
                 print(f"⚠️  No active pattern run found")
                 print(f"{'='*80}\n")
                 return
+
+            print(f"   Active athlete: {run_info['athlete_name']}")
+            print(f"   Sequence position: {run_info.get('sequence_position', -1)}")
 
             # Block touches during error feedback (athlete is still marked active, but feedback is playing)
             if self.registry.error_feedback_active:
@@ -803,10 +916,22 @@ class SessionService:
 
                 # Validate: is this the expected device?
                 if device_id != expected_device:
-                    print(f"❌ WRONG DEVICE!")
+                    # CRITICAL: ATOMIC CHECK-AND-SET to prevent race conditions
+                    # If another thread already started processing error/completion, abort
+                    if getattr(self.registry, 'pattern_display_active', False):
+                        print(f"\n⚠️  RACE CONDITION PREVENTED!")
+                        print(f"   Another thread is already processing - this thread ABORTS")
+                        print(f"{'='*80}\n")
+                        return
+
+                    # NOW set the flag - first thread wins
+                    self.registry.pattern_display_active = True
+                    print(f"\n❌ WRONG DEVICE - ERROR PATH TRIGGERED!")
+                    print(f"   🚫 Touches blocked immediately for error feedback and transition (this thread wins)")
                     print(f"   Expected: {expected_color.upper()} ({expected_device})")
                     print(f"   Got: {device_id}")
                     print(f"   Pattern: {pattern_data['description']}")
+                    print(f"   This will trigger error feedback and move to next athlete")
 
                     # Log error to System Log with detailed device info
                     touched_device_name = f"Cone {int(device_id.split('.')[-1]) - 100}"
@@ -889,6 +1014,8 @@ class SessionService:
                     try:
                         self.db.complete_run(run_id, datetime.utcnow(), total_time=completion_time, status='incomplete')
                         print(f"   ❌ Run failed for {run_info['athlete_name']} - pattern error")
+
+                        print(f"\n🔄 About to call _move_to_next_athlete() after ERROR...")
 
                         # Move to next athlete or complete session
                         # NOTE: _move_to_next_athlete() will handle marking current as inactive
@@ -1222,6 +1349,16 @@ class SessionService:
         """
         import time
 
+        print(f"\n🎬 _display_pattern_sequence - ENTRY")
+
+        # CRITICAL: Block ALL touches during pattern display
+        # (May already be set by _move_to_next_athlete for 2nd+ athletes)
+        if not getattr(self.registry, 'pattern_display_active', False):
+            self.registry.pattern_display_active = True
+            print(f"   🚫 Pattern display active - touches BLOCKED")
+        else:
+            print(f"   🚫 Touches already blocked (set by caller)")
+
         pattern = pattern_data['pattern']
         colored_devices = pattern_data['colored_devices']
         description = pattern_data['description']
@@ -1254,10 +1391,12 @@ class SessionService:
 
         try:
             # STEP 1: Play beep on D0 (signals pattern about to display)
-            print(f"\n🔊 Playing beep - pattern about to display...")
+            print(f"\n{'='*60}")
+            print(f"🔊 STEP 1: Playing BEEP before pattern display")
+            print(f"{'='*60}")
             try:
                 import requests
-                requests.post(
+                response = requests.post(
                     'http://localhost:5000/api/audio/play',
                     json={
                         'node_id': '192.168.99.100',
@@ -1265,9 +1404,12 @@ class SessionService:
                     },
                     timeout=2
                 )
-                print(f"   ✅ Beep played")
+                print(f"   ✅ Beep API called - Status: {response.status_code}")
+                print(f"   Response: {response.text}")
             except Exception as beep_err:
-                print(f"   ⚠️ Beep failed: {beep_err}")
+                print(f"   ❌ BEEP FAILED: {beep_err}")
+                import traceback
+                traceback.print_exc()
 
             time.sleep(0.5)  # Brief pause after beep
 
@@ -1286,32 +1428,32 @@ class SessionService:
                 self.registry.set_led(device_id, chase_pattern)
                 print(f"      {chase_pattern} → {device_id}")
 
-                # Wait for client auto-termination (3s) + buffer to prevent overlap
-                # NOTE: We sleep AFTER every chase, including the last one
-                time.sleep(5.0)  # Increased from 4.0s to compensate for slow clients
+                # Wait for chase animation to complete (3s)
+                time.sleep(3.5)
+
+                # CRITICAL: Restore ALL cones to assigned colors after EACH chase
+                # This prevents cones from staying dark between pattern steps
+                print(f"      🧹 Restoring all assigned colors...")
+                for restore_device in pattern_data['colored_devices']:
+                    restore_id = restore_device['device_id']
+                    restore_color = restore_device.get('color', 'red')
+                    solid_pattern = f"solid_{restore_color.lower()}"
+                    self.registry.set_led(restore_id, solid_pattern)
+
+                # Brief pause before next chase
+                time.sleep(0.5)
 
             print(f"   ✓ Pattern display complete (all chases finished)\n")
 
             # Log reminder to System Log
             self.registry.log(f"🎯 Touch pattern: {description}, then touch D0 (Start) to submit", source="session")
 
-            # BUG FIX #1: Restore assigned colors instead of clearing patterns
-            print(f"🧹 Restoring assigned colors after pattern display...")
-            for device in pattern_data['colored_devices']:
-                device_id = device['device_id']
-                node = self.registry.nodes.get(device_id)
-                if node:
-                    # Restore to assigned color
-                    color = device.get('color', 'red')
-                    node.led_pattern = f"solid_{color.lower()}"
-                    print(f"   {device_id} → restored to {color.upper()} (solid_{color.lower()})")
-
-            print(f"   ✅ All chase patterns cleared\n")
-
             # STEP 3: Play GO beep on D0 (signals athlete can start)
-            print(f"🔊 Playing GO beep...")
+            print(f"\n{'='*60}")
+            print(f"🔊 STEP 3: Playing GO BEEP (athlete can start)")
+            print(f"{'='*60}")
             try:
-                requests.post(
+                response = requests.post(
                     'http://localhost:5000/api/audio/play',
                     json={
                         'node_id': '192.168.99.100',
@@ -1319,12 +1461,25 @@ class SessionService:
                     },
                     timeout=2
                 )
-                print(f"   ✅ GO beep played - athlete can now begin\n")
+                print(f"   ✅ GO beep API called - Status: {response.status_code}")
+                print(f"   Response: {response.text}")
+                print(f"   Athlete can now begin touching pattern!\n")
             except Exception as beep_err:
-                print(f"   ⚠️ GO beep failed: {beep_err}\n")
+                print(f"   ❌ GO BEEP FAILED: {beep_err}\n")
+                import traceback
+                traceback.print_exc()
 
         except Exception as e:
             print(f"   ❌ Error displaying pattern: {e}")
             import traceback
             traceback.print_exc()
             # Continue anyway - don't block session start
+        finally:
+            # NOTE: Do NOT clear pattern_display_active here!
+            # It must stay True until _move_to_next_athlete() completely finishes
+            # Otherwise there's a gap where touches can trigger another transition
+            print(f"\n{'='*60}")
+            print(f"🎬 Pattern display complete - flag stays TRUE until transition done")
+            print(f"{'='*60}")
+
+        print(f"🎬 _display_pattern_sequence - EXIT\n")
