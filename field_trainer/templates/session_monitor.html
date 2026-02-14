@@ -127,6 +127,26 @@
     </div>
 </div>
 
+<!-- Countdown Modal for Athlete Transitions -->
+<div class="modal fade" id="countdownModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content text-center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px;">
+            <div class="modal-body" style="padding: 1rem;">
+                <div class="mb-2" style="font-size: 0.9rem;">
+                    <i class="fas fa-running"></i> Next Up
+                </div>
+                <div class="fw-bold mb-2" id="countdownAthleteName" style="font-size: 1.25rem; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">
+                    Athlete
+                </div>
+                <div class="fw-bold" id="countdownTimer" style="font-size: 3rem; text-shadow: 2px 2px 3px rgba(0,0,0,0.4);">
+                    5
+                </div>
+                <p class="mt-2 mb-0 text-white-50" style="font-size: 0.75rem;">Get ready...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -285,6 +305,13 @@ async function refreshStatus() {
         patternLength = data.pattern_length;
         patternData = data.pattern_data;
 
+        // Handle countdown for athlete transitions (Simon Says)
+        if (data.countdown && data.countdown.active) {
+            showCountdownModal(data.countdown.athlete_name, data.countdown.seconds_remaining);
+        } else {
+            hideCountdownModal();
+        }
+
         updateCourseLayout();  // Update layout based on pattern mode
         updateProgress(data.session);
         updateDeviceStatus(data.waiting_for_device);
@@ -349,20 +376,27 @@ function updateProgress(session) {
                         </div>
                         <div class="col-md-6">
                             <div class="d-flex flex-wrap">
-                                ${segments.map(seg => {
+                                ${(segments.length > 0 ? segments : (courseMode === 'pattern' && patternData && patternData.pattern ? patternData.pattern : [])).map((seg, idx) => {
+                                    // Handle both segment objects (after GO) and pattern objects (before GO)
+                                    const isActualSegment = seg.hasOwnProperty('to_device');
+                                    const isPatternItem = seg.hasOwnProperty('device_id');
+
+                                    if (!isActualSegment && !isPatternItem) return '';
+
+                                    const deviceId = isActualSegment ? seg.to_device : seg.device_id;
+                                    const segmentIndex = isActualSegment ? segments.indexOf(seg) : idx;
                                     let bgColor = '#6c757d';
                                     let textColor = 'white';
                                     let displayTime = '--';
 
                                     if (courseMode === 'pattern') {
                                         // PATTERN MODE: Show step number initially, cumulative time when touched, RED only for failed device
-                                        const segmentIndex = segments.indexOf(seg);
 
-                                        if (seg.touch_detected && seg.cumulative_time !== null && seg.cumulative_time !== undefined) {
+                                        if (isActualSegment && seg.touch_detected && seg.cumulative_time !== null && seg.cumulative_time !== undefined) {
                                             // Touched: show cumulative time from D0 beep in GREEN
                                             bgColor = '#28a745';
                                             displayTime = seg.cumulative_time.toFixed(2) + 's';
-                                        } else if (run.status === 'incomplete' && !seg.touch_detected) {
+                                        } else if (isActualSegment && run.status === 'incomplete' && !seg.touch_detected) {
                                             // Failed run - check if this is the first untouched segment (where they failed)
                                             const firstUntouchedIndex = segments.findIndex(s => !s.touch_detected);
                                             if (segmentIndex === firstUntouchedIndex) {
@@ -374,8 +408,8 @@ function updateProgress(session) {
                                                 bgColor = '#6c757d';
                                                 displayTime = '--';
                                             }
-                                        } else if (!seg.touch_detected) {
-                                            // Not touched yet (queued or running) - show gray
+                                        } else if (!isActualSegment || !seg.touch_detected) {
+                                            // Not touched yet (queued or running) OR showing pattern preview - show gray
                                             bgColor = '#6c757d';
                                             displayTime = '--';
                                         } else {
@@ -385,15 +419,14 @@ function updateProgress(session) {
                                         }
                                     } else {
                                         // SEQUENTIAL MODE: Show per-device times (original behavior)
-                                        if (seg.touch_detected) {
+                                        if (isActualSegment && seg.touch_detected) {
                                             bgColor = seg.alert_raised ? '#dc3545' : '#28a745';
                                             displayTime = seg.actual_time.toFixed(2) + 's';
                                         }
                                     }
 
-                                    const deviceNum = seg.to_device.split('.').pop();
+                                    const deviceNum = deviceId.split('.').pop();
                                     const coneNum = parseInt(deviceNum) - 100;  // Convert 101 -> 1, 102 -> 2, etc.
-                                    const segmentIndex = segments.indexOf(seg);
 
                                     // For pattern mode, show just cone number (more compact)
                                     // For sequential mode, show device number
@@ -407,10 +440,10 @@ function updateProgress(session) {
                                             <div style="font-size: 1.1rem; font-weight: bold;">
                                                 ${displayTime}
                                             </div>
-                                            ${courseMode !== 'pattern' && seg.alert_raised ? `<div style="font-size: 0.65rem; margin-top: 2px;">${seg.alert_type}</div>` : ''}
+                                            ${courseMode !== 'pattern' && isActualSegment && seg.alert_raised ? `<div style="font-size: 0.65rem; margin-top: 2px;">${seg.alert_type}</div>` : ''}
                                         </div>
                                     `;
-                                }).join('')}
+                                }).filter(html => html !== '').join('')}
                             </div>
                         </div>
                         <div class="col-md-3 text-end">
@@ -469,6 +502,32 @@ function showCompletionMessage() {
         </div>
     `;
     document.querySelector('.card-body').insertAdjacentHTML('afterbegin', alertHtml);
+}
+
+// Countdown modal functions for athlete transitions
+let countdownModalInstance = null;
+
+function showCountdownModal(athleteName, secondsRemaining) {
+    const modal = document.getElementById('countdownModal');
+    const athleteNameEl = document.getElementById('countdownAthleteName');
+    const timerEl = document.getElementById('countdownTimer');
+
+    // Update content
+    athleteNameEl.textContent = athleteName;
+    timerEl.textContent = secondsRemaining;
+
+    // Show modal if not already shown
+    if (!countdownModalInstance) {
+        countdownModalInstance = new bootstrap.Modal(modal);
+        countdownModalInstance.show();
+    }
+}
+
+function hideCountdownModal() {
+    if (countdownModalInstance) {
+        countdownModalInstance.hide();
+        countdownModalInstance = null;
+    }
 }
 
 {% if session.status == 'active' %}

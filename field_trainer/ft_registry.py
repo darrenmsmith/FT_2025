@@ -174,16 +174,7 @@ class Registry:
             if writer is not None:
                 n._writer = writer
 
-        # Handle touch events (Phase 1)
-            if fields.get('touch_detected'):
-                touch_timestamp = fields.get('touch_timestamp', time.time())
-
-                # Handle asynchronously to not block heartbeat
-                threading.Thread(
-                    target=self.handle_touch_event,
-                    args=(node_id, touch_timestamp),
-                    daemon=True
-                ).start()
+        # Touch events are now handled in ft_heartbeat.py with deduplication
 
     # ---------------- Snapshot for UI ----------------
 

@@ -208,36 +208,51 @@ class SessionService:
             if course_mode == 'pattern' and colored_devices:
                 from field_trainer.pattern_generator import pattern_generator
 
-                # Generate pattern, avoiding consecutive duplicates
-                max_attempts = 100
-                for attempt in range(max_attempts):
-                    pattern = pattern_generator.generate_simon_says_pattern(
-                        colored_devices,
-                        sequence_length=pattern_config['pattern_length'],
-                        allow_repeats=pattern_config['allow_repeats']
-                    )
+                # Check if pattern was pre-generated during deployment (SIMON SAYS ONLY)
+                pre_generated = None
+                if hasattr(self, 'pre_generated_patterns') and session_id in self.pre_generated_patterns:
+                    pre_generated = self.pre_generated_patterns[session_id].get(run['run_id'])
 
-                    # Check if this pattern is same as previous athlete's pattern
-                    if previous_pattern is None or not self._patterns_match(pattern, previous_pattern):
-                        break  # Found unique pattern
+                if pre_generated:
+                    # Use pre-generated pattern (already shown to coach before clicking GO)
+                    print(f"✓ Using pre-generated pattern for {run['athlete_name']}: {pre_generated['description']}")
+                    run_info['pattern_data'] = pre_generated
+                    pattern_device_ids = pre_generated['device_ids']
+                    previous_pattern = pre_generated['pattern']
+                else:
+                    # Fallback: Generate pattern on-the-fly (for backwards compatibility)
+                    print(f"⚠️  No pre-generated pattern found, generating on-the-fly for {run['athlete_name']}")
 
-                # Even if we couldn't find unique, use the last generated one (rare edge case)
-                pattern_description = pattern_generator.get_pattern_description(pattern)
-                pattern_device_ids = pattern_generator.get_pattern_device_ids(pattern)
+                    # Generate pattern, avoiding consecutive duplicates
+                    max_attempts = 100
+                    for attempt in range(max_attempts):
+                        pattern = pattern_generator.generate_simon_says_pattern(
+                            colored_devices,
+                            sequence_length=pattern_config['pattern_length'],
+                            allow_repeats=pattern_config['allow_repeats']
+                        )
 
-                # Store pattern in run_info (per-athlete, not session-wide)
-                run_info['pattern_data'] = {
-                    'pattern': pattern,
-                    'description': pattern_description,
-                    'device_ids': pattern_device_ids,
-                    'colored_devices': colored_devices
-                }
+                        # Check if this pattern is same as previous athlete's pattern
+                        if previous_pattern is None or not self._patterns_match(pattern, previous_pattern):
+                            break  # Found unique pattern
 
-                # Log pattern to System Log for coach
-                self.registry.log(f"📋 {run['athlete_name']}: {pattern_description}", source="session")
-                print(f"✓ Pattern for {run['athlete_name']}: {pattern_description}")
+                    # Even if we couldn't find unique, use the last generated one (rare edge case)
+                    pattern_description = pattern_generator.get_pattern_description(pattern)
+                    pattern_device_ids = pattern_generator.get_pattern_device_ids(pattern)
 
-                previous_pattern = pattern
+                    # Store pattern in run_info (per-athlete, not session-wide)
+                    run_info['pattern_data'] = {
+                        'pattern': pattern,
+                        'description': pattern_description,
+                        'device_ids': pattern_device_ids,
+                        'colored_devices': colored_devices
+                    }
+
+                    # Log pattern to System Log for coach
+                    self.registry.log(f"📋 {run['athlete_name']}: {pattern_description}", source="session")
+                    print(f"✓ Pattern for {run['athlete_name']}: {pattern_description}")
+
+                    previous_pattern = pattern
 
                 # Override device_sequence for pattern mode
                 if idx == 0:
@@ -305,6 +320,10 @@ class SessionService:
                 # Store timer_start in database for cumulative timing
                 self.db.update_run_timer_start(first_run['run_id'], timer_start)
                 print(f"⏱️  Timer started for {first_run['athlete_name']}")
+
+                # CRITICAL: Clear pattern_display_active NOW - athlete can start touching cones
+                self.registry.pattern_display_active = False
+                print(f"🔓 TOUCHES ENABLED - Pattern display complete, athlete can now touch cones")
             else:
                 print(f"⚠️  No pattern data for first athlete")
 
@@ -350,9 +369,9 @@ class SessionService:
                 WHERE session_id = ?
             ''', (datetime.utcnow().isoformat(), reason, session_id))
 
-        # Return course to standby (deployed but not active)
-        print("Returning to standby...")
-        self.registry.course_status = "Deployed"  # Keep course deployed, just not active
+        # Deactivate course completely
+        print("Deactivating course...")
+        self.registry.course_status = "Inactive"  # Fully deactivate course
 
         # Clear assignments and send stop command to all devices
         for node_id in list(self.registry.assignments.keys()):
@@ -360,22 +379,29 @@ class SessionService:
                 self.registry.send_to_node(node_id, {
                     "cmd": "stop",
                     "action": None,
-                    "course_status": "Deployed"
+                    "course_status": "Inactive"
                 })
 
         self.registry.assignments.clear()
+        self.registry.selected_course = None
+        self.registry.device_0_action = None
 
-        # Set all devices to AMBER (standby)
+        # Get course info and mode to determine LED behavior
         course = self.db.get_course(session['course_id'])
+        course_mode = self.session_state.get('course_mode', course.get('mode', 'sequential'))
+
+        # Set device LEDs back to Standby (amber) for all courses
         for action in course['actions']:
             device_id = action['device_id']
             if device_id != "192.168.99.100":
                 self.registry.set_led(device_id, pattern='solid_amber')
+                print(f"   🟠 {device_id} → Standby")
 
-        # Set Device 0 LED to amber (standby)
+        # Set Device 0 LED to Standby (amber)
         if self.registry._server_led:
             from field_trainer.ft_led import LEDState
             self.registry._server_led.set_state(LEDState.SOLID_ORANGE)
+            print(f"   🟠 D0 → Standby")
 
         # Clear active session state
         self.session_state.clear()
@@ -500,8 +526,28 @@ class SessionService:
         else:
             print(f"   ✅ Touches already blocked by caller (during feedback)")
 
-        # Restore all devices to assigned colors (2 second pause between athletes)
-        print(f"\n🔄 Restoring assigned colors between athletes...")
+        # COUNTDOWN TIMER: Start immediately when next athlete is determined
+        # Shows "Next up: Athlete" modal while system transitions
+        from field_trainer.ft_config import PAUSE_BETWEEN_ATHLETES, ATHLETE_COUNTDOWN_DURATION
+        countdown_seconds = ATHLETE_COUNTDOWN_DURATION
+        print(f"\n⏱️  Starting countdown for {next_run_info['athlete_name']} ({countdown_seconds}s countdown)...")
+
+        for remaining in range(countdown_seconds, 0, -1):
+            # Set countdown state so UI can display it
+            self.session_state['countdown'] = {
+                'active': True,
+                'athlete_name': next_run_info['athlete_name'],
+                'seconds_remaining': remaining
+            }
+            print(f"   Next up: {next_run_info['athlete_name']} in {remaining}...")
+            time.sleep(1.0)
+
+        # Clear countdown state
+        self.session_state['countdown'] = {'active': False}
+        print(f"   ✅ Countdown complete!\n")
+
+        # Restore all devices to assigned colors (happens after countdown)
+        print(f"\n🔄 Restoring assigned colors...")
         colored_devices = pattern_data['colored_devices']
         for dev in colored_devices:
             color = dev.get('color', 'red')
@@ -511,7 +557,8 @@ class SessionService:
             print(f"   {dev['device_id']} → {color.upper()} ({pattern})")
             time.sleep(0.2)  # Brief delay between commands
 
-        time.sleep(2.0)  # Pause to show assigned colors between athletes
+        # Small pause to let colors settle before pattern animation
+        time.sleep(0.5)
 
         # Display pattern for next athlete
         print(f"\n💡 Displaying pattern for {next_run_info['athlete_name']}...")
@@ -556,9 +603,9 @@ class SessionService:
         session = self.db.get_session(session_id)
         course = self.db.get_course(session['course_id'])
 
-        # Return course to standby (deployed but not active)
-        print("🏁 Session complete - returning to standby...")
-        self.registry.course_status = "Deployed"  # Keep course deployed, just not active
+        # Deactivate course completely
+        print("🏁 Session complete - deactivating course...")
+        self.registry.course_status = "Inactive"  # Fully deactivate course
 
         # Clear assignments and send stop command to all devices
         for node_id in list(self.registry.assignments.keys()):
@@ -566,21 +613,28 @@ class SessionService:
                 self.registry.send_to_node(node_id, {
                     "cmd": "stop",
                     "action": None,
-                    "course_status": "Deployed"
+                    "course_status": "Inactive"
                 })
 
         self.registry.assignments.clear()
+        self.registry.selected_course = None
+        self.registry.device_0_action = None
 
-        # Set all devices to AMBER (standby)
+        # Get course mode to determine LED behavior
+        course_mode = self.session_state.get('course_mode', 'sequential')
+
+        # Set device LEDs back to Standby (amber) for all courses
         for action in course['actions']:
             device_id = action['device_id']
             if device_id != "192.168.99.100":
                 self.registry.set_led(device_id, pattern='solid_amber')
+                print(f"   🟠 {device_id} → Standby")
 
-        # Set Device 0 LED to amber (standby)
+        # Set Device 0 LED to Standby (amber)
         if self.registry._server_led:
             from field_trainer.ft_led import LEDState
             self.registry._server_led.set_state(LEDState.SOLID_ORANGE)
+            print(f"   🟠 D0 → Standby")
 
         # Clear active session state
         self.session_state.clear()
@@ -898,6 +952,12 @@ class SessionService:
                 elif time_since_last < debounce_window and last_step_position != expected_position:
                     # Rapid repeat but different pattern step - this is intentional, allow it
                     print(f"✓ Rapid repeat on {device_id} ({time_since_last*1000:.0f}ms) but different pattern step (was {last_step_position}, now {expected_position}) - ALLOWING")
+
+            # Update debounce tracking IMMEDIATELY to prevent race conditions
+            # This must happen BEFORE validation so concurrent touches are blocked
+            debounce_tracking[device_id] = timestamp
+            debounce_step_tracking[device_id] = expected_position
+            print(f"🔒 Debounce updated: {device_id} at step {expected_position}")
 
             device_sequence = self.session_state['device_sequence']
             pattern_data = run_info.get('pattern_data')

@@ -113,14 +113,54 @@ def main() -> int:
         REGISTRY.db.migrate_courses_from_json(courses_data)
         REGISTRY.log("Course migration complete")
     
+    # Start D0 touch detection (SIMON SAYS ONLY)
+    try:
+        from field_trainer.ft_touch import TouchSensor
+        from datetime import datetime
+
+        d0_device_id = "192.168.99.100"
+        REGISTRY.log(f"Initializing D0 touch sensor ({d0_device_id})...")
+
+        d0_touch_sensor = TouchSensor(d0_device_id)
+
+        if d0_touch_sensor.hardware_available:
+            # Define touch callback that triggers session service
+            def on_d0_touch():
+                """Called when D0 is physically touched"""
+                timestamp = datetime.now()  # Use local time
+                print(f"\n🔔 D0 PHYSICAL TOUCH DETECTED at {timestamp.isoformat()}")
+
+                # Call the touch handler registered by coach_interface
+                if hasattr(REGISTRY, '_touch_handler') and REGISTRY._touch_handler:
+                    try:
+                        REGISTRY._touch_handler(d0_device_id, timestamp)
+                    except Exception as e:
+                        print(f"❌ D0 touch handler error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(f"⚠️  No touch handler registered yet")
+
+            # Set callback and start detection
+            d0_touch_sensor.set_touch_callback(on_d0_touch)
+            d0_touch_sensor.start_detection()
+
+            REGISTRY.log(f"D0 touch sensor started (threshold: {d0_touch_sensor.threshold})")
+            print(f"✅ D0 touch sensor active - physical touches will be detected")
+        else:
+            REGISTRY.log("D0 touch sensor hardware not available - D0 touches disabled", level="warning")
+    except Exception as e:
+        REGISTRY.log(f"Failed to start D0 touch sensor: {e}", level="error")
+        print(f"⚠️  D0 touch detection disabled: {e}")
+
     # Start coach interface (Phase 1)
-    
+
     try:
         import coach_interface as coach_app
-        
+
         # Call the registration function from coach_interface
         coach_app.register_touch_handler()
-        
+
         def run_coach_interface():
             coach_app.app.run(host='0.0.0.0', port=5001, use_reloader=False, debug=False)
         coach_thread = threading.Thread(target=run_coach_interface, daemon=True)

@@ -180,12 +180,26 @@ def session_status(session_id):
 
     # Get pattern data for pattern mode (to show step-by-step layout)
     pattern_data = None
-    if course_mode == 'pattern' and session_service.session_state.get('active_runs'):
-        # Get pattern from ACTIVE athlete's run_info (each athlete has unique pattern!)
-        for run_id, run_info in session_service.session_state.get('active_runs', {}).items():
-            if run_info.get('is_active', False) and 'pattern_data' in run_info:
-                pattern_data = run_info['pattern_data']
-                break
+    if course_mode == 'pattern':
+        # First, check if session has started and has active runs
+        if session_service.session_state.get('active_runs'):
+            # Get pattern from ACTIVE athlete's run_info (each athlete has unique pattern!)
+            for run_id, run_info in session_service.session_state.get('active_runs', {}).items():
+                if run_info.get('is_active', False) and 'pattern_data' in run_info:
+                    pattern_data = run_info['pattern_data']
+                    break
+        # Otherwise, check for pre-generated patterns (before session starts)
+        elif hasattr(session_service, 'pre_generated_patterns') and session_id in session_service.pre_generated_patterns:
+            # Find the first non-absent athlete's pattern to display
+            pre_patterns = session_service.pre_generated_patterns[session_id]
+            for run in session['runs']:
+                if run['status'] != 'absent' and run['run_id'] in pre_patterns:
+                    pattern_data = pre_patterns[run['run_id']]
+                    print(f"   📊 Returning pre-generated pattern for {run['athlete_name']}: {pattern_data.get('description')}")
+                    break
+
+    # Get countdown state for Simon Says athlete transitions
+    countdown_state = session_service.session_state.get('countdown', {'active': False})
 
     return jsonify({
         'session': session,
@@ -193,7 +207,8 @@ def session_status(session_id):
         'pattern_length': pattern_length,  # NEW: Pattern length for "Continue to n" button
         'pattern_data': pattern_data,  # NEW: Pattern sequence for step-based layout
         'active_run': active_session_state.get('current_run_id'),
-        'waiting_for_device': active_session_state.get('waiting_for_device')
+        'waiting_for_device': active_session_state.get('waiting_for_device'),
+        'countdown': countdown_state  # NEW: Countdown state for athlete transitions
     })
 
 
@@ -356,6 +371,77 @@ def deploy_course(session_id):
                     ''', (json.dumps(pattern_config), session_id))
 
                 print(f"   ✅ Pattern config saved to session: {pattern_config}")
+
+                # ========== GENERATE PATTERNS FOR ALL ATHLETES NOW (SIMON SAYS ONLY) ==========
+                print(f"\n   🎲 Generating patterns for all athletes...")
+
+                # Get course actions first
+                actions_for_patterns = db.get_course_actions(course['course_id'])
+
+                # Get colored devices from course actions
+                colored_devices = []
+                for action in actions_for_patterns:
+                    if action['device_id'] == '192.168.99.100':
+                        continue
+
+                    behavior_config = action.get('behavior_config')
+                    if behavior_config:
+                        try:
+                            config = json.loads(behavior_config) if isinstance(behavior_config, str) else behavior_config
+                            color = config.get('color')
+                            if color:
+                                colored_devices.append({
+                                    'device_id': action['device_id'],
+                                    'device_name': action['device_name'],
+                                    'color': color
+                                })
+                        except:
+                            pass
+
+                if colored_devices:
+                    from field_trainer.pattern_generator import pattern_generator
+
+                    # Generate patterns for ALL athletes before session starts
+                    pre_generated_patterns = {}
+                    previous_pattern = None
+
+                    for run in session['runs']:
+                        if run['status'] == 'absent':
+                            continue
+
+                        # Generate unique pattern for this athlete
+                        max_attempts = 100
+                        for attempt in range(max_attempts):
+                            pattern = pattern_generator.generate_simon_says_pattern(
+                                colored_devices,
+                                sequence_length=pattern_config['pattern_length'],
+                                allow_repeats=pattern_config['allow_repeats']
+                            )
+
+                            # Check if different from previous
+                            if previous_pattern is None or pattern != previous_pattern:
+                                break
+
+                        pattern_description = pattern_generator.get_pattern_description(pattern)
+                        pattern_device_ids = pattern_generator.get_pattern_device_ids(pattern)
+
+                        pre_generated_patterns[run['run_id']] = {
+                            'pattern': pattern,
+                            'description': pattern_description,
+                            'device_ids': pattern_device_ids,
+                            'colored_devices': colored_devices
+                        }
+
+                        previous_pattern = pattern
+                        print(f"      ✅ {run['athlete_name']}: {pattern_description}")
+
+                    # Store in session_service for use by start_session() and session_status()
+                    if not hasattr(session_service, 'pre_generated_patterns'):
+                        session_service.pre_generated_patterns = {}
+                    session_service.pre_generated_patterns[session_id] = pre_generated_patterns
+
+                    print(f"   ✅ All patterns pre-generated and stored!")
+                # ========== END PATTERN GENERATION ==========
 
         # Get devices from course_actions
         actions = db.get_course_actions(course['course_id'])

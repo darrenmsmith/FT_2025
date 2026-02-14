@@ -25,6 +25,12 @@ from .ft_models import utcnow_iso
 from .ft_registry import REGISTRY
 from .ft_version import VERSION
 
+# Touch event deduplication: {device_id: last_touch_timestamp}
+# Prevents same touch from being processed multiple times when reported in successive heartbeats
+_TOUCH_DEDUP_DICT: Dict[str, float] = {}
+_TOUCH_DEDUP_LOCK = threading.Lock()
+_TOUCH_DEDUP_TOLERANCE_SEC = 0.01  # 10ms tolerance for matching timestamps
+
 
 class HeartbeatHandler(socketserver.StreamRequestHandler):
     """Handle a single device connection (one thread per connection)."""
@@ -99,13 +105,45 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                     print(f"📨 Heartbeat from {node_id}: touch_detected={msg.get('touch_detected')}, timestamp={msg.get('touch_timestamp')}")
                     if msg.get('touch_detected'):
                         touch_timestamp = msg.get('touch_timestamp', time.time())
-                        # Handle asynchronously to not block heartbeat
-                        import threading
-                        threading.Thread(
-                            target=REGISTRY.handle_touch_event,
-                            args=(node_id, touch_timestamp),
-                            daemon=True
-                        ).start()
+                        print(f"🔍 Touch detected from {node_id}, timestamp={touch_timestamp}")
+
+                        # DEDUPLICATION: Check if this is a duplicate touch event
+                        # (same device, same timestamp within 10ms tolerance)
+                        with _TOUCH_DEDUP_LOCK:
+                            last_timestamp = _TOUCH_DEDUP_DICT.get(node_id)
+                            print(f"   Last timestamp for {node_id}: {last_timestamp}")
+
+                            if last_timestamp is not None:
+                                time_diff = abs(touch_timestamp - last_timestamp)
+                                if time_diff < _TOUCH_DEDUP_TOLERANCE_SEC:
+                                    print(f"🔇 DEDUP: Ignoring duplicate touch from {node_id} (diff={time_diff*1000:.1f}ms)")
+                                    # Skip processing this duplicate touch
+                                    pass  # Continue to send_ok below
+                                else:
+                                    # Different touch - update timestamp and process
+                                    _TOUCH_DEDUP_DICT[node_id] = touch_timestamp
+                                    # Handle asynchronously to not block heartbeat
+                                    threading.Thread(
+                                        target=REGISTRY.handle_touch_event,
+                                        args=(node_id, touch_timestamp),
+                                        daemon=True
+                                    ).start()
+                            else:
+                                # First touch from this device - record and process
+                                _TOUCH_DEDUP_DICT[node_id] = touch_timestamp
+                                # Handle asynchronously to not block heartbeat
+                                threading.Thread(
+                                    target=REGISTRY.handle_touch_event,
+                                    args=(node_id, touch_timestamp),
+                                    daemon=True
+                                ).start()
+
+                            # Cleanup old entries (older than 10 seconds)
+                            current_time = time.time()
+                            stale_devices = [dev for dev, ts in _TOUCH_DEDUP_DICT.items()
+                                           if current_time - ts > 10.0]
+                            for dev in stale_devices:
+                                del _TOUCH_DEDUP_DICT[dev]
 
                     # Optional time-drift correction trigger (if device reports skew)
                     try:

@@ -19,6 +19,14 @@ LOG_MAX: int = int(os.getenv("FIELD_TRAINER_LOG_MAX", "1000"))
 # ---------------- Courses ------------------------
 COURSE_FILE: str = os.getenv("FIELD_TRAINER_COURSE_FILE", "courses.json")
 
+# ---------------- Simon Says / Pattern Mode ------
+# Pause (in seconds) BEFORE countdown starts when transitioning between athletes
+# Gives time to breathe after chase green/red feedback before next athlete
+PAUSE_BETWEEN_ATHLETES: int = int(os.getenv("FIELD_TRAINER_PAUSE_BETWEEN_ATHLETES", "3"))
+
+# Countdown duration (in seconds) for "Next up: Athlete" modal
+ATHLETE_COUNTDOWN_DURATION: int = int(os.getenv("FIELD_TRAINER_COUNTDOWN_DURATION", "3"))
+
 # ---------------- LED / Audio / Time Sync --------
 AUDIO_CLIPS_DIR: str = os.getenv("FIELD_TRAINER_AUDIO_DIR", "/opt/field_trainer/audio")
 TIME_SYNC_DRIFT_MS: int = int(os.getenv("FIELD_TRAINER_TIME_SYNC_DRIFT_MS", "250"))
