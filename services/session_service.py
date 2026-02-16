@@ -1134,6 +1134,56 @@ class SessionService:
             print(f"{'='*80}\n")
             return  # Pattern mode handled, exit
 
+        # REACTION SPRINT MODE
+        # Check if this is a Reaction Sprint session by course_type
+        session = self.db.get_session(session_id)
+        if session:
+            course = self.db.get_course(session['course_id'])
+            if course and course.get('course_type') == 'reaction_sprint':
+                print(f"\n🟡 REACTION SPRINT MODE - Touch on {device_id}")
+
+                # Get Reaction Sprint service
+                from services.reaction_service import get_reaction_service
+                reaction_service = get_reaction_service()
+
+                # Find current run
+                current_run_id = reaction_service.session_state.get('current_run_id')
+                if not current_run_id:
+                    print(f"❌ No active Reaction Sprint run")
+                    print(f"{'='*80}\n")
+                    return
+
+                run_state = reaction_service.session_state['runs'].get(current_run_id)
+                if not run_state:
+                    print(f"❌ Run state not found")
+                    print(f"{'='*80}\n")
+                    return
+
+                # Check if this is the correct target cone
+                current_target = run_state.get('current_target')
+                if device_id != current_target:
+                    print(f"❌ Wrong cone! Expected {current_target}, got {device_id}")
+                    print(f"{'='*80}\n")
+                    return
+
+                print(f"✅ Correct cone touched: {device_id}")
+
+                # Record touch in database using standard API
+                segment_id = self.db.record_touch(current_run_id, device_id, timestamp)
+
+                if not segment_id:
+                    print(f"⚠️  No segment found for this touch")
+                    print(f"{'='*80}\n")
+                    return
+
+                print(f"✅ Touch recorded - Segment ID: {segment_id}")
+
+                # Call reaction_service to handle next cone
+                reaction_service.handle_successful_touch(current_run_id, device_id, timestamp)
+
+                print(f"{'='*80}\n")
+                return  # Reaction Sprint handled, exit
+
         # SEQUENTIAL MODE
         # Find which athlete should receive this touch
         run_id = self.find_athlete_for_touch(device_id, timestamp)

@@ -329,7 +329,11 @@ document.getElementById('deployBtn').addEventListener('click', async function() 
             
             // Redirect after 2 seconds
             setTimeout(() => {
+                {% if course.course_type == 'reaction_sprint' %}
+                window.location.href = `/reaction/monitor/${sessionId}`;
+                {% else %}
                 window.location.href = `/session/${sessionId}/monitor`;
+                {% endif %}
             }, 2000);
         } else {
             alert('Error deploying course: ' + data.error);

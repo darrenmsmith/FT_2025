@@ -73,7 +73,7 @@ def session_setup_cones(session_id):
     session = db.get_session(session_id)
     if not session:
         return "Session not found", 404
-    
+
     course = db.get_course(session['course_id'])
     if not course:
         return "Course not found", 404
@@ -469,10 +469,26 @@ def deploy_course(session_id):
         # Activate course using existing REGISTRY method
         REGISTRY.activate_course(course_name)
 
-        # Check if this is a Simon Says course (mode='pattern')
-        is_simon_says = course.get('mode') == 'pattern'
+        print(f"   DEBUG: course_type = {course.get('course_type')}")
+        print(f"   DEBUG: mode = {course.get('mode')}")
 
-        if is_simon_says:
+        # Check course_type FIRST (more specific than mode)
+        if course.get('course_type') == 'reaction_sprint':
+            # Reaction Sprint: Set cones to GREEN (ready)
+            print("\n🟢 Reaction Sprint - setting cones to GREEN...")
+            REGISTRY.activate_course(course_name)
+            time.sleep(0.5)  # Brief delay for activation to process
+            for device in devices:
+                # Skip Device 0 (home base)
+                if device['device_id'] != '192.168.99.100':
+                    try:
+                        REGISTRY.set_led(device['device_id'], pattern='solid_green')
+                        print(f"   ✅ {device['device_id']} → GREEN")
+                    except Exception as e:
+                        print(f"   ⚠️  Failed to set {device['device_id']} to green: {e}")
+
+        # Check if this is a Simon Says course (mode='pattern')
+        elif course.get('mode') == 'pattern':
             # Simon Says: Set cones to assigned colors
             print("\n📍 Simon Says - Setting assigned colors...")
             # Set each device to its assigned color

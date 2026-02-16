@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+{% block title %}Reaction Sprint - {{ team.name }} - Field Trainer{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-setup { background-color: #6b7280; }
+    .status-active { background-color: #16a34a; animation: pulse 2s infinite; }
+    .status-completed { background-color: #2563eb; }
+    .status-incomplete { background-color: #dc2626; }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+
+    .run-card { transition: all 0.3s; border-left: 4px solid #e5e7eb; }
+    .run-queued { border-left-color: #6b7280; }
+    .run-running { border-left-color: #16a34a; background-color: #f0fdf4; }
+    .run-completed { border-left-color: #2563eb; }
+    .run-failed { border-left-color: #dc2626; opacity: 0.8; }
+
+    .split-box {
+        background-color: #6c757d;
+        color: white;
+        padding: 12px;
+        border-radius: 8px;
+        text-align: center;
+        min-width: 90px;
+        margin: 4px;
+        display: inline-block;
+    }
+    .split-completed { background-color: #28a745; }
+    .split-current { background-color: #16a34a; animation: pulse-green 1.5s infinite; }
+
+    @keyframes pulse-green {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.8; transform: scale(1.05); }
+    }
+
+    .big-button { font-size: 1.5rem; padding: 1rem 2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-md-8">
+        <h2>
+            <i class="fas fa-bolt"></i>
+            {{ team.name }} - {{ course.course_name }}
+        </h2>
+        <span class="badge status-{{ session.status }}">{{ session.status|upper }}</span>
+    </div>
+    <div class="col-md-4 text-end" id="sessionControls">
+        {% if session.status == 'setup' %}
+            <a href="/dashboard" class="btn btn-secondary me-2">
+                <i class="fas fa-arrow-left"></i> Back
+            </a>
+            <button class="btn btn-success big-button" id="startBtn">
+                <i class="fas fa-play"></i> GO
+            </button>
+        {% elif session.status == 'active' %}
+            <button class="btn btn-danger" id="stopBtn">
+                <i class="fas fa-stop"></i> Stop Session
+            </button>
+        {% elif session.status == 'completed' or session.status == 'incomplete' %}
+            <button class="btn btn-primary me-2" id="repeatBtn">
+                <i class="fas fa-redo"></i> Repeat Session
+            </button>
+            <a href="/dashboard" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </a>
+        {% endif %}
+
+        <!-- Hidden buttons for dynamic display when session completes -->
+        {% if session.status == 'active' %}
+            <button class="btn btn-primary me-2" id="repeatBtn" style="display: none;">
+                <i class="fas fa-redo"></i> Repeat Session
+            </button>
+            <a href="/dashboard" class="btn btn-secondary" id="backBtn" style="display: none;">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Current Status Banner -->
+<div class="alert alert-info mb-4" id="currentStatus" style="display: none;">
+    <h5><i class="fas fa-info-circle"></i> Current Status</h5>
+    <p class="mb-0" id="statusText">Waiting to start...</p>
+</div>
+
+<!-- Athlete Progress -->
+<div class="card">
+    <div class="card-header">
+        <h5>
+            <i class="fas fa-users"></i>
+            Athlete Progress
+            <span class="badge bg-primary" id="completedCount">0 / {{ runs|length }}</span>
+        </h5>
+    </div>
+    <div class="card-body" id="athleteProgress">
+        <div class="text-center">
+            <i class="fas fa-spinner fa-spin fa-2x"></i>
+            <p class="mt-2">Loading session data...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Countdown Modal for Athlete Transitions -->
+<div class="modal fade" id="countdownModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content text-center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px;">
+            <div class="modal-body" style="padding: 1rem;">
+                <div class="mb-2" style="font-size: 0.9rem;">
+                    <i class="fas fa-running"></i> Next Up
+                </div>
+                <div class="fw-bold mb-2" id="countdownAthleteName" style="font-size: 1.25rem; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">
+                    Athlete
+                </div>
+                <div class="fw-bold" id="countdownTimer" style="font-size: 3rem; text-shadow: 2px 2px 3px rgba(0,0,0,0.4);">
+                    5
+                </div>
+                <p class="mt-2 mb-0 text-white-50" style="font-size: 0.75rem;">Get ready...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const sessionId = '{{ session.session_id }}';
+let refreshInterval;
+
+{% if session.status == 'setup' %}
+document.getElementById('startBtn').addEventListener('click', async function() {
+    if (!confirm('Start Reaction Sprint session? First athlete will begin after countdown.')) return;
+
+    this.disabled = true;
+    this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
+
+    const response = await fetch(`/api/reaction/start/${sessionId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    });
+
+    const result = await response.json();
+    if (result.success) {
+        location.reload();
+    } else {
+        alert('Error starting session: ' + result.error);
+        this.disabled = false;
+        this.innerHTML = '<i class="fas fa-play"></i> START';
+    }
+});
+{% endif %}
+
+{% if session.status == 'active' %}
+document.getElementById('stopBtn').addEventListener('click', async function() {
+    const reason = prompt('Reason for stopping session:');
+    if (!reason) return;
+
+    const response = await fetch(`/session/${sessionId}/stop`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({reason: reason})
+    });
+
+    const result = await response.json();
+    if (result.success) {
+        location.reload();
+    } else {
+        alert('Error stopping session: ' + result.error);
+    }
+});
+{% endif %}
+
+// Repeat button handler
+const repeatBtn = document.getElementById('repeatBtn');
+if (repeatBtn) {
+    repeatBtn.addEventListener('click', async function() {
+        if (!confirm('Repeat this session with the same athletes?')) return;
+
+        const response = await fetch(`/session/${sessionId}/repeat`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            window.location.href = result.redirect_url || `/reaction/monitor/${result.new_session_id}`;
+        } else {
+            alert('Error repeating session: ' + result.error);
+        }
+    });
+}
+
+async function refreshStatus() {
+    try {
+        const response = await fetch(`/api/reaction/status/${sessionId}`);
+        const data = await response.json();
+
+        // Update current status banner
+        const serviceStatus = data.service_status;
+        if (serviceStatus && serviceStatus.active) {
+            const statusBanner = document.getElementById('currentStatus');
+            const statusText = document.getElementById('statusText');
+
+            if (serviceStatus.countdown && serviceStatus.countdown.active) {
+                statusBanner.style.display = 'block';
+                statusText.innerHTML = `<strong>Next up:</strong> ${serviceStatus.countdown.athlete_name} - Get ready in ${serviceStatus.countdown.seconds_remaining}s`;
+            } else if (serviceStatus.current_athlete) {
+                statusBanner.style.display = 'block';
+                const targetText = serviceStatus.current_target ?
+                    `Waiting for <strong>${serviceStatus.current_target}</strong>` :
+                    'Selecting next cone...';
+                statusText.innerHTML = `<strong>${serviceStatus.current_athlete}</strong> - ${targetText} (${serviceStatus.touches_completed}/5 completed)`;
+            } else {
+                statusBanner.style.display = 'none';
+            }
+        }
+
+        // Handle countdown modal
+        if (serviceStatus && serviceStatus.countdown && serviceStatus.countdown.active) {
+            showCountdownModal(serviceStatus.countdown.athlete_name, serviceStatus.countdown.seconds_remaining);
+        } else {
+            hideCountdownModal();
+        }
+
+        // Update athlete progress
+        updateProgress(data.session, data.runs, serviceStatus);
+
+        // Check if session completed
+        if (data.session.status === 'completed' || data.session.status === 'incomplete') {
+            clearInterval(refreshInterval);
+
+            // Show completion message
+            if (data.session.status === 'completed') {
+                showCompletionMessage();
+            }
+
+            // Show back button and repeat button
+            const stopBtn = document.getElementById('stopBtn');
+            if (stopBtn) stopBtn.style.display = 'none';
+
+            const backBtn = document.getElementById('backBtn');
+            if (backBtn) backBtn.style.display = 'inline-block';
+
+            const repeatBtn = document.getElementById('repeatBtn');
+            if (repeatBtn) repeatBtn.style.display = 'inline-block';
+        }
+
+    } catch (error) {
+        console.error('Error refreshing status:', error);
+    }
+}
+
+function updateProgress(session, runs, serviceStatus) {
+    const completedCount = runs.filter(r => r.status === 'completed').length;
+    document.getElementById('completedCount').textContent = `${completedCount} / ${runs.length}`;
+
+    const html = runs.map(run => {
+        let statusClass = `run-${run.status}`;
+        if (run.status === 'incomplete') statusClass = 'run-failed';
+
+        const segments = run.segments || [];
+
+        // Determine status display
+        let statusDisplay = run.status.toUpperCase();
+        if (run.status === 'incomplete') statusDisplay = 'FAILED (TIMEOUT)';
+
+        // Check if this is the current athlete
+        const isCurrent = serviceStatus && serviceStatus.current_run_id === run.run_id;
+        const currentTarget = isCurrent ? serviceStatus.current_target : null;
+
+        return `
+            <div class="run-card ${statusClass} card mb-2">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-3">
+                            <strong>${run.queue_position + 1}. ${run.athlete_name}</strong>
+                            ${run.jersey_number ? `<span class="badge bg-secondary">#${run.jersey_number}</span>` : ''}
+                            <div class="small text-muted">${statusDisplay}</div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="d-flex flex-wrap">
+                                ${['192.168.99.101', '192.168.99.102', '192.168.99.103', '192.168.99.104', '192.168.99.105'].map((deviceId, idx) => {
+                                    const coneNum = parseInt(deviceId.split('.').pop()) - 100;
+                                    const segment = segments.find(s => s.to_device === deviceId);
+
+                                    let cssClass = 'split-box';
+                                    let displayTime = '--';
+
+                                    if (segment && segment.touch_detected) {
+                                        cssClass = 'split-box split-completed';
+                                        displayTime = segment.actual_time.toFixed(2) + 's';
+                                    } else if (isCurrent && currentTarget === deviceId) {
+                                        cssClass = 'split-box split-current';
+                                        displayTime = 'ACTIVE';
+                                    }
+
+                                    return `
+                                        <div class="${cssClass}">
+                                            <div style="font-size: 0.75rem; font-weight: bold; margin-bottom: 4px;">C${coneNum}</div>
+                                            <div style="font-size: 1.1rem; font-weight: bold;">
+                                                ${displayTime}
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                        <div class="col-md-3 text-end">
+                            ${run.total_time ? `<strong>${run.total_time.toFixed(2)}s</strong>` : ''}
+                            ${run.status === 'queued' ? `
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="markAbsent('${run.run_id}')">
+                                    <i class="fas fa-user-slash"></i> Absent
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    document.getElementById('athleteProgress').innerHTML = html;
+}
+
+async function markAbsent(runId) {
+    if (!confirm('Mark this athlete as absent?')) return;
+
+    const response = await fetch(`/session/${sessionId}/athlete/${runId}/absent`, {
+        method: 'POST'
+    });
+
+    if (response.ok) {
+        refreshStatus();
+    } else {
+        alert('Error marking athlete absent');
+    }
+}
+
+function showCompletionMessage() {
+    const alertHtml = `
+        <div class="alert alert-success alert-dismissible fade show">
+            <h4><i class="fas fa-check-circle"></i> Session Completed!</h4>
+            <p>All athletes have finished the Reaction Sprint drill.</p>
+        </div>
+    `;
+    document.querySelector('.card-body').insertAdjacentHTML('afterbegin', alertHtml);
+}
+
+// Countdown modal functions
+let countdownModalInstance = null;
+
+function showCountdownModal(athleteName, secondsRemaining) {
+    const modal = document.getElementById('countdownModal');
+    const athleteNameEl = document.getElementById('countdownAthleteName');
+    const timerEl = document.getElementById('countdownTimer');
+
+    // Always update the values (countdown changes each second)
+    athleteNameEl.textContent = athleteName;
+    timerEl.textContent = secondsRemaining;
+
+    if (!countdownModalInstance) {
+        countdownModalInstance = new bootstrap.Modal(modal);
+        countdownModalInstance.show();
+    }
+}
+
+function hideCountdownModal() {
+    if (countdownModalInstance) {
+        countdownModalInstance.hide();
+        // Properly dispose of the modal to remove backdrop
+        setTimeout(() => {
+            if (countdownModalInstance) {
+                countdownModalInstance.dispose();
+                countdownModalInstance = null;
+            }
+            // Force remove any lingering backdrops
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        }, 200);
+    }
+}
+
+// Always load initial data
+refreshStatus();
+
+{% if session.status == 'active' %}
+    // Poll for updates if session is active
+    refreshInterval = setInterval(refreshStatus, 1000);
+{% endif %}
+</script>
+{% endblock %}

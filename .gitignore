@@ -50,8 +50,8 @@ Thumbs.db
 
 # Field Trainer specific
 # Runtime data (don't commit)
-data/field_trainer.db
-data/field_trainer.db-*
+#data/field_trainer.db
+#data/field_trainer.db-*
 data/*.backup*
 data/logs/
 data/backups/
