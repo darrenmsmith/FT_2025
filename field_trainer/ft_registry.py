@@ -540,6 +540,17 @@ class Registry:
 
         touch_time = datetime.utcnow()
         self.log(f"Touch event: {device_id} at {touch_time.isoformat()}")
+
+        # Track pending touch count for calibration test mode polling
+        try:
+            with self.nodes_lock:
+                node = self.nodes.get(device_id)
+                if node is not None:
+                    if node.sensors is None:
+                        node.sensors = {}
+                    node.sensors['pending_touch_count'] = node.sensors.get('pending_touch_count', 0) + 1
+        except Exception:
+            pass
         
         if self._touch_handler:
             try:

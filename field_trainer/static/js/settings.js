@@ -931,7 +931,11 @@ function setupCalibrationEventListeners() {
     const startTestBtn = document.getElementById('start-test-mode-btn');
     const stopTestBtn = document.getElementById('stop-test-mode-btn');
 
-    if (startTestBtn) startTestBtn.addEventListener('click', startTestMode);
+    if (startTestBtn) startTestBtn.addEventListener('click', () => {
+        const input = document.getElementById('threshold-input');
+        const threshold = input ? parseFloat(input.value) : 0.5;
+        startTestMode(selectedCalibrationDevice, threshold);
+    });
     if (stopTestBtn) stopTestBtn.addEventListener('click', stopTestMode);
 
     // Calibration button (old UI - kept for backward compatibility)
@@ -1172,15 +1176,18 @@ function startCalibrationForDevice(deviceNum) {
     logToSystemLog(`🎯 Starting calibration for device ${deviceNum}...`);
     logToSystemLog('='.repeat(60));
 
-    if (calibrationSocket) {
-        calibrationSocket.emit('start_calibration_wizard', {
-            device_num: deviceNum,
-            tap_count: 5
-        });
-    } else {
-        logToSystemLog('❌ Error: WebSocket not connected');
-        showCalibrationMessage('danger', 'WebSocket not connected');
-    }
+    const evtSource = new EventSource(`/api/calibration/device/${deviceNum}/calibrate-stream`);
+    evtSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        updateCalibrationProgress(data);
+        if (data.status === 'complete' || data.status === 'error') {
+            evtSource.close();
+        }
+    };
+    evtSource.onerror = function() {
+        evtSource.close();
+        logToSystemLog('❌ Connection error during calibration');
+    };
 }
 
 function logToSystemLog(message) {
@@ -1465,10 +1472,22 @@ function startCalibration() {
         stopLiveReadingStream();
     }
 
-    calibrationSocket.emit('start_calibration_wizard', {
-        device_num: selectedCalibrationDevice,
-        tap_count: 5
-    });
+    const evtSource = new EventSource(`/api/calibration/device/${selectedCalibrationDevice}/calibrate-stream`);
+    evtSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        updateCalibrationProgress(data);
+        if (data.status === 'complete' || data.status === 'error') {
+            evtSource.close();
+            const runBtn = document.getElementById('run-calibration-btn');
+            if (runBtn) runBtn.disabled = false;
+        }
+    };
+    evtSource.onerror = function() {
+        evtSource.close();
+        logToSystemLog('❌ Connection error during calibration');
+        const runBtn = document.getElementById('run-calibration-btn');
+        if (runBtn) runBtn.disabled = false;
+    };
 }
 
 function updateCalibrationProgress(data) {
@@ -1502,8 +1521,19 @@ function updateCalibrationProgress(data) {
 
             showCalibrationMessage('success', '✅ Calibration PASSED');
 
-            // Refresh device table to show new threshold
-            setTimeout(() => loadCalibrationDeviceStatus(), 1000);
+            // Immediately update the threshold display for the calibrated device
+            if (data.device_num !== undefined && data.recommended_threshold) {
+                const newThreshold = data.recommended_threshold;
+                const devNum = data.device_num;
+                const display = document.querySelector(`.threshold-display[data-device="${devNum}"]`);
+                const input = document.querySelector(`.threshold-edit[data-device="${devNum}"]`);
+                if (display) {
+                    display.innerHTML = `${newThreshold.toFixed(2)} <i class="bi bi-pencil-square text-muted small"></i>`;
+                    display.setAttribute('onclick', `editThreshold(${devNum}, ${newThreshold})`);
+                }
+                if (input) input.value = newThreshold.toFixed(2);
+            }
+
             break;
 
         case 'error':
@@ -1667,37 +1697,37 @@ function startTestMode(deviceNum, threshold) {
         testModeActive = false;
     });
 
-    // Poll for touch events every 500ms
-    let lastTouchCount = 0;
+    // Poll accelerometer readings at 100ms (10Hz) and count touches client-side.
+    // Uses the existing /reading endpoint (no separate touch-count endpoint needed).
+    // 100ms polling catches brief tap spikes; 500ms debounce prevents one tap
+    // counting as multiple due to post-tap vibration.
+    let lastTouchTime = 0;
+    const touchDebounceMs = 500;
+    let wasAboveThreshold = false;
+
     const pollInterval = setInterval(() => {
         if (!testModeActive) {
             clearInterval(pollInterval);
             return;
         }
 
-        // Fetch current touch count from backend
-        fetch(`/api/calibration/device/${deviceNum}/touch-count`)
+        fetch(`/api/calibration/device/${deviceNum}/reading`)
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    const currentCount = data.touch_count || 0;
-
-                    // Only update if count increased
-                    if (currentCount > lastTouchCount) {
-                        const newTouches = currentCount - lastTouchCount;
-                        for (let i = 0; i < newTouches; i++) {
-                            testModeTouchCount++;
-                            appendToCalibrationLog(`👆 Touch #${testModeTouchCount} detected!`);
-                        }
-                        lastTouchCount = currentCount;
+                    // new_touches = touches detected by the 100Hz detection loop
+                    // since the last poll. Reliable regardless of polling interval.
+                    const newTouches = data.new_touches || 0;
+                    for (let i = 0; i < newTouches; i++) {
+                        testModeTouchCount++;
+                        appendToCalibrationLog(`👆 Touch #${testModeTouchCount} detected! (${data.magnitude.toFixed(3)}g)`);
                     }
                 }
             })
             .catch(error => {
-                // Silently ignore polling errors to avoid log spam
-                console.error('Touch count poll error:', error);
+                console.error('Touch poll error:', error);
             });
-    }, 500);
+    }, 100);
 
     // Auto-stop after 30 seconds
     testModeTimeout = setTimeout(() => {

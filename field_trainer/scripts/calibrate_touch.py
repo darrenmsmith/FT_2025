@@ -8,7 +8,15 @@ import sys
 import time
 sys.path.insert(0, '/opt')
 
-from field_trainer.ft_touch import TouchSensor
+# Support both gateway (full package) and client (bare ft_touch.py in /opt/field_trainer/)
+try:
+    from field_trainer.ft_touch import TouchSensor
+except ImportError:
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("ft_touch", "/opt/field_trainer/ft_touch.py")
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    TouchSensor = _mod.TouchSensor
 
 def run_calibration(node_id: str, tap_count: int = 5):
     """Run calibration locally on this device"""
@@ -24,21 +32,31 @@ def run_calibration(node_id: str, tap_count: int = 5):
         return False
 
     # Step 1: Measure baseline
+    # Collect raw x/y/z to establish the resting baseline first.
+    # This is required even if no calibration file exists yet (first-time setup).
     print("📊 Step 1: Measuring baseline (keep device still for 3 seconds)...")
-    baseline_samples = []
+    raw_samples = []
 
     for i in range(30):  # 3 seconds at 10Hz
         reading = sensor._get_sensor_reading()
         if reading:
-            magnitude = sensor._calculate_magnitude(reading)
-            baseline_samples.append(magnitude)
+            raw_samples.append(reading)
         time.sleep(0.1)
 
-    if not baseline_samples:
+    if not raw_samples:
         print("❌ FAILED: Could not measure baseline")
         return False
 
-    baseline = sum(baseline_samples) / len(baseline_samples)
+    # Set resting baseline so _calculate_magnitude works correctly from here on
+    sensor.baseline = {
+        'x': sum(s['x'] for s in raw_samples) / len(raw_samples),
+        'y': sum(s['y'] for s in raw_samples) / len(raw_samples),
+        'z': sum(s['z'] for s in raw_samples) / len(raw_samples),
+    }
+    sensor.calibrated = True
+
+    # Baseline noise level = average magnitude deviation from rest (should be near 0)
+    baseline = sum(sensor._calculate_magnitude(s) for s in raw_samples) / len(raw_samples)
     print(f"✓ Baseline: {baseline:.3f}g")
     print()
 

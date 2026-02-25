@@ -288,6 +288,7 @@ def connect_to_device0(node_id):
     # Track current action assignment (use list for mutable reference in lambda)
     current_action = [None]
     touch_detection_active = [False]
+    test_mode_active = [False]  # True while calibration test mode is running
     heartbeat_interval = [5]  # Default 5 seconds, can be changed by deployment
 
     # Set touch callback with audio manager and current action
@@ -452,6 +453,18 @@ def connect_to_device0(node_id):
                                         except Exception as e:
                                             print(f"✗ Failed to update threshold: {e}")
 
+                                elif action == "test_mode":
+                                    enabled = data.get("enabled", False)
+                                    if enabled:
+                                        test_mode_active[0] = True
+                                        if not touch_detection_active[0]:
+                                            touch_sensor.start_detection()
+                                            touch_detection_active[0] = True
+                                        print(f"🧪 Test mode started (threshold: {touch_sensor.threshold})")
+                                    else:
+                                        test_mode_active[0] = False
+                                        print("🧪 Test mode stopped")
+
                             # Update heartbeat interval if deployment message includes it
                             if "heartbeat_interval" in data:
                                 new_interval = data["heartbeat_interval"]
@@ -478,8 +491,9 @@ def connect_to_device0(node_id):
                                     touch_sensor.start_detection()
                                     touch_detection_active[0] = True
                                     print("Touch detection started (course active)")
-                            else:
-                                # Stop touch detection when course not active or no action
+                            elif not test_mode_active[0]:
+                                # Stop touch detection when course not active, no action,
+                                # and calibration test mode is not running
                                 if touch_detection_active[0]:
                                     touch_sensor.stop_detection()
                                     touch_detection_active[0] = False

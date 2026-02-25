@@ -2074,18 +2074,22 @@ def device_live_reading(device_num):
         })
 
 
-@app.route('/api/calibration/device/<int:device_num>/calibrate', methods=['POST'])
-def calibrate_device(device_num):
-    """Run full calibration wizard on device"""
-    try:
-        result = calibration_logic.run_calibration_wizard(device_num)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error calibrating device {device_num}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
+@app.route('/api/calibration/device/<int:device_num>/calibrate-stream', methods=['GET'])
+def calibrate_device_stream(device_num):
+    """Stream calibration wizard progress using Server-Sent Events"""
+    def generate():
+        try:
+            for progress in calibration_logic.run_calibration_wizard(device_num):
+                data = json.dumps(progress)
+                yield f"data: {data}\n\n"
+        except Exception as e:
+            logger.error(f"Error in calibration stream for device {device_num}: {e}")
+            error_data = json.dumps({'status': 'error', 'message': str(e), 'error': str(e),
+                                     'tap_number': 0, 'baseline': 0.0, 'tap_magnitudes': [], 'recommended_threshold': 0.0})
+            yield f"data: {error_data}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 @app.route('/api/device0/touch', methods=['POST'])

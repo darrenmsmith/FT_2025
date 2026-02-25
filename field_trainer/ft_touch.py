@@ -62,6 +62,12 @@ class TouchSensor:
         # Touch event tracking
         self.touch_count = 0
         self.touch_history = []
+
+        # Cached last reading — updated by detection loop, read by calibration API
+        # Avoids concurrent SMBus access from multiple threads
+        self.last_reading = None
+        self.last_magnitude = 0.0
+        self.pending_touch_count = 0  # Touches since last API read (for test mode)
         
         # Initialize hardware and calibration
         self._init_hardware()
@@ -294,11 +300,32 @@ class TouchSensor:
         """Main detection loop running in separate thread"""
         while self.running:
             try:
-                if self._detect_touch_event():
-                    print(f"[{self.device_id}] Touch detected (count: {self.touch_count})")
-                    if self.touch_callback:
-                        self.touch_callback()
-                
+                reading = self._get_sensor_reading()
+                if reading:
+                    magnitude = self._calculate_magnitude(reading)
+                    # Cache for calibration API reads (avoids concurrent bus access)
+                    self.last_reading = reading
+                    self.last_magnitude = magnitude
+
+                    if magnitude > self.threshold:
+                        current_time = time.time()
+                        if current_time - self.last_touch_time < self.touch_debounce:
+                            time.sleep(0.01)
+                            continue
+                        self.last_touch_time = current_time
+                        self.touch_count += 1
+                        self.pending_touch_count += 1
+                        self.touch_history.append({
+                            "time": current_time,
+                            "magnitude": magnitude,
+                            "threshold": self.threshold
+                        })
+                        cutoff_time = current_time - 300
+                        self.touch_history = [h for h in self.touch_history if h["time"] > cutoff_time]
+                        print(f"[{self.device_id}] Touch detected (count: {self.touch_count})")
+                        if self.touch_callback:
+                            self.touch_callback()
+
                 time.sleep(0.01)  # 100Hz detection rate
             except Exception as e:
                 print(f"[{self.device_id}] Detection loop error: {e}")

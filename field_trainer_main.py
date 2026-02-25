@@ -145,6 +145,9 @@ def main() -> int:
             d0_touch_sensor.set_touch_callback(on_d0_touch)
             d0_touch_sensor.start_detection()
 
+            # Store reference so calibration API can read without creating a new sensor
+            REGISTRY.d0_touch_sensor = d0_touch_sensor
+
             REGISTRY.log(f"D0 touch sensor started (threshold: {d0_touch_sensor.threshold})")
             print(f"✅ D0 touch sensor active - physical touches will be detected")
         else:

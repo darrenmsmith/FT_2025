@@ -246,6 +246,15 @@ def set_threshold(device_num: int, threshold: float) -> Dict[str, Any]:
 
                 logger.info(f"Saved threshold {threshold} to {cal_file}")
 
+                # Also update the running sensor so the detection loop uses the new threshold immediately
+                try:
+                    sensor = getattr(REGISTRY, 'd0_touch_sensor', None)
+                    if sensor:
+                        sensor.threshold = threshold
+                        logger.info(f"Updated running D0 sensor threshold to {threshold}")
+                except Exception as ex:
+                    logger.warning(f"Could not update running sensor threshold: {ex}")
+
                 return {
                     'success': True,
                     'message': f'Threshold set to {threshold} for {info["name"]}'
@@ -334,13 +343,14 @@ def get_accelerometer_reading(device_num: int) -> Dict[str, Any]:
 
         logger.debug(f"Getting accelerometer reading for device {device_num} ({device_id})")
 
-        # For Device 0, we can read locally using ft_touch module
+        # For Device 0, reuse the already-running sensor stored in REGISTRY.
+        # Creating a new TouchSensor here conflicts with the main service's 100Hz
+        # detection loop (I2C bus contention + 100ms sleep in _init_hardware).
         if device_num == 0:
             try:
-                from field_trainer.ft_touch import TouchSensor
-                sensor = TouchSensor(device_id, config_dir="/opt/field_trainer/config")
+                sensor = getattr(REGISTRY, 'd0_touch_sensor', None)
 
-                if not sensor.hardware_available:
+                if not sensor or not sensor.hardware_available:
                     return {
                         'success': False,
                         'magnitude': 0.0,
@@ -348,19 +358,26 @@ def get_accelerometer_reading(device_num: int) -> Dict[str, Any]:
                         'y': 0.0,
                         'z': 0.0,
                         'timestamp': time.time(),
-                        'error': 'Accelerometer hardware not available'
+                        'error': 'D0 touch sensor not available'
                     }
 
-                reading = sensor._get_sensor_reading()
+                # Read from cache populated by the detection loop.
+                # Do NOT call _get_sensor_reading() here — the detection thread
+                # owns the SMBus object and concurrent access causes silent failures.
+                reading = getattr(sensor, 'last_reading', None)
+                magnitude = getattr(sensor, 'last_magnitude', 0.0)
+                # Drain pending touch count atomically for test mode polling
+                new_touches = getattr(sensor, 'pending_touch_count', 0)
+                sensor.pending_touch_count = 0
                 if reading:
-                    magnitude = sensor._calculate_magnitude(reading)
                     return {
                         'success': True,
                         'magnitude': magnitude,
                         'x': reading['x'],
                         'y': reading['y'],
                         'z': reading['z'],
-                        'timestamp': time.time()
+                        'timestamp': time.time(),
+                        'new_touches': new_touches
                     }
                 else:
                     return {
@@ -370,10 +387,11 @@ def get_accelerometer_reading(device_num: int) -> Dict[str, Any]:
                         'y': 0.0,
                         'z': 0.0,
                         'timestamp': time.time(),
-                        'error': 'Failed to read sensor'
+                        'new_touches': 0,
+                        'error': 'No reading available yet'
                     }
             except Exception as e:
-                logger.error(f"Error reading local accelerometer: {e}")
+                logger.error(f"Error reading D0 accelerometer: {e}")
                 return {
                     'success': False,
                     'magnitude': 0.0,
@@ -414,13 +432,18 @@ def get_accelerometer_reading(device_num: int) -> Dict[str, Any]:
                 accel = node.sensors.get('accelerometer', {'x': 0.0, 'y': 0.0, 'z': 0.0})
                 magnitude = node.sensors.get('touch_magnitude', 0.0)
 
+                # Drain pending touch count (incremented by handle_touch_event on each heartbeat touch)
+                new_touches = node.sensors.get('pending_touch_count', 0)
+                node.sensors['pending_touch_count'] = 0
+
                 return {
                     'success': True,
                     'magnitude': float(magnitude),
                     'x': float(accel.get('x', 0.0)),
                     'y': float(accel.get('y', 0.0)),
                     'z': float(accel.get('z', 0.0)),
-                    'timestamp': time.time()
+                    'timestamp': time.time(),
+                    'new_touches': new_touches
                 }
 
         except Exception as e:
@@ -570,11 +593,31 @@ def run_calibration_wizard(device_num: int, tap_count: int = 5) -> Generator[Dic
             logger.info(f"Starting LOCAL calibration for device {device_num} ({device_id}) - local execution")
             cmd = f"cd /opt/field_trainer/scripts && python3 -u calibrate_touch.py {device_id} {tap_count}"
         else:
-            # Remote devices (1-5): SSH to the device and run calibration
+            # Remote devices (1-5): stop the cone service first to free I2C bus, then calibrate
             logger.info(f"Starting REMOTE calibration for device {device_num} ({device_id}) via SSH")
+            stop_cmd = (
+                f"ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no pi@{device_id} "
+                f"'sudo systemctl stop field-trainer-client.service 2>/dev/null "
+                f"|| sudo systemctl stop field-client.service 2>/dev/null'"
+            )
+            subprocess.run(stop_cmd, shell=True, timeout=10)
+            logger.info(f"Stopped cone service on {device_id} before calibration")
             cmd = f"ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no pi@{device_id} 'cd /opt/field_trainer/scripts && python3 -u calibrate_touch.py {device_id} {tap_count}'"
 
         logger.info(f"Executing: {cmd}")
+
+        # For Device 0, the main process runs a touch detection loop on the same I2C bus.
+        # Stop it before spawning the calibration subprocess so both don't fight over the bus.
+        d0_sensor_was_running = False
+        if device_num == 0:
+            try:
+                if hasattr(REGISTRY, 'd0_touch_sensor') and REGISTRY.d0_touch_sensor:
+                    if REGISTRY.d0_touch_sensor.running:
+                        REGISTRY.d0_touch_sensor.stop_detection()
+                        d0_sensor_was_running = True
+                        logger.info("Paused D0 touch sensor for calibration")
+            except Exception as e:
+                logger.warning(f"Could not pause D0 touch sensor: {e}")
 
         try:
             # Run the script with real-time output streaming
@@ -641,10 +684,23 @@ def run_calibration_wizard(device_num: int, tap_count: int = 5) -> Generator[Dic
 
             # Check for PASSED or FAILED
             if '✅ PASSED' in full_output:
-                # Success!
+                # For remote cones, restart their service so new threshold loads from file
+                if device_num != 0:
+                    try:
+                        restart_cmd = (
+                            f"ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no pi@{device_id} "
+                            f"'sudo systemctl restart field-trainer-client.service 2>/dev/null "
+                            f"|| sudo systemctl restart field-client.service 2>/dev/null'"
+                        )
+                        subprocess.run(restart_cmd, shell=True, timeout=15)
+                        logger.warning(f"Restarted cone service on {device_id} to load new threshold")
+                    except Exception as e:
+                        logger.warning(f"Could not restart cone service on {device_id}: {e}")
+
                 yield {
                     'status': 'complete',
                     'message': '✅ PASSED - Calibration complete!',
+                    'device_num': device_num,
                     'tap_number': len(tap_magnitudes),
                     'baseline': baseline,
                     'tap_magnitudes': tap_magnitudes,
@@ -673,6 +729,16 @@ def run_calibration_wizard(device_num: int, tap_count: int = 5) -> Generator[Dic
                 'recommended_threshold': 0.0,
                 'error': 'Timeout'
             }
+
+        finally:
+            # Always restart D0 touch sensor if we stopped it before the subprocess
+            if d0_sensor_was_running:
+                try:
+                    if hasattr(REGISTRY, 'd0_touch_sensor') and REGISTRY.d0_touch_sensor:
+                        REGISTRY.d0_touch_sensor.start_detection()
+                        logger.info("Resumed D0 touch sensor after calibration")
+                except Exception as e:
+                    logger.warning(f"Could not resume D0 touch sensor: {e}")
 
     except Exception as e:
         logger.error(f"Error in calibration wizard: {e}")
