@@ -181,21 +181,20 @@ def session_status(session_id):
     # Get pattern data for pattern mode (to show step-by-step layout)
     pattern_data = None
     if course_mode == 'pattern':
-        # First, check if session has started and has active runs
-        if session_service.session_state.get('active_runs'):
-            # Get pattern from ACTIVE athlete's run_info (each athlete has unique pattern!)
+        if session['status'] == 'setup':
+            # Session not yet started — show pre-generated pattern preview (before GO)
+            if hasattr(session_service, 'pre_generated_patterns') and session_id in session_service.pre_generated_patterns:
+                pre_patterns = session_service.pre_generated_patterns[session_id]
+                for run in session['runs']:
+                    if run['status'] != 'absent' and run['run_id'] in pre_patterns:
+                        pattern_data = pre_patterns[run['run_id']]
+                        print(f"   📊 Pre-GO pattern preview for {run['athlete_name']}: {pattern_data.get('description')}")
+                        break
+        else:
+            # Session active — get pattern from the currently active run
             for run_id, run_info in session_service.session_state.get('active_runs', {}).items():
                 if run_info.get('is_active', False) and 'pattern_data' in run_info:
                     pattern_data = run_info['pattern_data']
-                    break
-        # Otherwise, check for pre-generated patterns (before session starts)
-        elif hasattr(session_service, 'pre_generated_patterns') and session_id in session_service.pre_generated_patterns:
-            # Find the first non-absent athlete's pattern to display
-            pre_patterns = session_service.pre_generated_patterns[session_id]
-            for run in session['runs']:
-                if run['status'] != 'absent' and run['run_id'] in pre_patterns:
-                    pattern_data = pre_patterns[run['run_id']]
-                    print(f"   📊 Returning pre-generated pattern for {run['athlete_name']}: {pattern_data.get('description')}")
                     break
 
     # Get countdown state for Simon Says athlete transitions
@@ -801,6 +800,75 @@ def continue_session(session_id):
 
         REGISTRY.log(f"Session {session_id[:8]} continued to {next_length} cones as {new_session_id[:8]} ({len(successful_athletes)} athletes)")
 
+        # Pre-generate patterns for all athletes so the session monitor can show
+        # the pattern preview before the coach clicks GO (mirrors deploy_course behavior)
+        try:
+            from field_trainer.pattern_generator import pattern_generator
+
+            actions_for_patterns = db.get_course_actions(course_id)
+            colored_devices = []
+            for action in actions_for_patterns:
+                if action['device_id'] == '192.168.99.100':
+                    continue
+                behavior_config = action.get('behavior_config')
+                if behavior_config:
+                    try:
+                        config = json.loads(behavior_config) if isinstance(behavior_config, str) else behavior_config
+                        color = config.get('color')
+                        if color:
+                            colored_devices.append({
+                                'device_id': action['device_id'],
+                                'device_name': action['device_name'],
+                                'color': color
+                            })
+                    except Exception:
+                        pass
+
+            if colored_devices:
+                # Force allow_repeats if pattern length exceeds number of devices
+                allow_repeats = pattern_config.get('allow_repeats', True)
+                if next_length > len(colored_devices):
+                    allow_repeats = True
+                    print(f"   ⚠️  next_length ({next_length}) > devices ({len(colored_devices)}), forcing allow_repeats=True")
+
+                print(f"\n   🎲 Pre-generating {next_length}-step patterns for {len(successful_athletes)} athletes...")
+                new_session_data = db.get_session(new_session_id)
+                pre_generated = {}
+                previous_pattern = None
+
+                for run in new_session_data['runs']:
+                    if run['status'] == 'absent':
+                        continue
+                    for attempt in range(100):
+                        pattern = pattern_generator.generate_simon_says_pattern(
+                            colored_devices,
+                            sequence_length=next_length,
+                            allow_repeats=allow_repeats
+                        )
+                        if previous_pattern is None or pattern != previous_pattern:
+                            break
+
+                    pattern_description = pattern_generator.get_pattern_description(pattern)
+                    pattern_device_ids = pattern_generator.get_pattern_device_ids(pattern)
+
+                    pre_generated[run['run_id']] = {
+                        'pattern': pattern,
+                        'description': pattern_description,
+                        'device_ids': pattern_device_ids,
+                        'colored_devices': colored_devices
+                    }
+                    previous_pattern = pattern
+                    print(f"      ✅ {run['athlete_name']}: {pattern_description}")
+
+                if not hasattr(session_service, 'pre_generated_patterns'):
+                    session_service.pre_generated_patterns = {}
+                session_service.pre_generated_patterns[new_session_id] = pre_generated
+                print(f"   ✅ Pre-generated {len(pre_generated)} patterns stored for new session")
+        except Exception as pregen_error:
+            print(f"   ⚠️  Pattern pre-generation failed (will generate on-the-fly at start): {pregen_error}")
+            import traceback
+            traceback.print_exc()
+
         # Deactivate the old session's course first (important!)
         # This ensures the new session can properly deploy/activate the course
         try:
@@ -850,18 +918,6 @@ def continue_session(session_id):
             traceback.print_exc()
             # Don't continue - this is critical
             return jsonify({'success': False, 'error': f'Course activation failed: {str(deploy_error)}'}), 500
-
-        # Auto-start the session (generates pattern, displays it)
-        try:
-            print(f"📤 Calling start_session for: {new_session_id[:8]}")
-            session_service.start_session(new_session_id)
-            REGISTRY.log(f"Session {new_session_id[:8]} auto-started (continue to {next_length})")
-            print(f"✓ Session started successfully")
-        except Exception as start_error:
-            print(f"❌ Auto-start failed: {start_error}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({'success': False, 'error': f'Session start failed: {str(start_error)}'}), 500
 
         return jsonify({
             'success': True,

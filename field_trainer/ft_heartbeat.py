@@ -25,11 +25,13 @@ from .ft_models import utcnow_iso
 from .ft_registry import REGISTRY
 from .ft_version import VERSION
 
-# Touch event deduplication: {device_id: last_touch_timestamp}
-# Prevents same touch from being processed multiple times when reported in successive heartbeats
-_TOUCH_DEDUP_DICT: Dict[str, float] = {}
+# Touch event deduplication: {device_id: {'cone_ts': float, 'received_at': float}}
+# Prevents same touch from being processed multiple times when reported in successive heartbeats.
+# IMPORTANT: staleness check uses gateway receive time (received_at), NOT cone's clock timestamp,
+# because cone clocks can be days out of sync with the gateway clock.
+_TOUCH_DEDUP_DICT: Dict[str, Dict[str, float]] = {}
 _TOUCH_DEDUP_LOCK = threading.Lock()
-_TOUCH_DEDUP_TOLERANCE_SEC = 0.01  # 10ms tolerance for matching timestamps
+_TOUCH_DEDUP_TOLERANCE_SEC = 0.01  # 10ms tolerance for matching cone timestamps
 
 
 class HeartbeatHandler(socketserver.StreamRequestHandler):
@@ -108,21 +110,20 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                         print(f"🔍 Touch detected from {node_id}, timestamp={touch_timestamp}")
 
                         # DEDUPLICATION: Check if this is a duplicate touch event
-                        # (same device, same timestamp within 10ms tolerance)
+                        # (same device, same cone timestamp within 10ms tolerance)
                         with _TOUCH_DEDUP_LOCK:
-                            last_timestamp = _TOUCH_DEDUP_DICT.get(node_id)
-                            print(f"   Last timestamp for {node_id}: {last_timestamp}")
+                            last_entry = _TOUCH_DEDUP_DICT.get(node_id)
+                            last_cone_ts = last_entry['cone_ts'] if last_entry else None
+                            print(f"   Last timestamp for {node_id}: {last_cone_ts}")
 
-                            if last_timestamp is not None:
-                                time_diff = abs(touch_timestamp - last_timestamp)
+                            if last_cone_ts is not None:
+                                time_diff = abs(touch_timestamp - last_cone_ts)
                                 if time_diff < _TOUCH_DEDUP_TOLERANCE_SEC:
                                     print(f"🔇 DEDUP: Ignoring duplicate touch from {node_id} (diff={time_diff*1000:.1f}ms)")
-                                    # Skip processing this duplicate touch
                                     pass  # Continue to send_ok below
                                 else:
-                                    # Different touch - update timestamp and process
-                                    _TOUCH_DEDUP_DICT[node_id] = touch_timestamp
-                                    # Handle asynchronously to not block heartbeat
+                                    # Different touch - update and process
+                                    _TOUCH_DEDUP_DICT[node_id] = {'cone_ts': touch_timestamp, 'received_at': time.time()}
                                     threading.Thread(
                                         target=REGISTRY.handle_touch_event,
                                         args=(node_id, touch_timestamp),
@@ -130,18 +131,18 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                                     ).start()
                             else:
                                 # First touch from this device - record and process
-                                _TOUCH_DEDUP_DICT[node_id] = touch_timestamp
-                                # Handle asynchronously to not block heartbeat
+                                _TOUCH_DEDUP_DICT[node_id] = {'cone_ts': touch_timestamp, 'received_at': time.time()}
                                 threading.Thread(
                                     target=REGISTRY.handle_touch_event,
                                     args=(node_id, touch_timestamp),
                                     daemon=True
                                 ).start()
 
-                            # Cleanup old entries (older than 10 seconds)
+                            # Cleanup uses gateway receive time, NOT cone clock
+                            # (cone clocks can be days behind the gateway)
                             current_time = time.time()
-                            stale_devices = [dev for dev, ts in _TOUCH_DEDUP_DICT.items()
-                                           if current_time - ts > 10.0]
+                            stale_devices = [dev for dev, entry in _TOUCH_DEDUP_DICT.items()
+                                           if current_time - entry['received_at'] > 10.0]
                             for dev in stale_devices:
                                 del _TOUCH_DEDUP_DICT[dev]
 

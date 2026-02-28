@@ -140,8 +140,11 @@ def run_calibration(node_id: str, tap_count: int = 5):
     min_tap = min(tap_magnitudes)
     max_tap = max(tap_magnitudes)
 
-    # Threshold: halfway between baseline and minimum tap, with 20% safety margin
-    recommended_threshold = baseline + ((min_tap - baseline) * 0.6)
+    # Threshold: 60% of the way between baseline and the softest tap detected.
+    # A minimum floor of 0.15g prevents overly sensitive thresholds when taps
+    # were soft during calibration — below 0.15g the sensor picks up footsteps
+    # and ambient vibrations as false touches.
+    recommended_threshold = max(0.15, baseline + ((min_tap - baseline) * 0.6))
 
     print()
     print(f"📊 Baseline: {baseline:.3f}g  |  Tap range: {min_tap:.3f}g - {max_tap:.3f}g  |  Threshold: {recommended_threshold:.3f}g")
