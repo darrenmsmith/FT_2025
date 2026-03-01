@@ -393,8 +393,15 @@ class Registry:
                 if db_course:
                     course_mode = db_course.get("mode", "sequential")
 
-            # Pattern mode (Simon Says) needs faster heartbeat (3s), sequential uses 5s
-            heartbeat_interval = 3 if course_mode == "pattern" else 5
+            # Reaction Sprint needs fastest heartbeat (touch latency is heartbeat/2 on average)
+            # Pattern mode (Simon Says) uses 3s, sequential uses 5s
+            course_type = db_course.get("course_type") if db_course else None
+            if course_type == "reaction_sprint":
+                heartbeat_interval = 1
+            elif course_mode == "pattern":
+                heartbeat_interval = 3
+            else:
+                heartbeat_interval = 5
             self.log(f"Course mode: {course_mode}, heartbeat interval: {heartbeat_interval}s")
 
             # Notify connected devices (skip Device 0)

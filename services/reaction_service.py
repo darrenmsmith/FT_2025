@@ -108,24 +108,11 @@ class ReactionService:
 
             print(f"✅ Device IDs: {device_ids}")
 
-            # Get timeout config from behavior_config
-            timeout_seconds = 10  # Default
-            d0_action = next((a for a in course_actions if a['device_id'] == '192.168.99.100'), None)
-            if d0_action and d0_action.get('behavior_config'):
-                try:
-                    config = json.loads(d0_action['behavior_config']) if isinstance(d0_action['behavior_config'], str) else d0_action['behavior_config']
-                    timeout_seconds = config.get('timeout_seconds', 10)
-                except:
-                    pass
-
-            print(f"⏱️  Timeout: {timeout_seconds}s")
-
             # Initialize session state
             with self.state_lock:
                 self.session_state = {
                     'session_id': session_id,
                     'course_id': session['course_id'],
-                    'timeout_seconds': timeout_seconds,
                     'current_run_id': None,
                     'device_ids': device_ids,
                     'runs': {},
@@ -213,7 +200,7 @@ class ReactionService:
                         cone_id,           # To this random cone
                         i,                 # Sequence 0-4
                         0.0,               # No min time for Reaction Sprint
-                        self.session_state['timeout_seconds']  # Max time = timeout
+                        9999.0  # No timeout
                     ))
             print(f"✅ Created {len(random_sequence)} segments")
 
@@ -226,12 +213,10 @@ class ReactionService:
                     'random_sequence': random_sequence,  # Pre-generated sequence
                     'current_index': 0,                   # Index into random_sequence
                     'current_target': None,
-                    'target_activated_at': None,
                     'splits': [],
                     'run_start_time': None,
                     'status': 'running',
                     'touches_completed': 0,
-                    'timeout_thread': None
                 }
 
             # All cones turn OFF FIRST (before countdown starts)
@@ -275,9 +260,20 @@ class ReactionService:
             print(f"   DEBUG: D0 beep complete")
             time.sleep(0.2)
 
-            # Record run start time
+            # Record run start time (both in-memory and DB)
+            # Must use utcnow() to match timestamps used by db.record_touch()
+            start_time = datetime.utcnow()
             with self.state_lock:
                 self.session_state['runs'][run_id]['run_start_time'] = time.time()
+                self.session_state['runs'][run_id]['run_start_dt'] = start_time
+
+            with self.db.get_connection() as conn:
+                conn.execute('''
+                    UPDATE runs
+                    SET status = 'running', started_at = ?
+                    WHERE run_id = ?
+                ''', (start_time.isoformat(), run_id))
+            print(f"✅ Run started_at set in DB: {start_time.isoformat()}")
 
             # Select first random cone
             self._activate_next_cone(run_id)
@@ -313,127 +309,98 @@ class ReactionService:
 
             target_cone = random_sequence[current_index]
             run_state['current_target'] = target_cone
-            activation_time = time.time()
-            run_state['target_activated_at'] = activation_time
 
+            cone_num = int(target_cone.split('.')[-1]) - 100
             print(f"\n🎯 Target selected: {target_cone} (#{current_index + 1}/5)")
-            print(f"   DEBUG: Activation time set to: {activation_time}")
+            self.registry.log(f"[REACT] Cone activated: C{cone_num} (touch {current_index + 1}/5)", source="reaction")
 
         # Turn cone GREEN + BEEP
         print(f"💡 {target_cone} → GREEN + BEEP")
         self.registry.set_led(target_cone, 'solid_green')
-        time.sleep(0.1)
         self._play_cone_beep(target_cone)
 
-        # Start timeout monitor thread
-        timeout_thread = threading.Thread(
-            target=self._timeout_monitor,
-            args=(run_id, target_cone),
-            daemon=True
-        )
-        timeout_thread.start()
-
-        with self.state_lock:
-            run_state['timeout_thread'] = timeout_thread
-
-    def _timeout_monitor(self, run_id: str, device_id: str):
+    def handle_touch(self, device_id: str, timestamp: datetime) -> bool:
         """
-        Monitor for timeout on current target cone.
-        Runs in background thread, checks every 0.5s.
-        """
-        timeout_seconds = self.session_state['timeout_seconds']
+        Full touch handler called directly (bypasses session_service routing).
+        Validates cone, records in DB, then calls handle_successful_touch().
 
-        while True:
-            time.sleep(0.5)
-
-            with self.state_lock:
-                run_state = self.session_state['runs'].get(run_id)
-                if not run_state:
-                    return  # Run ended
-
-                if run_state['current_target'] != device_id:
-                    return  # Different target now (touch was detected)
-
-                if run_state['status'] != 'running':
-                    return  # Run ended
-
-                elapsed = time.time() - run_state['target_activated_at']
-                if elapsed >= timeout_seconds:
-                    # TIMEOUT!
-                    print(f"\n⏱️  TIMEOUT on {device_id} ({elapsed:.1f}s)")
-                    break
-
-        # Handle timeout
-        self.handle_timeout(run_id, device_id)
-
-    def handle_timeout(self, run_id: str, device_id: str):
-        """
-        Handle timeout event (athlete failed to touch within timeout).
-
-        Flow:
-        1. Mark run as failed
-        2. All cones → CHASE RED
-        3. D0 double beep
-        4. All cones → AMBER
-        5. Move to next athlete
+        Returns True if touch was processed, False if ignored.
         """
         print(f"\n{'='*60}")
-        print(f"TIMEOUT - RUN FAILED")
-        print(f"{'='*60}\n")
+        print(f"[REACTION TOUCH] Incoming touch: {device_id}")
 
         with self.state_lock:
-            run_state = self.session_state['runs'].get(run_id)
-            if not run_state or run_state['status'] != 'running':
-                return  # Already handled
+            if not self.session_state:
+                print(f"[REACTION TOUCH] ❌ No active session state — ignoring")
+                return False
 
-            run_state['status'] = 'failed'
-            athlete_name = run_state['athlete_name']
+            current_run_id = self.session_state.get('current_run_id')
+            if not current_run_id:
+                print(f"[REACTION TOUCH] ❌ No active run — ignoring")
+                return False
 
-        print(f"👤 Athlete: {athlete_name}")
-        print(f"🎯 Failed on: {device_id}")
+            run_state = self.session_state['runs'].get(current_run_id)
+            if not run_state:
+                print(f"[REACTION TOUCH] ❌ Run state missing for {current_run_id}")
+                return False
 
-        # All cones → CHASE RED
-        print(f"\n💡 All cones → CHASE RED")
-        for cone_id in self.session_state['device_ids']:
-            self.registry.set_led(cone_id, 'chase_red')
+            if run_state['status'] != 'running':
+                print(f"[REACTION TOUCH] ❌ Run not running (status={run_state['status']}) — ignoring")
+                return False
 
-        # D0 double beep
-        print(f"🔊 D0 double beep (error)")
-        self._play_d0_beep(count=2)
+            current_target = run_state.get('current_target')
+            touches_done = run_state['touches_completed']
+            cone_num = int(current_target.split('.')[-1]) - 100 if current_target else '?'
+            touched_num = int(device_id.split('.')[-1]) - 100
 
-        # Wait for chase animation
-        time.sleep(4.0)
+            self.registry.log(
+                f"[REACT] Touch received: C{touched_num} | Active cone: {'C' + str(cone_num) if current_target else 'none'} | Progress: {touches_done}/5",
+                source="reaction"
+            )
+            print(f"[REACTION TOUCH]   Active cone (current_target): {current_target}")
+            print(f"[REACTION TOUCH]   Touches completed: {touches_done}/5")
 
-        # All cones → AMBER
-        print(f"\n💡 All cones → AMBER (standby)")
-        for cone_id in self.session_state['device_ids']:
-            self.registry.set_led(cone_id, 'solid_amber')
+            if current_target is None:
+                self.registry.log(f"[REACT] Touch on C{touched_num} ignored — no cone active (transition)", source="reaction")
+                print(f"[REACTION TOUCH] ❌ No cone currently active (between transitions) — ignoring")
+                return False
 
-        # Update database
-        with self.db.get_connection() as conn:
-            conn.execute('''
-                UPDATE runs
-                SET status = 'incomplete',
-                    completed_at = ?
-                WHERE run_id = ?
-            ''', (datetime.utcnow().isoformat(), run_id))
+            if device_id != current_target:
+                self.registry.log(
+                    f"[REACT] ❌ Wrong cone: got C{touched_num}, expected C{cone_num}",
+                    level="warning", source="reaction"
+                )
+                print(f"[REACTION TOUCH] ❌ Wrong cone — expected {current_target}, got {device_id}")
+                return False
 
-        print(f"✅ Run marked as FAILED in database")
+            # Claim the touch atomically — clears current_target so any duplicate
+            # heartbeat for the same cone gets rejected above before DB is written.
+            run_state['current_target'] = None
 
-        # Move to next athlete
-        self.move_to_next_athlete()
+        self.registry.log(f"[REACT] ✅ C{touched_num} touch accepted (touch {touches_done + 1}/5)", source="reaction")
+        print(f"[REACTION TOUCH] ✅ Correct cone — activating next immediately, DB write in background")
+
+        # Activate next cone immediately (don't block on DB write)
+        self.handle_successful_touch(current_run_id, device_id, timestamp)
+
+        # Record touch in DB in background (non-blocking)
+        threading.Thread(
+            target=self.db.record_touch,
+            args=(current_run_id, device_id, timestamp),
+            daemon=True
+        ).start()
+
+        return True
 
     def handle_successful_touch(self, run_id: str, device_id: str, timestamp: datetime):
         """
-        Handle successful touch after db.record_touch() was called by session_service.
+        Handle post-touch logic after the touch has been validated and recorded in DB.
 
         Flow:
         1. Update run state (increment index, clear target)
         2. Turn cone OFF
         3. If all 5 cones touched: Complete run (SUCCESS)
         4. Else: Activate next cone
-
-        NOTE: Database recording is done by session_service via db.record_touch()
         """
         print(f"\n✅ SUCCESSFUL TOUCH")
 
@@ -467,7 +434,6 @@ class ReactionService:
             self.complete_run(run_id, success=True)
         else:
             # Continue to next cone
-            time.sleep(0.3)  # Brief pause before next cone
             self._activate_next_cone(run_id)
 
     def complete_run(self, run_id: str, success: bool):
@@ -510,11 +476,6 @@ class ReactionService:
 
             # Wait for animation
             time.sleep(4.0)
-
-        # All cones → AMBER
-        print(f"\n💡 All cones → AMBER (standby)")
-        for cone_id in self.session_state['device_ids']:
-            self.registry.set_led(cone_id, 'solid_amber')
 
         # Update database
         status = 'completed' if success else 'incomplete'

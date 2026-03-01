@@ -653,6 +653,24 @@ class SessionService:
         session_id = self.session_state.get('session_id')
 
         if not session_id:
+            # Check if Reaction Sprint service has an active session.
+            # Reaction Sprint doesn't call session_service.start_session(), so session_id
+            # will always be None for it.  Route directly to reaction_service.
+            # NOTE: only catch import errors here — let handle_touch() exceptions propagate
+            # so the registry logs them as "Touch handler error" (visible in system log).
+            try:
+                from services.reaction_service import get_reaction_service
+                rs = get_reaction_service()
+            except Exception as e:
+                print(f"[SESSION→REACTION] Failed to load ReactionService: {e}")
+                self.registry.log(f"Touch on {device_id} but no active session", level="warning")
+                return
+
+            if rs.session_state and rs.session_state.get('current_run_id'):
+                print(f"[SESSION→REACTION] Delegating touch on {device_id} to ReactionService")
+                rs.handle_touch(device_id, timestamp)  # exceptions propagate to registry
+                return
+
             self.registry.log(f"Touch on {device_id} but no active session", level="warning")
             return
 

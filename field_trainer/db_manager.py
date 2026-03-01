@@ -1137,8 +1137,12 @@ class DatabaseManager:
 
             if prev_segment and prev_segment['touch_timestamp']:
                 start_time = datetime.fromisoformat(prev_segment['touch_timestamp'])
-            else:
+            elif run['started_at']:
                 start_time = datetime.fromisoformat(run['started_at'])
+            else:
+                # started_at not set yet (race condition) — use timestamp as baseline (split = 0)
+                print(f"⚠️  record_touch: started_at is NULL for run {run_id}, using timestamp as baseline")
+                start_time = timestamp
 
             actual_time = (timestamp - start_time).total_seconds()
 
