@@ -144,6 +144,57 @@
                 </div>
             </div>
             {% endif %}
+
+            {% if course.course_type == 'sprint' %}
+            <!-- Sprint Configuration -->
+            <div class="alert alert-success mt-3">
+                <h6 class="text-success"><i class="fas fa-bolt"></i> Sprint Configuration</h6>
+                <div class="row mt-3">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Distance</label>
+                        <div class="d-flex gap-2 align-items-center">
+                            <select id="sprintDistance" class="form-select" onchange="onSprintDistanceChange()">
+                                <option value="10" {% if course.distance == 10 %}selected{% endif %}>10</option>
+                                <option value="20" {% if course.distance == 20 %}selected{% endif %}>20</option>
+                                <option value="30" {% if course.distance == 30 %}selected{% endif %}>30</option>
+                                <option value="40" {% if not course.distance or course.distance == 40 %}selected{% endif %}>40</option>
+                                <option value="50" {% if course.distance == 50 %}selected{% endif %}>50</option>
+                                <option value="60" {% if course.distance == 60 %}selected{% endif %}>60</option>
+                                <option value="80" {% if course.distance == 80 %}selected{% endif %}>80</option>
+                                <option value="100" {% if course.distance == 100 %}selected{% endif %}>100</option>
+                                <option value="custom">Custom…</option>
+                            </select>
+                            <input type="number" id="sprintDistanceCustom" class="form-control"
+                                   style="display:none; max-width:80px;" min="5" max="400" placeholder="dist">
+                            <span class="text-muted">{{ course.distance_unit or 'yards' }}</span>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Countdown</label>
+                        <select id="sprintCountdown" class="form-select">
+                            <option value="3" {% if course.countdown_interval == 3 %}selected{% endif %}>3 seconds</option>
+                            <option value="5" {% if not course.countdown_interval or course.countdown_interval == 5 %}selected{% endif %}>5 seconds</option>
+                            <option value="10" {% if course.countdown_interval == 10 %}selected{% endif %}>10 seconds</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Timing Mode</label>
+                        <div class="mt-1">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingManual" value="manual" checked>
+                                <label class="form-check-label" for="sprintTimingManual">Manual (Coach STOP)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingIR" value="ir" disabled>
+                                <label class="form-check-label text-muted" for="sprintTimingIR">
+                                    IR Detect <span class="badge bg-secondary">Coming Soon</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
     
@@ -212,6 +263,12 @@ const sessionId = '{{ session_id }}';
 const courseId = '{{ course.course_id }}';
 let deploymentTimeout;
 let timeoutMinutes = {{ timeout_minutes }};
+
+function onSprintDistanceChange() {
+    const sel = document.getElementById('sprintDistance');
+    const custom = document.getElementById('sprintDistanceCustom');
+    if (sel && custom) custom.style.display = sel.value === 'custom' ? 'inline-block' : 'none';
+}
 
 // Prepare course (amber LEDs)
 async function prepareCourse() {
@@ -310,6 +367,21 @@ document.getElementById('deployBtn').addEventListener('click', async function() 
         };
     }
 
+    // Get sprint configuration if Sprint course
+    const sprintDistSel = document.getElementById('sprintDistance');
+    const sprintCountdown = document.getElementById('sprintCountdown');
+    const sprintTiming = document.querySelector('input[name="sprintTiming"]:checked');
+    if (sprintDistSel && sprintCountdown && sprintTiming) {
+        const dist = sprintDistSel.value === 'custom'
+            ? parseInt(document.getElementById('sprintDistanceCustom').value)
+            : parseInt(sprintDistSel.value);
+        requestBody.sprint_config = {
+            distance: dist,
+            countdown_interval: parseInt(sprintCountdown.value),
+            timing_mode: sprintTiming.value
+        };
+    }
+
     try {
         const response = await fetch(`/session/${sessionId}/deploy-course`, {
             method: 'POST',
@@ -329,7 +401,9 @@ document.getElementById('deployBtn').addEventListener('click', async function() 
             
             // Redirect after 2 seconds
             setTimeout(() => {
-                {% if course.course_type == 'reaction_sprint' %}
+                {% if course.course_type == 'sprint' %}
+                window.location.href = `/sprint/monitor/${sessionId}`;
+                {% elif course.course_type == 'reaction_sprint' %}
                 window.location.href = `/reaction/monitor/${sessionId}`;
                 {% else %}
                 window.location.href = `/session/${sessionId}/monitor`;

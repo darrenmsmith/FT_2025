@@ -250,6 +250,68 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_beep_results_session ON beep_test_results(session_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_beep_results_athlete ON beep_test_results(athlete_id)')
 
+            # Sprint course columns — add to existing courses table if not present
+            for col_def in [
+                "distance INTEGER",
+                "distance_unit TEXT",
+                "countdown_interval INTEGER DEFAULT 5",
+                "timing_mode TEXT DEFAULT 'manual'",
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE courses ADD COLUMN {col_def}")
+                except Exception:
+                    pass  # Column already exists
+
+            # Sprint Personal Bests table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sprint_personal_bests (
+                    pb_id TEXT PRIMARY KEY,
+                    athlete_id TEXT NOT NULL,
+                    distance INTEGER NOT NULL,
+                    distance_unit TEXT NOT NULL,
+                    best_time_seconds REAL NOT NULL,
+                    session_id TEXT NOT NULL,
+                    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(athlete_id, distance, distance_unit),
+                    FOREIGN KEY (athlete_id) REFERENCES athletes(athlete_id),
+                    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_sprint_pb_athlete ON sprint_personal_bests(athlete_id)')
+
+            # Add sprint_distance to runs so historical runs keep their distance even after course is re-deployed
+            for col_def in ["sprint_distance INTEGER", "sprint_distance_unit TEXT"]:
+                try:
+                    conn.execute(f"ALTER TABLE runs ADD COLUMN {col_def}")
+                except Exception:
+                    pass  # Column already exists
+
+            # Backfill sprint_distance for existing runs from sprint_personal_bests (session_id is unique per distance)
+            conn.execute('''
+                UPDATE runs SET
+                    sprint_distance = (
+                        SELECT spb.distance FROM sprint_personal_bests spb
+                        WHERE spb.session_id = runs.session_id LIMIT 1
+                    ),
+                    sprint_distance_unit = (
+                        SELECT spb.distance_unit FROM sprint_personal_bests spb
+                        WHERE spb.session_id = runs.session_id LIMIT 1
+                    )
+                WHERE sprint_distance IS NULL
+                AND EXISTS (
+                    SELECT 1 FROM courses c
+                    WHERE c.course_id = runs.course_id AND c.course_type = 'sprint'
+                )
+                AND EXISTS (
+                    SELECT 1 FROM sprint_personal_bests spb WHERE spb.session_id = runs.session_id
+                )
+            ''')
+
+            # Sprint courses are user-created (custom) — mark any auto-created builtins as custom
+            conn.execute(
+                "UPDATE courses SET is_builtin = 0 WHERE course_type = 'sprint' AND is_builtin = 1"
+            )
+
     # ==================== DASHBOARD QUERIES ====================
     
     def get_dashboard_stats(self) -> Dict[str, Any]:
@@ -295,7 +357,10 @@ class DatabaseManager:
                     r.completed_at,
                     COALESCE(ph.is_personal_record, 0) as is_pr,
                     a.name as athlete_name,
-                    c.course_name,
+                    CASE WHEN c.course_type = 'sprint' AND COALESCE(r.sprint_distance, c.distance) IS NOT NULL
+                         THEN c.course_name || ' (' || COALESCE(r.sprint_distance, c.distance) || ' ' || COALESCE(r.sprint_distance_unit, c.distance_unit, 'yds') || ')'
+                         ELSE c.course_name
+                    END as course_name,
                     'run' as activity_type
                 FROM runs r
                 JOIN athletes a ON r.athlete_id = a.athlete_id
@@ -368,7 +433,12 @@ class DatabaseManager:
             rows = conn.execute(f'''
                 SELECT
                     c.course_id,
-                    c.course_name,
+                    COALESCE(r.sprint_distance, c.distance) as sprint_distance,
+                    COALESCE(r.sprint_distance_unit, c.distance_unit) as sprint_distance_unit,
+                    CASE WHEN c.course_type = 'sprint' AND COALESCE(r.sprint_distance, c.distance) IS NOT NULL
+                         THEN c.course_name || ' (' || COALESCE(r.sprint_distance, c.distance) || ' ' || COALESCE(r.sprint_distance_unit, c.distance_unit, 'yds') || ')'
+                         ELSE c.course_name
+                    END as course_name,
                     c.category,
                     a.athlete_id,
                     a.name as athlete_name,
@@ -379,6 +449,7 @@ class DatabaseManager:
                         FROM runs
                         WHERE athlete_id = a.athlete_id
                         AND course_id = c.course_id
+                        AND COALESCE(sprint_distance, 0) = COALESCE(r.sprint_distance, 0)
                         AND status = 'completed'
                     ) THEN r.completed_at END) as pr_date,
                     'course' as ranking_type
@@ -387,24 +458,24 @@ class DatabaseManager:
                 JOIN teams t ON a.team_id = t.team_id
                 JOIN courses c ON r.course_id = c.course_id
                 WHERE {where_clause}
-                GROUP BY c.course_id, c.course_name, c.category, a.athlete_id, a.name, t.name
-                ORDER BY c.course_name, best_time ASC
+                GROUP BY c.course_id, COALESCE(r.sprint_distance, c.distance), c.category, a.athlete_id, a.name, t.name
+                ORDER BY course_name, best_time ASC
             ''', params).fetchall()
 
-            # Organize by course
+            # Organize by course (sprint courses split by distance)
             courses = {}
             for row in rows:
-                course_id = row['course_id']
-                if course_id not in courses:
-                    courses[course_id] = {
-                        'course_id': course_id,
+                course_key = (row['course_id'], row['sprint_distance'])
+                if course_key not in courses:
+                    courses[course_key] = {
+                        'course_id': row['course_id'],
                         'course_name': row['course_name'],
                         'category': row['category'],
                         'ranking_type': 'course',
                         'rankings': []
                     }
 
-                courses[course_id]['rankings'].append({
+                courses[course_key]['rankings'].append({
                     'athlete_id': row['athlete_id'],
                     'athlete_name': row['athlete_name'],
                     'team_name': row['team_name'],
@@ -1713,6 +1784,91 @@ class DatabaseManager:
 
         return round(vo2_max, 1)
 
+
+    # ==================== SPRINT METHODS ====================
+
+    def move_run_to_end_of_queue(self, session_id: str, run_id: str) -> bool:
+        """Move a run to the end of the pending queue (used when pause aborts a run)."""
+        with self.get_connection() as conn:
+            max_row = conn.execute(
+                "SELECT MAX(queue_position) FROM runs WHERE session_id = ?",
+                (session_id,)
+            ).fetchone()
+            new_pos = (max_row[0] or 0) + 1
+            conn.execute(
+                "UPDATE runs SET status = 'queued', queue_position = ?, started_at = NULL, completed_at = NULL, total_time = NULL WHERE run_id = ?",
+                (new_pos, run_id)
+            )
+        return True
+
+    def check_and_update_sprint_pb(self, athlete_id: str, distance: int, distance_unit: str,
+                                    time_seconds: float, session_id: str) -> bool:
+        """Check if time_seconds is a new personal best; upsert if so. Returns True if new PB."""
+        with self.get_connection() as conn:
+            existing = conn.execute(
+                "SELECT best_time_seconds FROM sprint_personal_bests WHERE athlete_id = ? AND distance = ? AND distance_unit = ?",
+                (athlete_id, distance, distance_unit)
+            ).fetchone()
+            if existing is None or time_seconds < existing['best_time_seconds']:
+                pb_id = str(uuid.uuid4())
+                conn.execute('''
+                    INSERT INTO sprint_personal_bests (pb_id, athlete_id, distance, distance_unit, best_time_seconds, session_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(athlete_id, distance, distance_unit)
+                    DO UPDATE SET best_time_seconds = excluded.best_time_seconds,
+                                  session_id = excluded.session_id,
+                                  recorded_at = CURRENT_TIMESTAMP
+                ''', (pb_id, athlete_id, distance, distance_unit, time_seconds, session_id))
+                return True
+        return False
+
+    def get_sprint_personal_bests(self, athlete_id: str) -> List[Dict[str, Any]]:
+        """Get all sprint personal bests for an athlete."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sprint_personal_bests WHERE athlete_id = ? ORDER BY distance, distance_unit",
+                (athlete_id,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_sprint_results(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get completed sprint runs for a session, sorted fastest first, with PB flag."""
+        with self.get_connection() as conn:
+            session = conn.execute(
+                "SELECT course_id FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if not session:
+                return []
+            course = conn.execute(
+                "SELECT distance, distance_unit FROM courses WHERE course_id = ?",
+                (session['course_id'],)
+            ).fetchone()
+            distance = course['distance'] if course else None
+            distance_unit = course['distance_unit'] if course else None
+
+            rows = conn.execute('''
+                SELECT r.run_id, r.athlete_id, r.total_time, r.status, r.queue_position,
+                       a.name as athlete_name, a.jersey_number
+                FROM runs r
+                JOIN athletes a ON r.athlete_id = a.athlete_id
+                WHERE r.session_id = ?
+                ORDER BY CASE WHEN r.status = 'completed' THEN 0 ELSE 1 END,
+                         r.total_time ASC
+            ''', (session_id,)).fetchall()
+
+            results = []
+            for row in rows:
+                item = dict(row)
+                if distance and distance_unit and item['total_time']:
+                    pb = conn.execute(
+                        "SELECT best_time_seconds FROM sprint_personal_bests WHERE athlete_id = ? AND distance = ? AND distance_unit = ?",
+                        (item['athlete_id'], distance, distance_unit)
+                    ).fetchone()
+                    item['is_pb'] = pb is not None and pb['best_time_seconds'] == item['total_time']
+                else:
+                    item['is_pb'] = False
+                results.append(item)
+            return results
 
     def get_course_svg_content(self, course_id):
         """Load SVG content from file based on course diagram_svg filename"""

@@ -47,6 +47,10 @@ app.register_blueprint(beep_test_bp)
 from routes.reaction_bp import reaction_bp
 app.register_blueprint(reaction_bp)
 
+# Register Sprint blueprint
+from routes.sprint_bp import sprint_bp
+app.register_blueprint(sprint_bp)
+
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
 
 # Configure logging

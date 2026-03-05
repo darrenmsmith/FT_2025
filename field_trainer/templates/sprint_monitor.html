@@ -1,0 +1,588 @@
+{% extends "base.html" %}
+{% block title %}Sprint Monitor - {{ team.name }} - Field Trainer{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-setup      { background-color: #6b7280; }
+    .status-active     { background-color: #16a34a; animation: pulse 2s infinite; }
+    .status-completed  { background-color: #2563eb; }
+    .status-incomplete { background-color: #dc2626; }
+    .status-paused     { background-color: #d97706; }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
+
+    .big-button { font-size: 1.5rem; padding: 1rem 2rem; }
+    .btn-stop-large {
+        font-size: 2.2rem;
+        font-weight: 700;
+        padding: 1.5rem 2rem;
+        width: 100%;
+        letter-spacing: 0.05em;
+    }
+
+    .sprint-clock {
+        font-size: 3.5rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+        padding: 0.5rem 0;
+        color: #1a1a1a;
+    }
+    .sprint-clock.running  { color: #16a34a; }
+    .sprint-clock.countdown { color: #d97706; }
+
+    .run-card { transition: all 0.3s; border-left: 4px solid #e5e7eb; }
+    .run-queued    { border-left-color: #6b7280; }
+    .run-running   { border-left-color: #16a34a; background-color: #f0fdf4; }
+    .run-completed { border-left-color: #2563eb; }
+    .run-absent    { border-left-color: #dc2626; opacity: 0.6; }
+
+    .device-status {
+        display: inline-block; width: 12px; height: 12px;
+        border-radius: 50%; margin-right: 5px;
+    }
+    .device-idle    { background-color: #6b7280; }
+    .device-active  { background-color: #16a34a; }
+    .device-waiting { background-color: #ea580c; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Header ─────────────────────────────────────────────────────── -->
+<div class="row mb-3">
+    <div class="col-md-8">
+        <h2>
+            <i class="fas fa-bolt"></i>
+            {{ team.name }} - {{ course.course_name }}
+        </h2>
+        <span class="badge status-{{ session.status }}" id="statusBadge">{{ session.status|upper }}</span>
+    </div>
+    <div class="col-md-4 text-end" id="sessionControls">
+        {% if session.status == 'setup' %}
+            <a href="/dashboard" class="btn btn-secondary me-2">
+                <i class="fas fa-arrow-left"></i> Back
+            </a>
+            <button class="btn btn-success big-button" id="goBtn" onclick="doGo()">
+                <i class="fas fa-play"></i> GO
+            </button>
+        {% elif session.status in ('completed', 'incomplete') %}
+            <button class="btn btn-primary me-2" id="repeatBtn" onclick="doRepeat()">
+                <i class="fas fa-redo"></i> Repeat Session
+            </button>
+            <a href="/dashboard" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Dashboard
+            </a>
+        {% endif %}
+        <!-- Shown dynamically when session completes mid-run -->
+        {% if session.status == 'active' %}
+            <button class="btn btn-warning me-2" id="pauseBtn" onclick="doPause()">
+                <i class="fas fa-pause"></i> Pause
+            </button>
+            <button class="btn btn-danger" onclick="confirmEnd()">
+                <i class="fas fa-stop"></i> End Session
+            </button>
+            <button class="btn btn-primary me-2" id="repeatBtn" style="display:none;" onclick="doRepeat()">
+                <i class="fas fa-redo"></i> Repeat Session
+            </button>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ── Sprint timing panel (hidden in setup state) ─────────────────── -->
+<div class="card mb-4" id="timingPanel" style="display:none;">
+    <div class="card-body">
+        <div class="text-center mb-1 text-muted" id="timingAthleteLabel" style="font-size:1.1rem; font-weight:600;"></div>
+        <div class="sprint-clock" id="clockDisplay">00:00.00</div>
+        <div id="stopBtnWrap" style="display:none;">
+            <button class="btn btn-danger btn-stop-large" onclick="doStop()">
+                <i class="fas fa-stop"></i> STOP
+            </button>
+        </div>
+        <div id="lastResultBanner" class="alert alert-info mt-2 text-center" style="display:none;"></div>
+    </div>
+</div>
+
+<!-- ── Pause overlay ──────────────────────────────────────────────── -->
+<div class="card mb-4 border-warning" id="pausePanel" style="display:none;">
+    <div class="card-body text-center">
+        <h5 class="text-warning"><i class="fas fa-pause-circle"></i> Session Paused</h5>
+        <p id="pauseMsg" class="mb-3">Session is paused.</p>
+        <button class="btn btn-success me-2" onclick="doResume()"><i class="fas fa-play"></i> Resume</button>
+        <button class="btn btn-danger" onclick="confirmEnd()"><i class="fas fa-stop"></i> End Session</button>
+    </div>
+</div>
+
+<!-- ── Course layout ──────────────────────────────────────────────── -->
+<div class="card mb-4" id="coursePanel">
+    <div class="card-header">
+        <h5><i class="fas fa-map-marked-alt"></i> Course Layout</h5>
+    </div>
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between">
+            {% for action in course.actions %}
+            <div class="text-center" style="flex:1; min-width:100px;">
+                <div class="mb-2">
+                    <span class="device-status device-idle" id="dev-{{ action.device_id }}"></span>
+                    <strong>{{ action.device_name }}</strong>
+                </div>
+                <div class="small text-muted">Start Cone</div>
+                <div class="small text-muted">
+                    {{ course.distance }} {{ course.distance_unit }}
+                    &mdash; {{ course.countdown_interval }}s countdown
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- ── Results panel (completed) ─────────────────────────────────── -->
+<div class="card mb-4" id="resultsPanel" style="display:none;">
+    <div class="card-header">
+        <h5><i class="fas fa-trophy"></i> Results — {{ course.distance }} {{ course.distance_unit }}</h5>
+    </div>
+    <div class="card-body" id="resultsBody"></div>
+    <div class="card-footer d-flex gap-2">
+        <button class="btn btn-primary" onclick="doRepeat()"><i class="fas fa-redo"></i> Repeat Session</button>
+        <a href="/dashboard" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Dashboard</a>
+    </div>
+</div>
+
+<!-- ── Athlete Progress ───────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <h5>
+            <i class="fas fa-users"></i> Athlete Progress
+            <span class="badge bg-primary" id="completedCount">0 / {{ runs|length }}</span>
+        </h5>
+    </div>
+    <div class="card-body" id="athleteProgress">
+        <div class="text-center"><i class="fas fa-spinner fa-spin fa-2x"></i></div>
+    </div>
+</div>
+
+<!-- ── Confirm end modal ──────────────────────────────────────────── -->
+<div class="modal fade" id="endModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">End Session?</h5></div>
+            <div class="modal-body">Athletes still in queue. End anyway?</div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button class="btn btn-danger" onclick="doEnd()">End Session</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const sessionId = '{{ session.session_id }}';
+const countdownInterval = {{ course.countdown_interval or 5 }};
+let sessionStatus = '{{ session.status }}';
+
+// ── Timer state ──────────────────────────────────────────────────────────
+let startTime = null;
+let clockTick  = null;
+let timerRunning = false;
+let lastBeepTs = null;   // tracks last beep_fired_at seen in poll (SSE fallback)
+
+// ── Browser beep — plays in sync with clock start ─────────────────────────
+function playBrowserBeep() {
+    try {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.6, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+    } catch(e) { /* audio not available */ }
+}
+
+// ── Beep fired handler — called by SSE or polling fallback ───────────────
+function onBeepFired() {
+    if (timerRunning) return;           // already started (SSE fired first)
+    playBrowserBeep();
+    startTime = performance.now();
+    timerRunning = true;
+    if (clockTick) clearInterval(clockTick);
+    clockTick = setInterval(tickClock, 50);
+    document.getElementById('clockDisplay').classList.add('running');
+    document.getElementById('clockDisplay').classList.remove('countdown');
+    document.getElementById('stopBtnWrap').style.display = 'block';
+    document.getElementById('lastResultBanner').style.display = 'none';
+    const pauseBtn = document.getElementById('pauseBtn');
+    if (pauseBtn) pauseBtn.style.display = 'none';
+}
+
+// ── SSE for start signal (primary path) ──────────────────────────────────
+let es = null;
+
+function connectSSE() {
+    if (es) return;
+    es = new EventSource(`/session/sprint/${sessionId}/timer-stream`);
+    es.addEventListener('beep_fired', (e) => {
+        try { lastBeepTs = JSON.parse(e.data).beep_ts; } catch(_) {}
+        onBeepFired();
+    });
+}
+
+// ── Clock ────────────────────────────────────────────────────────────────
+function tickClock() {
+    if (!timerRunning || startTime === null) return;
+    document.getElementById('clockDisplay').textContent = fmt((performance.now() - startTime) / 1000);
+}
+
+function fmt(s) {
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = Math.floor(s % 60).toString().padStart(2, '0');
+    const cs  = Math.floor((s % 1) * 100).toString().padStart(2, '0');
+    return `${m}:${sec}.${cs}`;
+}
+
+// ── GO (first press also starts session) ─────────────────────────────────
+async function doGo() {
+    const btn = document.getElementById('goBtn');
+    if (btn) btn.disabled = true;
+
+    // If session still in setup, initialise it first
+    if (sessionStatus === 'setup') {
+        const r = await fetch(`/api/sprint/start/${sessionId}`, { method: 'POST' });
+        const d = await r.json();
+        if (!d.success) {
+            alert(d.error || 'Failed to start session');
+            if (btn) btn.disabled = false;
+            return;
+        }
+        sessionStatus = 'active';
+        document.getElementById('statusBadge').className = 'badge status-active';
+        document.getElementById('statusBadge').textContent = 'ACTIVE';
+        // Swap controls
+        const controls = document.getElementById('sessionControls');
+        controls.innerHTML = `
+            <button class="btn btn-warning me-2" id="pauseBtn" onclick="doPause()">
+                <i class="fas fa-pause"></i> Pause
+            </button>
+            <button class="btn btn-danger" onclick="confirmEnd()">
+                <i class="fas fa-stop"></i> End Session
+            </button>
+            <button class="btn btn-primary me-2" id="repeatBtn" style="display:none;" onclick="doRepeat()">
+                <i class="fas fa-redo"></i> Repeat Session
+            </button>`;
+
+        connectSSE();
+    }
+
+    // Show timing panel
+    document.getElementById('timingPanel').style.display = 'block';
+    document.getElementById('coursePanel').style.display = 'none';
+    document.getElementById('lastResultBanner').style.display = 'none';
+    document.getElementById('stopBtnWrap').style.display = 'none';
+    document.getElementById('clockDisplay').classList.remove('running');
+    document.getElementById('clockDisplay').classList.add('countdown');
+    document.getElementById('clockDisplay').textContent = countdownInterval.toString();
+
+    // Request countdown from server
+    const r2 = await fetch(`/api/sprint/go/${sessionId}`, { method: 'POST' });
+    const d2 = await r2.json();
+    if (!d2.success) {
+        alert(d2.error || 'Failed to start countdown');
+        if (btn) btn.disabled = false;
+    } else {
+        const name = d2.athlete_name || '';
+        document.getElementById('timingAthleteLabel').textContent = name ? `Now: ${name}` : '';
+    }
+}
+
+// ── STOP ─────────────────────────────────────────────────────────────────
+async function doStop() {
+    if (!timerRunning) return;
+    const elapsed = parseFloat(((performance.now() - startTime) / 1000).toFixed(2));
+    timerRunning = false;
+    if (clockTick) { clearInterval(clockTick); clockTick = null; }
+    document.getElementById('clockDisplay').textContent = fmt(elapsed);
+    document.getElementById('clockDisplay').classList.remove('running');
+    document.getElementById('stopBtnWrap').style.display = 'none';
+
+    let data;
+    try {
+        const resp = await fetch(`/api/sprint/stop/${sessionId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ time_seconds: elapsed })
+        });
+        data = await resp.json();
+    } catch(e) {
+        alert('Network error recording time. Please try again.');
+        return;
+    }
+    if (!data.success) { alert(data.error || 'Failed to record'); return; }
+
+    const pb = data.is_new_pb ? ' <i class="fas fa-star text-warning" title="New PB!"></i>' : '';
+    document.getElementById('lastResultBanner').innerHTML =
+        `Recorded: <strong>${elapsed.toFixed(2)}s</strong>${pb}`;
+    document.getElementById('lastResultBanner').style.display = 'block';
+
+    if (data.session_complete) {
+        if (es) { es.close(); es = null; }
+        showResults(data.results || []);
+    } else {
+        // Show next athlete with GO button — coach controls when next sprint starts
+        const nextName = data.next_run?.athlete_name || 'Next athlete';
+        startTime = null;
+        document.getElementById('clockDisplay').classList.remove('running', 'countdown');
+        document.getElementById('clockDisplay').textContent = '—';
+        document.getElementById('timingAthleteLabel').textContent = `Next: ${nextName}`;
+        document.getElementById('sessionControls').innerHTML = `
+            <button class="btn btn-success big-button me-2" id="goBtn" onclick="goNextAthlete()">
+                <i class="fas fa-play"></i> GO
+            </button>
+            <button class="btn btn-warning me-2" id="pauseBtn" onclick="doPause()">
+                <i class="fas fa-pause"></i> Pause
+            </button>
+            <button class="btn btn-danger" onclick="confirmEnd()">
+                <i class="fas fa-stop"></i> End Session
+            </button>`;
+    }
+}
+
+// ── GO for next athlete (session already active, SSE connected) ────────────
+async function goNextAthlete() {
+    const btn = document.getElementById('goBtn');
+    if (btn) btn.disabled = true;
+    document.getElementById('lastResultBanner').style.display = 'none';
+    document.getElementById('stopBtnWrap').style.display = 'none';
+    document.getElementById('clockDisplay').classList.remove('running');
+    document.getElementById('clockDisplay').classList.add('countdown');
+    document.getElementById('clockDisplay').textContent = countdownInterval.toString();
+
+    let d;
+    try {
+        const r = await fetch(`/api/sprint/go/${sessionId}`, { method: 'POST' });
+        d = await r.json();
+    } catch(e) {
+        alert('Network error. Please try again.');
+        if (btn) btn.disabled = false;
+        return;
+    }
+    if (!d.success) {
+        alert(d.error || 'Failed to start next athlete');
+        if (btn) btn.disabled = false;
+        return;
+    }
+    document.getElementById('timingAthleteLabel').textContent = `Now: ${d.athlete_name}`;
+}
+
+// ── Pause / Resume ────────────────────────────────────────────────────────
+async function doPause() {
+    if (timerRunning) { timerRunning = false; if (clockTick) { clearInterval(clockTick); clockTick = null; } }
+    document.getElementById('stopBtnWrap').style.display = 'none';
+
+    const r = await fetch(`/api/sprint/pause/${sessionId}`, { method: 'POST' });
+    const d = await r.json();
+    if (d.success) {
+        document.getElementById('pausePanel').style.display = 'block';
+        document.getElementById('timingPanel').style.display = 'none';
+        if (d.aborted_athlete) {
+            document.getElementById('pauseMsg').textContent =
+                `${d.aborted_athlete}'s run was not recorded — moved to end of queue.`;
+        }
+        const controls = document.getElementById('sessionControls');
+        controls.innerHTML = '';
+        document.getElementById('statusBadge').className = 'badge status-paused';
+        document.getElementById('statusBadge').textContent = 'PAUSED';
+    }
+}
+
+async function doResume() {
+    const r = await fetch(`/api/sprint/resume/${sessionId}`, { method: 'POST' });
+    const d = await r.json();
+    if (d.success) {
+        document.getElementById('pausePanel').style.display = 'none';
+        document.getElementById('coursePanel').style.display = 'block';
+        startTime = null;
+        document.getElementById('clockDisplay').textContent = '00:00.00';
+        document.getElementById('clockDisplay').classList.remove('countdown', 'running');
+        document.getElementById('statusBadge').className = 'badge status-active';
+        document.getElementById('statusBadge').textContent = 'ACTIVE';
+        document.getElementById('sessionControls').innerHTML = `
+            <button class="btn btn-success big-button me-2" id="goBtn" onclick="doGo()">
+                <i class="fas fa-play"></i> GO
+            </button>
+            <button class="btn btn-warning me-2" onclick="doPause()">
+                <i class="fas fa-pause"></i> Pause
+            </button>
+            <button class="btn btn-danger" onclick="confirmEnd()">
+                <i class="fas fa-stop"></i> End Session
+            </button>`;
+    }
+}
+
+// ── End ───────────────────────────────────────────────────────────────────
+function confirmEnd() {
+    const pending = document.querySelectorAll('[data-status="queued"]').length;
+    if (pending > 0) {
+        const m = new bootstrap.Modal(document.getElementById('endModal'));
+        m.show();
+    } else {
+        doEnd();
+    }
+}
+
+async function doEnd() {
+    const m = bootstrap.Modal.getInstance(document.getElementById('endModal'));
+    if (m) m.hide();
+    if (timerRunning) { timerRunning = false; if (clockTick) clearInterval(clockTick); }
+    if (es) { es.close(); es = null; }
+    const r = await fetch(`/api/sprint/end/${sessionId}`, { method: 'POST' });
+    const d = await r.json();
+    if (d.success) showResults(d.results || []);
+}
+
+// ── Results ───────────────────────────────────────────────────────────────
+function showResults(results) {
+    document.getElementById('timingPanel').style.display = 'none';
+    document.getElementById('coursePanel').style.display = 'none';
+    document.getElementById('pausePanel').style.display = 'none';
+    document.getElementById('resultsPanel').style.display = 'block';
+    document.getElementById('statusBadge').className = 'badge status-completed';
+    document.getElementById('statusBadge').textContent = 'COMPLETED';
+    document.getElementById('sessionControls').innerHTML = `
+        <button class="btn btn-primary me-2" onclick="doRepeat()"><i class="fas fa-redo"></i> Repeat Session</button>
+        <a href="/dashboard" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Dashboard</a>`;
+
+    const done   = results.filter(r => r.status === 'completed');
+    const absent = results.filter(r => r.status !== 'completed');
+    let html = '';
+    done.forEach((r, i) => {
+        const pb = r.is_pb ? ' <i class="fas fa-star text-warning" title="New Personal Best"></i>' : '';
+        html += `<div class="d-flex align-items-center py-2 border-bottom">
+            <span style="width:2.5rem; font-weight:700; color:#6b7280;">#${i+1}</span>
+            <span style="flex:1; font-weight:500;">${r.athlete_name}</span>
+            <span style="font-variant-numeric:tabular-nums; font-weight:700;">${r.total_time.toFixed(2)}s ${pb}</span>
+        </div>`;
+    });
+    absent.forEach(r => {
+        html += `<div class="d-flex align-items-center py-2 border-bottom text-muted">
+            <span style="width:2.5rem;">—</span>
+            <span style="flex:1;">${r.athlete_name}</span>
+            <span>DNS</span>
+        </div>`;
+    });
+    if (done.length) {
+        const times = done.map(r => r.total_time);
+        const avg = times.reduce((a,b)=>a+b,0)/times.length;
+        html += `<div class="mt-2 text-muted small">
+            Fastest: ${Math.min(...times).toFixed(2)}s &nbsp;|&nbsp;
+            Slowest: ${Math.max(...times).toFixed(2)}s &nbsp;|&nbsp;
+            Avg: ${avg.toFixed(2)}s</div>`;
+    }
+    document.getElementById('resultsBody').innerHTML = html || '<p class="text-muted">No results.</p>';
+}
+
+async function doRepeat() {
+    const r = await fetch(`/session/${sessionId}/repeat`, { method: 'POST' });
+    const d = await r.json();
+    if (d.success) window.location.href = d.redirect_url;
+    else alert(d.error || 'Could not repeat session');
+}
+
+// ── Athlete progress rendering ────────────────────────────────────────────
+function renderProgress(runs, currentRunId, sprintStatus) {
+    const done = runs.filter(r => r.status === 'completed').length;
+    document.getElementById('completedCount').textContent = `${done} / ${runs.filter(r=>r.status!=='absent').length}`;
+
+    const html = runs.map(run => {
+        const cls = `run-${run.status}`;
+        const num = (run.queue_position ?? 0) + 1;
+        let statusLabel = run.status.toUpperCase();
+        if (run.run_id === currentRunId && sprintStatus === 'active') statusLabel = 'RUNNING';
+
+        const timeStr = run.total_time ? `<strong>${run.total_time.toFixed(2)}s</strong>` : '';
+        const absentBtn = run.status === 'queued' ? `
+            <button class="btn btn-sm btn-outline-secondary" onclick="markAbsent('${run.run_id}')">
+                <i class="fas fa-user-slash"></i> Absent
+            </button>` : '';
+        const restoreBtn = run.status === 'absent' ? `
+            <button class="btn btn-sm btn-outline-secondary" onclick="restoreAthlete('${run.run_id}')">
+                Restore
+            </button>` : '';
+
+        return `<div class="run-card ${cls} card mb-2" data-status="${run.status}">
+            <div class="card-body py-2">
+                <div class="d-flex align-items-center">
+                    <div style="flex:1;">
+                        <strong>${num}. ${run.athlete_name}</strong>
+                        ${run.jersey_number ? `<span class="badge bg-secondary">#${run.jersey_number}</span>` : ''}
+                        <div class="small text-muted">${statusLabel}</div>
+                    </div>
+                    <div class="text-end d-flex align-items-center gap-2">
+                        ${timeStr}
+                        ${absentBtn}
+                        ${restoreBtn}
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    document.getElementById('athleteProgress').innerHTML = html;
+}
+
+async function markAbsent(runId) {
+    await fetch(`/session/${sessionId}/athlete/${runId}/absent`, { method: 'POST' });
+    refreshStatus();
+}
+
+async function restoreAthlete(runId) {
+    await fetch(`/api/sprint/restore/${sessionId}/${runId}`, { method: 'POST' });
+    refreshStatus();
+}
+
+// ── Status poll ───────────────────────────────────────────────────────────
+async function refreshStatus() {
+    try {
+        const r = await fetch(`/api/sprint/status/${sessionId}`);
+        const d = await r.json();
+        if (d.runs) renderProgress(d.runs, d.current_run_id, d.sprint_status);
+
+        // Update countdown display if server says countdown is active
+        if (d.countdown_active) {
+            document.getElementById('clockDisplay').textContent = d.countdown_remaining.toString();
+            document.getElementById('clockDisplay').classList.add('countdown');
+        }
+
+        // Polling fallback: start timer if beep_fired_at changed and SSE missed it
+        if (d.beep_fired_at && d.beep_fired_at !== lastBeepTs) {
+            lastBeepTs = d.beep_fired_at;
+            if (!timerRunning) {
+                onBeepFired();
+            }
+        }
+    } catch(e) { /* swallow */ }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(async function init() {
+    if (sessionStatus === 'active') {
+        connectSSE();
+        document.getElementById('coursePanel').style.display = 'none';
+        document.getElementById('timingPanel').style.display = 'block';
+    } else if (sessionStatus === 'completed' || sessionStatus === 'incomplete') {
+        const r = await fetch(`/api/sprint/results/${sessionId}`);
+        const d = await r.json();
+        showResults(d.results || []);
+        return;
+    }
+    refreshStatus();
+    setInterval(refreshStatus, 500);
+})();
+</script>
+{% endblock %}

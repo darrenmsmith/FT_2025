@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}New Sprint Course — Field Trainer{% endblock %}
+
+{% block content %}
+<div class="container mt-4" style="max-width: 500px;">
+    <h4><i class="bi bi-lightning-charge-fill text-warning"></i> New Sprint Course</h4>
+    <p class="text-muted">Distance, countdown, and timing are configured each session on the Setup Cones page.</p>
+
+    <div class="card">
+        <div class="card-body">
+            <div class="mb-4">
+                <label class="form-label fw-semibold">Course Name</label>
+                <input type="text" id="courseName" class="form-control form-control-lg"
+                       placeholder="e.g. Sprint, Sprint — Men, Sprint 40 yds" maxlength="80">
+            </div>
+
+            <div id="errorMsg" class="alert alert-danger" style="display:none;"></div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-success" onclick="createCourse()">
+                    <i class="bi bi-plus-circle"></i> Create Course
+                </button>
+                <a href="/session/setup" class="btn btn-secondary">Cancel</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function createCourse() {
+    const name = document.getElementById('courseName').value.trim();
+    const err = document.getElementById('errorMsg');
+    err.style.display = 'none';
+
+    if (!name) { err.textContent = 'Course name is required.'; err.style.display = 'block'; return; }
+
+    const resp = await fetch('/sprint/course/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name })
+    });
+    const data = await resp.json();
+    if (data.success) {
+        window.location.href = data.redirect;
+    } else {
+        err.textContent = data.error || 'Failed to create course.';
+        err.style.display = 'block';
+    }
+}
+</script>
+{% endblock %}

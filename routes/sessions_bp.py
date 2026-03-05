@@ -472,7 +472,26 @@ def deploy_course(session_id):
         print(f"   DEBUG: mode = {course.get('mode')}")
 
         # Check course_type FIRST (more specific than mode)
-        if course.get('course_type') == 'reaction_sprint':
+        if course.get('course_type') == 'sprint':
+            # Save sprint config if provided (distance, countdown, timing from deploy page)
+            sprint_config = request_data.get('sprint_config', {})
+            if sprint_config:
+                print(f"   ⚡ Sprint config: {sprint_config}")
+                with db.get_connection() as conn:
+                    conn.execute(
+                        'UPDATE courses SET distance = ?, countdown_interval = ?, timing_mode = ? WHERE course_id = ?',
+                        (sprint_config.get('distance', 40),
+                         sprint_config.get('countdown_interval', 5),
+                         sprint_config.get('timing_mode', 'manual'),
+                         course['course_id'])
+                    )
+
+            # Sprint: Gateway (D100) is the start cone — set it AMBER
+            print("\n🟡 Sprint — setting gateway to AMBER...")
+            REGISTRY.set_led('192.168.99.100', pattern='solid_amber')
+            print("   ✅ 192.168.99.100 (Gateway) → AMBER")
+
+        elif course.get('course_type') == 'reaction_sprint':
             # Reaction Sprint: Set cones to GREEN (ready)
             print("\n🟢 Reaction Sprint - setting cones to GREEN...")
             REGISTRY.activate_course(course_name)
