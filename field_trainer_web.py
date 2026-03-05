@@ -172,6 +172,17 @@ def api_state():
             "last_command_time": None        # placeholder; add if you track it
         }
 
+        # Fallback: if batman_neighbors is 0 but REGISTRY has connected nodes, use that count
+        gw = snap.get("gateway_status", {})
+        if gw.get("batman_neighbors", 0) == 0:
+            registry_count = sum(
+                1 for n in nodes
+                if n.get("node_id") != "192.168.99.100" and n.get("status") not in ("Offline", "Unknown")
+            )
+            if registry_count > 0:
+                snap["gateway_status"]["batman_neighbors"] = registry_count
+                snap["gateway_status"]["batman_neighbors_fallback"] = True
+
         return jsonify(snap)
 
     except Exception as e:
@@ -372,6 +383,39 @@ def get_network_info():
 #     data = request.get_json(force=True) or {}
 #     ok = REGISTRY.sync_time(data.get("node_id"), data.get("controller_ms"))
 #     return jsonify({"success": ok})
+
+@app.post("/api/device/reboot")
+def api_device_reboot():
+    """Send a reboot command to a specific device."""
+    data = request.get_json(force=True) or {}
+    node_id = data.get("node_id")
+    if not node_id:
+        return jsonify({"success": False, "error": "node_id required"}), 400
+    if node_id == "192.168.99.100":
+        return jsonify({"success": False, "error": "Cannot reboot virtual Device 0"}), 400
+    try:
+        ok = REGISTRY.send_to_node(node_id, {"cmd": "reboot"})
+        if ok:
+            REGISTRY.log(f"Reboot command sent to {node_id}", level="warning")
+            return jsonify({"success": True})
+        else:
+            return jsonify({"success": False, "error": f"Device {node_id} not connected"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.post("/api/restart-service")
+def api_restart_service():
+    """Restart the field-trainer-server.service on the gateway."""
+    import subprocess, threading
+    def _do_restart():
+        import time as _t
+        _t.sleep(0.5)
+        subprocess.run(["systemctl", "restart", "field-trainer-server.service"])
+    threading.Thread(target=_do_restart, daemon=True).start()
+    REGISTRY.log("Gateway service restart requested by admin", level="warning")
+    return jsonify({"success": True, "message": "Service restarting..."})
+
 
 @app.post("/api/send_command")
 def api_send_command():

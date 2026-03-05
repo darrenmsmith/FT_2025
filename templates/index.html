@@ -73,7 +73,11 @@
                 <div class="card shadow-sm">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>📝 System Log</span>
-                        <button class="btn btn-sm btn-action" onclick="clearLogs()">Clear</button>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="downloadLogs()">Download</button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="restartService()">Restart Service</button>
+                            <button class="btn btn-sm btn-action" onclick="clearLogs()">Clear</button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <pre id="logs" class="log-window">Loading logs...</pre>

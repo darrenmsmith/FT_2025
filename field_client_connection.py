@@ -465,6 +465,13 @@ def connect_to_device0(node_id):
                                         test_mode_active[0] = False
                                         print("🧪 Test mode stopped")
 
+                            # Process reboot command
+                            if "cmd" in data and data["cmd"] == "reboot":
+                                print("🔄 Reboot command received - rebooting device...")
+                                import subprocess
+                                subprocess.Popen(["sudo", "reboot"])
+                                return
+
                             # Update heartbeat interval if deployment message includes it
                             if "heartbeat_interval" in data:
                                 new_interval = data["heartbeat_interval"]

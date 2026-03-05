@@ -39,6 +39,20 @@ function getDeviceStatusClass(status) {
     }
 }
 
+function formatLastSeen(isoStr) {
+    if (!isoStr) return 'never';
+    try {
+        const date = new Date(isoStr);
+        const diff = Math.floor((Date.now() - date) / 1000);
+        if (diff < 5) return 'just now';
+        if (diff < 60) return diff + 's ago';
+        if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+        return Math.floor(diff / 3600) + 'h ago';
+    } catch (e) {
+        return '?';
+    }
+}
+
 function updateStatus() {
     fetch('/api/state')
         .then(r => r.json())
@@ -63,37 +77,28 @@ function updateStatus() {
                 sortedNodes.forEach((n, index) => {
                     const deviceName = getDeviceName(n.node_id);
                     const pingText = n.ping_ms ? n.ping_ms.toFixed(1) + 'ms' : '-';
-                    const batteryText = n.battery_level ? n.battery_level.toFixed(1) + '%' : '-';
-                    const batteryIcon = '🔋';
                     const audioIcon = n.audio_working ? '🔈' : '🔇';
-                    const accelIcon = n.accelerometer_working ? '◉' : '⌀';
+                    const lastSeen = formatLastSeen(n.last_msg);
+                    const isVirtual = n.node_id === '192.168.99.100';
+                    const rebootBtn = !isVirtual
+                        ? `<button class="btn btn-sm btn-danger ms-1" onclick="rebootDevice('${n.node_id}', '${deviceName}')" title="Reboot device">&#x21BA; Reboot</button>`
+                        : '';
 
                     deviceHtml += `
                     <div class="mb-2 p-2 border rounded d-flex justify-content-between align-items-center">
-                        <!-- Left side: Device info -->
                         <div class="flex-grow-1">
-                        <strong>${deviceName}</strong>
-                        <span class="badge ${getDeviceStatusClass(n.status)}">${n.status}</span><br>
-                        <small>
-                            Action: ${n.action || 'None'} | Ping: ${pingText}
-                        </small>
+                            <strong>${deviceName}</strong>
+                            <span class="badge ${getDeviceStatusClass(n.status)}">${n.status}</span><br>
+                            <small>
+                                Action: ${n.action || 'None'} | Ping: ${pingText} | Seen: ${lastSeen}
+                            </small>
                         </div>
-
-                        <!-- Right side: Status icons -->
-                        <div class="device-icons text-end ms-3">
-                            <span class="me-2" data-bs-toggle="tooltip" title="Battery Level">
-                                ${batteryIcon} ${batteryText}
-                            </span>
-                            <span class="me-2" data-bs-toggle="tooltip" title="Audio Status">
-                                ${audioIcon}
-                            </span>
-                            <span data-bs-toggle="tooltip" title="Accelerometer Status">
-                                ${accelIcon}
-                            </span>
+                        <div class="device-icons text-end ms-2">
+                            <span title="Audio Status">${audioIcon}</span>
+                            ${rebootBtn}
                         </div>
                     </div>
                     `;
-
                 });
             } else {
                 deviceHtml = '<div class="text-muted">No devices connected</div>';
@@ -121,9 +126,11 @@ function updateGatewayStatus(gw) {
         ? `<span class="badge bg-success">Connected</span>`
         : `<span class="badge bg-warning">Disconnected</span>`;
 
-    const neighborsText = gw.batman_neighbors > 0
-        ? `<span class="badge bg-success">${gw.batman_neighbors} devices</span>`
-        : `<span class="badge bg-warning">No neighbors</span>`;
+    const neighborsCount = gw.batman_neighbors || 0;
+    const neighborsLabel = neighborsCount === 1 ? 'device' : 'devices';
+    const neighborsBadgeClass = neighborsCount > 0 ? 'bg-success' : 'bg-secondary';
+    const neighborsNote = gw.batman_neighbors_fallback ? ' (via registry)' : '';
+    const neighborsText = `<span class="badge ${neighborsBadgeClass}">${neighborsCount} ${neighborsLabel}${neighborsNote}</span>`;
 
     // Status group (badges)
     let statusHtml = `
@@ -257,6 +264,57 @@ function clearLogs() {
         body: '{}'
     }).then(() => refreshLogs())
         .catch(e => console.error('Clear logs error:', e));
+}
+
+function downloadLogs() {
+    const logEl = document.getElementById('logs');
+    const text = logEl ? logEl.textContent : 'No logs';
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'field-trainer-log-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function rebootDevice(nodeId, deviceName) {
+    if (!confirm('Reboot ' + deviceName + '?\nThe device will disconnect briefly and rejoin the mesh.')) return;
+    fetch('/api/device/reboot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node_id: nodeId })
+    }).then(r => r.json())
+      .then(data => {
+          if (data.success) {
+              refreshLogs();
+          } else {
+              alert('Reboot failed: ' + (data.error || 'Unknown error'));
+          }
+      })
+      .catch(e => { console.error('Reboot error:', e); alert('Reboot request failed'); });
+}
+
+function restartService() {
+    if (!confirm('Restart the Field Trainer service on the gateway?\nThis will briefly interrupt all connected devices.')) return;
+    fetch('/api/restart-service', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+    }).then(r => r.json())
+      .then(data => {
+          if (data.success) {
+              document.getElementById('logs').textContent = 'Service restarting... page will reload in 8 seconds.';
+              setTimeout(() => location.reload(), 8000);
+          } else {
+              alert('Restart failed: ' + (data.error || 'Unknown error'));
+          }
+      })
+      .catch(() => {
+          // Expected: connection drops during restart
+          document.getElementById('logs').textContent = 'Service restarting... page will reload in 8 seconds.';
+          setTimeout(() => location.reload(), 8000);
+      });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
