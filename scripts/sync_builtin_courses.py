@@ -125,11 +125,11 @@ BUILTIN_COURSES = [
             'timing_mode': 'manual',
         },
         [
-            {'sequence': 0, 'device_id': '192.168.99.100', 'device_name': 'Device 0 (Start)', 'action': 'default_beep', 'action_type': 'audio_start',       'audio_file': 'default_beep.mp3', 'min_time': 0.1, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 0, 'distance': 0.0},
-            {'sequence': 1, 'device_id': '192.168.99.101', 'device_name': 'Cone 1',           'action': 'default_beep', 'action_type': 'touch_checkpoint',  'audio_file': 'default_beep.mp3', 'min_time': 1.0, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 0, 'distance': 3.0},
-            {'sequence': 2, 'device_id': '192.168.99.102', 'device_name': 'Cone 2',           'action': 'default_beep', 'action_type': 'touch_checkpoint',  'audio_file': 'default_beep.mp3', 'min_time': 1.0, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 0, 'distance': 3.0},
-            {'sequence': 3, 'device_id': '192.168.99.103', 'device_name': 'Cone 3',           'action': 'default_beep', 'action_type': 'touch_checkpoint',  'audio_file': 'default_beep.mp3', 'min_time': 1.0, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 0, 'distance': 3.0},
-            {'sequence': 4, 'device_id': '192.168.99.104', 'device_name': 'Cone 4',           'action': 'default_beep', 'action_type': 'touch_checkpoint',  'audio_file': 'default_beep.mp3', 'min_time': 1.0, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 1, 'distance': 3.0},
+            {'sequence': 0, 'device_id': '192.168.99.100', 'device_name': 'Device 0 (Start)', 'action': 'default_beep', 'action_type': 'audio_start',       'audio_file': 'default_beep.mp3', 'min_time': 0.1, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 0, 'distance': 0.0, 'behavior_config': None},
+            {'sequence': 1, 'device_id': '192.168.99.101', 'device_name': 'Cone 1',           'action': 'default_beep', 'action_type': 'touch_checkpoint',  'audio_file': 'default_beep.mp3', 'min_time': 1.0, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 0, 'distance': 3.0, 'behavior_config': '{"color": "red"}'},
+            {'sequence': 2, 'device_id': '192.168.99.102', 'device_name': 'Cone 2',           'action': 'default_beep', 'action_type': 'touch_checkpoint',  'audio_file': 'default_beep.mp3', 'min_time': 1.0, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 0, 'distance': 3.0, 'behavior_config': '{"color": "blue"}'},
+            {'sequence': 3, 'device_id': '192.168.99.103', 'device_name': 'Cone 3',           'action': 'default_beep', 'action_type': 'touch_checkpoint',  'audio_file': 'default_beep.mp3', 'min_time': 1.0, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 0, 'distance': 3.0, 'behavior_config': '{"color": "green"}'},
+            {'sequence': 4, 'device_id': '192.168.99.104', 'device_name': 'Cone 4',           'action': 'default_beep', 'action_type': 'touch_checkpoint',  'audio_file': 'default_beep.mp3', 'min_time': 1.0, 'max_time': 30.0, 'triggers_next_athlete': 0, 'marks_run_complete': 1, 'distance': 3.0, 'behavior_config': '{"color": "yellow"}'},
         ]
     ),
 
@@ -270,12 +270,12 @@ def sync(db_path):
                 INSERT INTO course_actions
                     (course_id, sequence, device_id, device_name, action, action_type,
                      audio_file, instruction, min_time, max_time,
-                     triggers_next_athlete, marks_run_complete, distance)
+                     triggers_next_athlete, marks_run_complete, distance, behavior_config)
                 VALUES
                     (:course_id, :sequence, :device_id, :device_name, :action, :action_type,
                      :audio_file, :instruction, :min_time, :max_time,
-                     :triggers_next_athlete, :marks_run_complete, :distance)
-            ''', {**a, 'course_id': course_id, 'instruction': a.get('instruction')})
+                     :triggers_next_athlete, :marks_run_complete, :distance, :behavior_config)
+            ''', {**a, 'course_id': course_id, 'instruction': a.get('instruction'), 'behavior_config': a.get('behavior_config')})
 
         print(f'  {label:<8} {name}')
 
