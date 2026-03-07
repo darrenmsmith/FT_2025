@@ -14,6 +14,8 @@ BUILTIN_PATTERNS = [
     'Warm-up:',
     'Simon Says',
     'Beep Test',
+    'Reaction',
+    'Sprint',
 ]
 
 def matches_builtin(name):
