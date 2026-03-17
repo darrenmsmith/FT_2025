@@ -4,12 +4,20 @@ Field Trainer Client with LED Control
 Connects to Device 0 and manages local LED hardware
 """
 
+import os
 import socket
 import json
 import time
 import sys
 sys.path.insert(0, '/opt/field_trainer')
+sys.path.insert(0, '/opt')
 from ft_touch import TouchSensor
+try:
+    from sonar_sensor import SonarSensor
+    SONAR_AVAILABLE = True
+except ImportError:
+    SONAR_AVAILABLE = False
+    print("⚠ sonar_sensor module not found — proximity detection unavailable")
 import argparse
 from audio_manager import AudioManager
 from enum import Enum
@@ -285,10 +293,37 @@ def connect_to_device0(node_id):
     print(f"Touch sensor created for {node_id}")
     print(f"Touch sensor hardware available: {touch_sensor.hardware_available}")
 
+    # Initialize sonar sensor (GPIO only allocated when active)
+    sonar_sensor = SonarSensor(device_id=node_id) if SONAR_AVAILABLE else None
+    if sonar_sensor:
+        sonar_sensor.set_detection_callback(lambda: touch_detected_callback(audio_manager, current_action[0]))
+        # Load saved sonar config if it exists
+        ip_suffix = node_id.split('.')[-1]
+        _sonar_config_file = f"/opt/field_trainer/config/sonar_config_device{ip_suffix}.json"
+        if os.path.exists(_sonar_config_file):
+            try:
+                with open(_sonar_config_file, 'r') as f:
+                    _sc = json.load(f)
+                if 'threshold_cm' in _sc:
+                    sonar_sensor.set_threshold(_sc['threshold_cm'])
+                if 'read_interval_s' in _sc:
+                    sonar_sensor.set_read_interval(_sc['read_interval_s'])
+                if 'confirm_readings' in _sc:
+                    sonar_sensor.set_confirm_readings(_sc['confirm_readings'])
+                print(f"Sonar config loaded: threshold={sonar_sensor.threshold_cm}cm, "
+                      f"interval={int(sonar_sensor.read_interval_s*1000)}ms, "
+                      f"confirm={sonar_sensor.confirm_readings}")
+            except Exception as e:
+                print(f"Failed to load sonar config: {e}")
+        print("Sonar sensor initialized (GPIO not yet allocated)")
+
     # Track current action assignment (use list for mutable reference in lambda)
     current_action = [None]
     touch_detection_active = [False]
+    sonar_detection_active = [False]
+    current_detection_method = ['touch']  # 'touch' | 'proximity' | 'none'
     test_mode_active = [False]  # True while calibration test mode is running
+    sonar_test_active = [False]  # True while sonar test mode is running (from settings page)
     heartbeat_interval = [5]  # Default 5 seconds, can be changed by deployment
 
     # Set touch callback with audio manager and current action
@@ -326,17 +361,30 @@ def connect_to_device0(node_id):
                     "action": current_action[0]  # Report current action assignment
                 }
 
-                # Phase 1: Add touch event reporting
+                # Report detection event (touch or sonar, same field for compatibility)
                 global last_touch_time
                 current_time = time.time()
                 if last_touch_time > 0 and (current_time - last_touch_time) < 5.0:
-                    # Touch occurred within last 5 seconds, report it
                     heartbeat["touch_detected"] = True
                     heartbeat["touch_timestamp"] = last_touch_time
                     last_touch_time = 0  # Reset after reporting
                 else:
                     heartbeat["touch_detected"] = False
                     heartbeat["touch_timestamp"] = None
+
+                # Include sonar live data when active (for remote monitoring / test UI)
+                heartbeat["detection_method"] = current_detection_method[0]
+                if sonar_sensor and sonar_detection_active[0]:
+                    s = sonar_sensor.get_status()
+                    heartbeat["sonar"] = {
+                        "distance_cm":   s["distance_cm"],
+                        "baseline_cm":   s["baseline_cm"],
+                        "threshold_cm":  s["threshold_cm"],
+                        "detection_count": s["detection_count"],
+                        "recent_detection": s["recent_detection"],
+                        "last_detection_distance_cm": s["last_detection_distance_cm"],
+                        "last_detection_baseline_cm": s["last_detection_baseline_cm"],
+                    }
 
                 sock.send((json.dumps(heartbeat) + "\n").encode())
 
@@ -430,7 +478,6 @@ def connect_to_device0(node_id):
                                             touch_sensor.threshold = new_threshold
 
                                             # Save to calibration file
-                                            import os
                                             os.makedirs("/opt/field_trainer/config", exist_ok=True)
                                             ip_suffix = node_id.split('.')[-1]  # "101" from "192.168.99.101"
                                             cal_file = f"/opt/field_trainer/config/touch_cal_device{ip_suffix}.json"
@@ -465,6 +512,46 @@ def connect_to_device0(node_id):
                                         test_mode_active[0] = False
                                         print("🧪 Test mode stopped")
 
+                            # Process sonar test command (from settings page)
+                            if "cmd" in data and data["cmd"] == "sonar_test":
+                                enabled = data.get("enabled", False)
+                                if enabled and sonar_sensor:
+                                    settings_changed = False
+                                    if data.get("threshold_cm"):
+                                        sonar_sensor.set_threshold(float(data["threshold_cm"]))
+                                        settings_changed = True
+                                    if data.get("read_interval_s"):
+                                        sonar_sensor.set_read_interval(float(data["read_interval_s"]))
+                                        settings_changed = True
+                                    if data.get("confirm_readings"):
+                                        sonar_sensor.set_confirm_readings(int(data["confirm_readings"]))
+                                        settings_changed = True
+                                    if settings_changed:
+                                        try:
+                                            os.makedirs("/opt/field_trainer/config", exist_ok=True)
+                                            _suffix = node_id.split('.')[-1]
+                                            with open(f"/opt/field_trainer/config/sonar_config_device{_suffix}.json", 'w') as f:
+                                                json.dump({
+                                                    'device_id': node_id,
+                                                    'threshold_cm': sonar_sensor.threshold_cm,
+                                                    'read_interval_s': sonar_sensor.read_interval_s,
+                                                    'confirm_readings': sonar_sensor.confirm_readings,
+                                                }, f, indent=2)
+                                        except Exception as e:
+                                            print(f"Failed to save sonar config: {e}")
+                                    sonar_test_active[0] = True
+                                    if not sonar_detection_active[0]:
+                                        sonar_sensor.start_monitoring()
+                                        sonar_detection_active[0] = True
+                                    print(f"🔊 Sonar test started (threshold: {sonar_sensor.threshold_cm}cm)")
+                                elif not enabled and sonar_sensor:
+                                    sonar_test_active[0] = False
+                                    if sonar_detection_active[0] and not (current_detection_method[0] == 'proximity' and
+                                            current_action[0] is not None):
+                                        sonar_sensor.stop_monitoring()
+                                        sonar_detection_active[0] = False
+                                        print("🔊 Sonar test stopped")
+
                             # Process reboot command
                             if "cmd" in data and data["cmd"] == "reboot":
                                 print("🔄 Reboot command received - rebooting device...")
@@ -479,11 +566,17 @@ def connect_to_device0(node_id):
                                     heartbeat_interval[0] = new_interval
                                     print(f"📡 Heartbeat interval changed to {new_interval}s")
 
-                            # Update current action assignment and touch detection state
+                            # Update detection method from deploy command
+                            if "detection_method" in data:
+                                new_method = data["detection_method"] or "touch"
+                                if new_method != current_detection_method[0]:
+                                    current_detection_method[0] = new_method
+                                    print(f"🎯 Detection method set to: {new_method}")
+
+                            # Update current action assignment
                             action = data.get("action")
                             course_status = data.get("course_status", "Inactive")
 
-                            # Update action if changed
                             if action != current_action[0]:
                                 current_action[0] = action
                                 if action:
@@ -491,20 +584,45 @@ def connect_to_device0(node_id):
                                 else:
                                     print(f"Action cleared (device inactive)")
 
-                            # Control touch detection based on course status
+                            # Start/stop the correct sensor based on detection_method
+                            method = current_detection_method[0]
                             if course_status == "Active" and action:
-                                # Start touch detection only when course is Active
-                                if not touch_detection_active[0]:
-                                    touch_sensor.start_detection()
-                                    touch_detection_active[0] = True
-                                    print("Touch detection started (course active)")
-                            elif not test_mode_active[0]:
-                                # Stop touch detection when course not active, no action,
-                                # and calibration test mode is not running
+                                if method == "proximity":
+                                    # Use sonar — stop touch if running
+                                    if touch_detection_active[0]:
+                                        touch_sensor.stop_detection()
+                                        touch_detection_active[0] = False
+                                    if sonar_sensor and not sonar_detection_active[0]:
+                                        sonar_sensor.start_monitoring()
+                                        sonar_detection_active[0] = True
+                                        print("🔊 Sonar detection started (course active)")
+                                elif method == "none":
+                                    # No detection — stop both
+                                    if touch_detection_active[0]:
+                                        touch_sensor.stop_detection()
+                                        touch_detection_active[0] = False
+                                    if sonar_sensor and sonar_detection_active[0]:
+                                        sonar_sensor.stop_monitoring()
+                                        sonar_detection_active[0] = False
+                                else:
+                                    # Default: touch — stop sonar if running
+                                    if sonar_sensor and sonar_detection_active[0]:
+                                        sonar_sensor.stop_monitoring()
+                                        sonar_detection_active[0] = False
+                                    if not touch_detection_active[0]:
+                                        touch_sensor.start_detection()
+                                        touch_detection_active[0] = True
+                                        print("Touch detection started (course active)")
+                            elif not test_mode_active[0] and not sonar_test_active[0]:
+                                # Course inactive — stop all detection sensors
                                 if touch_detection_active[0]:
                                     touch_sensor.stop_detection()
                                     touch_detection_active[0] = False
                                     print("Touch detection stopped (course inactive)")
+                                if sonar_sensor and sonar_detection_active[0]:
+                                    sonar_sensor.stop_monitoring()
+                                    sonar_detection_active[0] = False
+                                    print("🔊 Sonar detection stopped (course inactive)")
 
                         except json.JSONDecodeError as e:
                             print(f"JSON decode error for message '{message}': {e}")

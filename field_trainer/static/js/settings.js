@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadSettings();
     attachEventListeners();
     loadTestAudioPreferences();
+    refreshSonarDevices();
 });
 
 /**
@@ -1876,4 +1877,364 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(() => {
         initializeCalibration();
     }, 500);
+});
+
+// ============================================================
+// SONAR DISTANCE SENSOR — Live monitoring and detection test
+// ============================================================
+
+let sonarPollInterval = null;
+let sonarDetectionFlashTimer = null;
+let sonarLastDetectionCount = 0;
+let sonarSelectedDevice = null;  // device number currently being monitored (0-5)
+let sonarStartTime = null;        // timestamp when monitoring was started (for startup grace period)
+const SONAR_STARTUP_GRACE_MS = 10000;  // 10s grace before treating running=false as "stopped"
+
+function refreshSonarDevices() {
+    const btn = document.getElementById('refresh-sonar-devices-btn');
+    if (btn) btn.disabled = true;
+
+    fetch('/api/sonar/devices/status')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) updateSonarDeviceTable(data.devices);
+    })
+    .catch(() => {})
+    .finally(() => {
+        if (btn) btn.disabled = false;
+    });
+}
+
+function updateSonarDeviceTable(devices) {
+    const tbody = document.querySelector('#sonar-devices-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    devices.forEach(dev => {
+        const row = document.createElement('tr');
+        const onlineBadge = dev.online
+            ? '<span class="badge bg-success">Online</span>'
+            : '<span class="badge bg-secondary">Offline</span>';
+        const sonarBadge = dev.sonar_running
+            ? '<span class="badge bg-primary">Running</span>'
+            : '<span class="badge bg-light text-dark border">Idle</span>';
+        const isSelected = sonarSelectedDevice === dev.device_num;
+        const btnClass = isSelected ? 'btn-warning' : 'btn-outline-success';
+        const btnLabel = isSelected ? 'Selected' : 'Start Monitoring';
+        const btnDisabled = !dev.online && dev.device_num !== 0 ? 'disabled' : '';
+
+        row.innerHTML = `
+            <td><strong>${dev.name}</strong><br><small class="text-muted">${dev.ip}</small></td>
+            <td>${onlineBadge}</td>
+            <td>${sonarBadge}</td>
+            <td>
+                <button class="btn ${btnClass} btn-sm" ${btnDisabled}
+                    onclick="startSonarForDevice(${dev.device_num}, '${dev.name}')">
+                    <i class="bi bi-play-fill"></i> ${btnLabel}
+                </button>
+            </td>`;
+        tbody.appendChild(row);
+    });
+}
+
+function startSonarForDevice(deviceNum, deviceName) {
+    // If different device was running, stop it first
+    if (sonarSelectedDevice !== null && sonarSelectedDevice !== deviceNum && sonarPollInterval) {
+        fetch(`/api/sonar/device/${sonarSelectedDevice}/stop`, { method: 'POST' }).catch(() => {});
+        clearInterval(sonarPollInterval);
+        sonarPollInterval = null;
+    }
+
+    sonarSelectedDevice = deviceNum;
+
+    // Show the selected panel with correct device name
+    const panel = document.getElementById('sonar-selected-panel');
+    const nameEl = document.getElementById('sonar-selected-name');
+    if (panel) panel.style.display = '';
+    if (nameEl) nameEl.textContent = deviceName;
+
+    const thresholdInput = document.getElementById('sonar-threshold-input');
+    const threshold = thresholdInput ? parseFloat(thresholdInput.value) || 30 : 30;
+    const intervalInput = document.getElementById('sonar-interval-input');
+    const intervalMs = intervalInput ? (parseFloat(intervalInput.value) || 500) : 500;
+
+    sonarLogLine(`Starting sonar monitoring on ${deviceName}...`);
+    setSonarControls('starting');
+
+    fetch(`/api/sonar/device/${deviceNum}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold_cm: threshold, read_interval_s: intervalMs / 1000 })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const alreadyRunning = data.message === 'Already running';
+            sonarLogLine(alreadyRunning
+                ? `✅ ${deviceName} sensor already active — resuming live feed`
+                : `✅ ${deviceName} monitoring started — building background baseline...`);
+            setSonarControls('running');
+            sonarLastDetectionCount = data.status ? (data.status.detection_count || 0) : 0;
+            sonarStartTime = Date.now();
+            sonarPollInterval = setInterval(pollSonarReading, 500);
+            refreshSonarDevices();
+        } else {
+            sonarLogLine('❌ Failed to start: ' + (data.error || 'Unknown error'));
+            setSonarControls('idle');
+        }
+    })
+    .catch(err => {
+        sonarLogLine('❌ Request error: ' + err.message);
+        setSonarControls('idle');
+    });
+}
+
+function stopSonarMonitoring() {
+    if (sonarPollInterval) {
+        clearInterval(sonarPollInterval);
+        sonarPollInterval = null;
+    }
+    if (sonarDetectionFlashTimer) {
+        clearTimeout(sonarDetectionFlashTimer);
+        sonarDetectionFlashTimer = null;
+    }
+
+    const devNum = sonarSelectedDevice !== null ? sonarSelectedDevice : 0;
+    fetch(`/api/sonar/device/${devNum}/stop`, { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+        sonarLogLine('⏹ Monitoring stopped — GPIO released');
+        sonarSelectedDevice = null;
+        setSonarControls('idle');
+        resetSonarDisplay();
+        const panel = document.getElementById('sonar-selected-panel');
+        if (panel) panel.style.display = 'none';
+        refreshSonarDevices();
+    })
+    .catch(err => {
+        sonarLogLine('⚠ Stop request error: ' + err.message);
+        setSonarControls('idle');
+    });
+}
+
+function pollSonarReading() {
+    const devNum = sonarSelectedDevice !== null ? sonarSelectedDevice : 0;
+    fetch(`/api/sonar/device/${devNum}/reading`)
+    .then(r => r.json())
+    .then(data => {
+        if (!data.running) {
+            // Allow startup grace period — remote devices take up to one heartbeat interval
+            // before they start sending sonar data back
+            const elapsed = sonarStartTime ? Date.now() - sonarStartTime : Infinity;
+            if (elapsed < SONAR_STARTUP_GRACE_MS) {
+                // Still starting up — keep polling
+                return;
+            }
+            // Sensor stopped externally
+            stopSonarMonitoring();
+            return;
+        }
+        updateSonarDisplay(data);
+    })
+    .catch(() => {
+        // Network hiccup — keep polling
+    });
+}
+
+function cmToIn(cm) {
+    if (cm === null || cm === undefined) return null;
+    return (cm / 2.54).toFixed(1);
+}
+
+function updateSonarDisplay(data) {
+    const distCm = document.getElementById('sonar-dist-cm');
+    const distIn = document.getElementById('sonar-dist-in');
+    const baseCm = document.getElementById('sonar-baseline-cm');
+    const baseIn = document.getElementById('sonar-baseline-in');
+    const threshDisp = document.getElementById('sonar-threshold-display');
+    const detCount = document.getElementById('sonar-det-count');
+    const banner = document.getElementById('sonar-detection-banner');
+
+    // Compute inches locally if not provided by remote device heartbeat
+    const distInVal = data.distance_in !== undefined ? data.distance_in : cmToIn(data.distance_cm);
+    const baseInVal = data.baseline_in !== undefined ? data.baseline_in : cmToIn(data.baseline_cm);
+
+    if (distCm) {
+        distCm.textContent = data.distance_cm !== null && data.distance_cm !== undefined
+            ? data.distance_cm + ' cm' : '—';
+    }
+    if (distIn) {
+        distIn.textContent = distInVal !== null ? distInVal + ' in' : '—';
+    }
+
+    if (baseCm) {
+        if (data.baseline_cm !== null && data.baseline_cm !== undefined) {
+            // baseline_samples not sent by remote devices — treat as ready if baseline exists
+            const samples = data.baseline_samples !== undefined ? data.baseline_samples : 3;
+            const ready = samples >= 3;
+            baseCm.textContent = data.baseline_cm + ' cm';
+            baseCm.closest('.card').classList.toggle('border-warning', !ready);
+            baseCm.closest('.card').classList.toggle('border-secondary', ready);
+        } else {
+            baseCm.textContent = 'Building...';
+        }
+    }
+    if (baseIn) {
+        baseIn.textContent = baseInVal !== null ? baseInVal + ' in' : '—';
+    }
+    if (threshDisp) threshDisp.textContent = data.threshold_cm;
+
+    if (detCount) detCount.textContent = data.detection_count || 0;
+
+    // Flash detection banner on new detections
+    if (data.detection_count > sonarLastDetectionCount) {
+        const newCount = data.detection_count - sonarLastDetectionCount;
+        sonarLastDetectionCount = data.detection_count;
+        // Use snapshot values captured at detection time (not current live reading)
+        const detDist = data.last_detection_distance_cm !== null && data.last_detection_distance_cm !== undefined
+            ? data.last_detection_distance_cm : data.distance_cm;
+        const detBase = data.last_detection_baseline_cm !== null && data.last_detection_baseline_cm !== undefined
+            ? data.last_detection_baseline_cm : data.baseline_cm;
+        const detDiff = (detBase !== null && detDist !== null) ? (detBase - detDist).toFixed(1) : '?';
+        sonarLogLine(`🎯 Detection #${data.detection_count} — ${detDist} cm (background ${detBase} cm, Δ${detDiff} cm)`);
+        if (banner) {
+            banner.style.display = 'block';
+            if (sonarDetectionFlashTimer) clearTimeout(sonarDetectionFlashTimer);
+            sonarDetectionFlashTimer = setTimeout(() => {
+                if (banner) banner.style.display = 'none';
+            }, 2000);
+        }
+    }
+}
+
+function applySonarThreshold() {
+    if (sonarSelectedDevice === null) { sonarLogLine('⚠ Select a device first'); return; }
+    const input = document.getElementById('sonar-threshold-input');
+    const threshold = input ? parseFloat(input.value) : 30;
+    if (isNaN(threshold) || threshold < 5) {
+        sonarLogLine('⚠ Threshold must be at least 5 cm');
+        return;
+    }
+
+    fetch(`/api/sonar/device/${sonarSelectedDevice}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold_cm: threshold })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            sonarLogLine(`⚙️ Detection threshold set to ${threshold} cm`);
+            const disp = document.getElementById('sonar-threshold-display');
+            if (disp) disp.textContent = threshold;
+        } else {
+            sonarLogLine('❌ Failed to update threshold: ' + (data.error || 'Unknown'));
+        }
+    })
+    .catch(err => sonarLogLine('❌ Request error: ' + err.message));
+}
+
+function applySonarConfirm() {
+    if (sonarSelectedDevice === null) { sonarLogLine('⚠ Select a device first'); return; }
+    const input = document.getElementById('sonar-confirm-input');
+    const count = input ? parseInt(input.value) : 2;
+
+    fetch(`/api/sonar/device/${sonarSelectedDevice}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm_readings: count })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            sonarLogLine(`⚙️ Confirm readings set to ${count} (need ${count} consecutive hits to detect)`);
+        } else {
+            sonarLogLine('❌ Failed: ' + (data.error || 'Unknown'));
+        }
+    })
+    .catch(err => sonarLogLine('❌ Request error: ' + err.message));
+}
+
+function applySonarInterval() {
+    if (sonarSelectedDevice === null) { sonarLogLine('⚠ Select a device first'); return; }
+    const input = document.getElementById('sonar-interval-input');
+    const ms = input ? parseInt(input.value) : 500;
+    if (isNaN(ms) || ms < 50) {
+        sonarLogLine('⚠ Interval must be at least 50 ms');
+        return;
+    }
+
+    fetch(`/api/sonar/device/${sonarSelectedDevice}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ read_interval_s: ms / 1000 })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            sonarLogLine(`⚙️ Read interval set to ${ms} ms`);
+        } else {
+            sonarLogLine('❌ Failed to update interval: ' + (data.error || 'Unknown'));
+        }
+    })
+    .catch(err => sonarLogLine('❌ Request error: ' + err.message));
+}
+
+function setSonarControls(state) {
+    const startBtn = document.getElementById('sonar-start-btn');
+    const stopBtn = document.getElementById('sonar-stop-btn');
+    const badge = document.getElementById('sonar-status-badge');
+    const livePanel = document.getElementById('sonar-live-panel');
+
+    if (state === 'running') {
+        if (startBtn) startBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = '';
+        if (badge) { badge.textContent = 'Active'; badge.className = 'badge bg-success'; }
+        if (livePanel) livePanel.style.display = '';
+    } else if (state === 'starting') {
+        if (startBtn) { startBtn.disabled = true; startBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...'; }
+        if (badge) { badge.textContent = 'Starting...'; badge.className = 'badge bg-warning text-dark'; }
+    } else {
+        // idle
+        if (startBtn) { startBtn.style.display = ''; startBtn.disabled = false; startBtn.innerHTML = '<i class="bi bi-play-fill"></i> Start Monitoring'; }
+        if (stopBtn) stopBtn.style.display = 'none';
+        if (badge) { badge.textContent = 'Inactive'; badge.className = 'badge bg-secondary'; }
+        if (livePanel) livePanel.style.display = 'none';
+    }
+}
+
+function resetSonarDisplay() {
+    const ids = ['sonar-dist-cm', 'sonar-dist-in', 'sonar-baseline-cm', 'sonar-baseline-in'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '—';
+    });
+    const detCount = document.getElementById('sonar-det-count');
+    if (detCount) detCount.textContent = '0';
+    const banner = document.getElementById('sonar-detection-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+function sonarLogLine(msg) {
+    const content = document.getElementById('sonar-log-content');
+    if (!content) return;
+    const now = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.textContent = `[${now}] ${msg}`;
+    content.appendChild(line);
+    // Auto-scroll to bottom
+    const logBox = document.getElementById('sonar-system-log');
+    if (logBox) logBox.scrollTop = logBox.scrollHeight;
+}
+
+function clearSonarLog() {
+    const content = document.getElementById('sonar-log-content');
+    if (content) content.innerHTML = '<div class="text-muted">Log cleared.</div>';
+}
+
+// Stop monitoring when navigating away (release GPIO)
+window.addEventListener('beforeunload', function() {
+    if (sonarPollInterval && sonarSelectedDevice !== null) {
+        fetch(`/api/sonar/device/${sonarSelectedDevice}/stop`, { method: 'POST', keepalive: true });
+    }
 });

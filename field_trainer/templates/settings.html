@@ -469,6 +469,197 @@
     </div>
 </div>
 
+<!-- Sonar Distance Sensor Card -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-broadcast"></i> Sonar Distance Sensor (JSN-SR04T)</h5>
+    </div>
+    <div class="card-body">
+        <!-- How to Use (Collapsible) -->
+        <div class="alert alert-info mb-3">
+            <h6 class="alert-heading mb-0">
+                <a class="text-decoration-none text-reset d-flex align-items-center" data-bs-toggle="collapse" href="#sonarHowToCollapse" role="button" aria-expanded="false" aria-controls="sonarHowToCollapse" style="cursor: pointer;">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <span>How to Use</span>
+                    <i class="bi bi-chevron-down ms-auto"></i>
+                </a>
+            </h6>
+            <div class="collapse" id="sonarHowToCollapse">
+                <hr class="my-2">
+                <h6 class="mt-2 mb-2"><i class="bi bi-broadcast"></i> Live Distance Feed</h6>
+                <ul class="mb-2" style="padding-left: 20px;">
+                    <li><strong>Purpose:</strong> Verify the sensor is measuring distance correctly and test proximity detection</li>
+                    <li><strong>GPIO:</strong> Echo = GPIO 23 (Pin 16), Trigger = GPIO 24 (Pin 18) — same on all devices</li>
+                    <li><strong>Sensor range:</strong> 25 cm – 600 cm</li>
+                    <li><strong>How to read:</strong>
+                        <ul>
+                            <li><strong>Current:</strong> Live distance to the nearest object</li>
+                            <li><strong>Background:</strong> Rolling average of recent readings (what the sensor sees at rest)</li>
+                            <li><strong>🎯 DETECTED!</strong> appears when current distance drops more than the threshold below background</li>
+                        </ul>
+                    </li>
+                </ul>
+                <h6 class="mt-3 mb-2"><i class="bi bi-sliders"></i> Detection Threshold</h6>
+                <ul class="mb-0" style="padding-left: 20px;">
+                    <li>Set how many cm closer than background triggers a detection event</li>
+                    <li><strong>Default: 30 cm</strong> — wave your hand in front of the sensor to test</li>
+                    <li><strong>Lower values</strong> = more sensitive (may false-trigger)</li>
+                    <li><strong>Higher values</strong> = requires object to be significantly closer</li>
+                    <li>Sensor needs ~3 background readings before detection is active (1.5 seconds after Start)</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Device Status Table -->
+        <div class="mb-3">
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered table-hover" id="sonar-devices-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Device</th>
+                            <th>Status</th>
+                            <th>Sonar</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populated via JavaScript -->
+                        <tr><td colspan="5" class="text-center text-muted">Loading devices...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="refresh-sonar-devices-btn" onclick="refreshSonarDevices()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+
+        <!-- Live Readings Panel (shown when a device is selected) -->
+        <div id="sonar-selected-panel" style="display:none;">
+            <hr class="my-3">
+
+            <!-- Selected device header + stop button -->
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <h6 class="mb-0" id="sonar-selected-label">
+                    <i class="bi bi-broadcast"></i> <span id="sonar-selected-name">Device</span> — Live Feed
+                </h6>
+                <span id="sonar-status-badge" class="badge bg-secondary">Inactive</span>
+                <button class="btn btn-danger btn-sm ms-auto" id="sonar-stop-btn" onclick="stopSonarMonitoring()" style="display:none;">
+                    <i class="bi bi-stop-fill"></i> Stop Monitoring
+                </button>
+            </div>
+
+            <!-- Read interval control -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">Read Interval</label>
+                <div class="d-flex align-items-center gap-2">
+                    <div class="input-group input-group-sm" style="max-width: 220px;">
+                        <input type="number" class="form-control" id="sonar-interval-input"
+                               value="500" min="50" max="30000" step="50" placeholder="500">
+                        <span class="input-group-text">ms</span>
+                    </div>
+                    <button class="btn btn-outline-primary btn-sm text-nowrap" onclick="applySonarInterval()">
+                        Apply
+                    </button>
+                </div>
+                <div class="form-text">Min 50 ms (20 Hz) · Default 500 ms · Max 30000 ms (0.03 Hz). Faster = quicker detection, more CPU.</div>
+            </div>
+
+            <!-- Live Readings Display -->
+            <div id="sonar-live-panel" style="display:none;">
+                <!-- Distance readout -->
+                <div class="row g-3 mb-3">
+                    <div class="col-6 col-md-3">
+                        <div class="card text-center border-primary">
+                            <div class="card-body py-2">
+                                <div class="text-muted small mb-1">Current Distance</div>
+                                <div class="fw-bold fs-4" id="sonar-dist-cm">—</div>
+                                <div class="text-muted small" id="sonar-dist-in">— in</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card text-center border-secondary">
+                            <div class="card-body py-2">
+                                <div class="text-muted small mb-1">Background</div>
+                                <div class="fw-bold fs-4" id="sonar-baseline-cm">—</div>
+                                <div class="text-muted small" id="sonar-baseline-in">— in</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card text-center border-warning">
+                            <div class="card-body py-2">
+                                <div class="text-muted small mb-1">Threshold</div>
+                                <div class="fw-bold fs-4" id="sonar-threshold-display">30</div>
+                                <div class="text-muted small">cm change</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card text-center border-success">
+                            <div class="card-body py-2">
+                                <div class="text-muted small mb-1">Detections</div>
+                                <div class="fw-bold fs-4" id="sonar-det-count">0</div>
+                                <div class="text-muted small">total</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detection event banner -->
+                <div id="sonar-detection-banner" class="alert alert-success text-center fw-bold py-2 mb-3" style="display:none;">
+                    <i class="bi bi-bullseye"></i> 🎯 DETECTED!
+                </div>
+
+                <!-- Threshold and confirm controls -->
+                <div class="row g-3 mb-3">
+                    <div class="col-12 col-md-6">
+                        <label class="form-label fw-bold">Detection Threshold (cm)</label>
+                        <div class="d-flex align-items-center gap-2">
+                            <input type="number" class="form-control" id="sonar-threshold-input"
+                                   value="30" min="5" max="400" step="5" placeholder="30">
+                            <button class="btn btn-outline-primary btn-sm text-nowrap" onclick="applySonarThreshold()">
+                                Apply
+                            </button>
+                        </div>
+                        <div class="form-text">cm closer than background to trigger</div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label fw-bold">Confirm Readings</label>
+                        <div class="d-flex align-items-center gap-2">
+                            <select class="form-select" id="sonar-confirm-input">
+                                <option value="1">1 — instant (noisy)</option>
+                                <option value="2" selected>2 — default</option>
+                                <option value="3">3 — more stable</option>
+                                <option value="4">4 — strict</option>
+                            </select>
+                            <button class="btn btn-outline-primary btn-sm text-nowrap" onclick="applySonarConfirm()">
+                                Apply
+                            </button>
+                        </div>
+                        <div class="form-text">Consecutive readings below threshold required</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Log -->
+        <div class="mb-3">
+            <label class="form-label fw-bold">Sonar Log</label>
+            <div class="card bg-dark text-light" style="height: 200px; overflow-y: auto;" id="sonar-system-log">
+                <div class="card-body p-2 font-monospace small">
+                    <div id="sonar-log-content">
+                        <div class="text-muted">Select a device above and click Start Monitoring...</div>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm mt-1" onclick="clearSonarLog()">
+                <i class="bi bi-x-circle"></i> Clear Log
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Status Messages -->
 <div id="status-message" class="alert" style="display: none;"></div>
 

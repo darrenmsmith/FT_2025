@@ -50,7 +50,8 @@ class Registry:
         self.pattern_display_active: bool = False  # Flag to block touches during pattern display
 
         # courses loaded after DB init below
-        self.assignments: Dict[str, str] = {}  # node_id -> action
+        self.assignments: Dict[str, str] = {}         # node_id -> action
+        self.detection_methods: Dict[str, str] = {}   # node_id -> detection_method ('touch'|'proximity'|'none')
         self.device_0_action: Optional[str] = None  # virtual Device 0 state marker
 
         # Optional server-side LED control (Device 0 hardware)
@@ -378,6 +379,10 @@ class Registry:
                 from .ft_led import LEDState
                 self._server_led.set_state(LEDState.SOLID_RED)
             self.assignments = {st["node_id"]: st["action"] for st in course.get("stations", [])}
+            self.detection_methods = {
+                st["node_id"]: (st.get("detection_method") or "touch")
+                for st in course.get("stations", [])
+            }
 
             # Device 0 (virtual) action
             d0 = next((st for st in course.get("stations", []) if st["node_id"] == "192.168.99.100"), None)
@@ -408,7 +413,8 @@ class Registry:
             success = 0
             for node_id, action in self.assignments.items():
                 if node_id != "192.168.99.100":
-                    if self.send_to_node(node_id, {"deploy": True, "action": action, "course": course_name, "heartbeat_interval": heartbeat_interval}):
+                    detection_method = self.detection_methods.get(node_id, "touch")
+                    if self.send_to_node(node_id, {"deploy": True, "action": action, "course": course_name, "heartbeat_interval": heartbeat_interval, "detection_method": detection_method}):
                         success += 1
 
             # Mark unassigned devices as inactive

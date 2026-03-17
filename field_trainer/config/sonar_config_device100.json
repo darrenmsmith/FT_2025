@@ -1,0 +1,6 @@
+{
+  "device_id": "D0",
+  "threshold_cm": 30.0,
+  "read_interval_s": 0.3,
+  "confirm_readings": 1
+}

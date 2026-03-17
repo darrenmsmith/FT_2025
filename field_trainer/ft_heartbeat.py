@@ -102,6 +102,8 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                         # Phase 1: Touch event support
                         touch_detected=msg.get("touch_detected", False),
                         touch_timestamp=msg.get("touch_timestamp"),
+                        detection_method=msg.get("detection_method"),
+                        sonar_data=msg.get("sonar"),
                     )                    
                     # Handle touch events (Phase 1)
                     print(f"📨 Heartbeat from {node_id}: touch_detected={msg.get('touch_detected')}, timestamp={msg.get('touch_timestamp')}")

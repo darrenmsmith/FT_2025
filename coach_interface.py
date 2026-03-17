@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 import sys
 import os
+import time
 import subprocess
 import json
 import logging
@@ -70,6 +71,49 @@ session_service = SessionService(db, REGISTRY, active_session_state)
 
 # Initialize settings manager
 settings_mgr = SettingsManager(db)
+
+# Sonar sensor — instance created on demand, GPIO only held while monitoring
+try:
+    from sonar_sensor import SonarSensor
+    _sonar_sensor_class = SonarSensor
+except ImportError:
+    _sonar_sensor_class = None
+    logger.warning("sonar_sensor module not found — sonar API will be unavailable")
+
+_sonar_sensor = None  # Active instance (None when not monitoring)
+_SONAR_CONFIG_D0 = '/opt/field_trainer/config/sonar_config_device100.json'
+
+def _load_sonar_config_d0(sensor):
+    """Apply saved D0 sonar config to a freshly created sensor instance."""
+    if not os.path.exists(_SONAR_CONFIG_D0):
+        return
+    try:
+        with open(_SONAR_CONFIG_D0, 'r') as f:
+            sc = json.load(f)
+        if 'threshold_cm' in sc:
+            sensor.set_threshold(sc['threshold_cm'])
+        if 'read_interval_s' in sc:
+            sensor.set_read_interval(sc['read_interval_s'])
+        if 'confirm_readings' in sc:
+            sensor.set_confirm_readings(sc['confirm_readings'])
+        logger.info(f"Sonar D0 config loaded: threshold={sensor.threshold_cm}cm, "
+                    f"interval={int(sensor.read_interval_s*1000)}ms, confirm={sensor.confirm_readings}")
+    except Exception as e:
+        logger.warning(f"Failed to load sonar D0 config: {e}")
+
+def _save_sonar_config_d0(sensor):
+    """Persist current D0 sonar settings to config file."""
+    try:
+        os.makedirs('/opt/field_trainer/config', exist_ok=True)
+        with open(_SONAR_CONFIG_D0, 'w') as f:
+            json.dump({
+                'device_id': 'D0',
+                'threshold_cm': sensor.threshold_cm,
+                'read_interval_s': sensor.read_interval_s,
+                'confirm_readings': sensor.confirm_readings,
+            }, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to save sonar D0 config: {e}")
 
 # Sync audio settings from database to AudioManager on startup
 try:
@@ -2122,6 +2166,249 @@ def device0_touch():
             'success': False,
             'error': str(e)
         }), 500
+
+
+# ============================================
+# SONAR DISTANCE SENSOR API ENDPOINTS
+# ============================================
+
+@app.route('/api/sonar/start', methods=['POST'])
+def sonar_start():
+    """Start sonar monitoring — allocates GPIO pins."""
+    global _sonar_sensor
+    if _sonar_sensor_class is None:
+        return jsonify({'success': False, 'error': 'sonar_sensor module not available'}), 500
+    try:
+        if _sonar_sensor is not None and _sonar_sensor.running:
+            return jsonify({'success': True, 'message': 'Already running'})
+        _sonar_sensor = _sonar_sensor_class(device_id='local')
+        _load_sonar_config_d0(_sonar_sensor)
+        data = request.get_json(silent=True) or {}
+        settings_changed = False
+        if 'threshold_cm' in data:
+            _sonar_sensor.set_threshold(float(data['threshold_cm']))
+            settings_changed = True
+        if 'read_interval_s' in data:
+            _sonar_sensor.set_read_interval(float(data['read_interval_s']))
+            settings_changed = True
+        if 'confirm_readings' in data:
+            _sonar_sensor.set_confirm_readings(int(data['confirm_readings']))
+            settings_changed = True
+        if settings_changed:
+            _save_sonar_config_d0(_sonar_sensor)
+        _sonar_sensor.start_monitoring()
+        if not _sonar_sensor.hardware_available:
+            return jsonify({'success': False, 'error': 'Hardware not available — check GPIO wiring'}), 500
+        return jsonify({'success': True, 'status': _sonar_sensor.get_status()})
+    except Exception as e:
+        logger.error(f"sonar_start error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/sonar/stop', methods=['POST'])
+def sonar_stop():
+    """Stop sonar monitoring — releases GPIO pins."""
+    global _sonar_sensor
+    try:
+        if _sonar_sensor is not None:
+            _sonar_sensor.stop_monitoring()
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"sonar_stop error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/sonar/reading', methods=['GET'])
+def sonar_reading():
+    """Get current sonar reading and sensor state."""
+    global _sonar_sensor
+    if _sonar_sensor is None:
+        return jsonify({
+            'running': False,
+            'hardware_available': False,
+            'gpiozero_available': _sonar_sensor_class is not None,
+        })
+    return jsonify(_sonar_sensor.get_status())
+
+
+@app.route('/api/sonar/threshold', methods=['POST'])
+def sonar_threshold():
+    """Update detection threshold while monitoring is active."""
+    global _sonar_sensor
+    try:
+        data = request.get_json(silent=True) or {}
+        if _sonar_sensor is not None:
+            settings_changed = False
+            if 'threshold_cm' in data:
+                _sonar_sensor.set_threshold(float(data['threshold_cm']))
+                settings_changed = True
+            if 'confirm_readings' in data:
+                _sonar_sensor.set_confirm_readings(int(data['confirm_readings']))
+                settings_changed = True
+            if 'read_interval_s' in data:
+                _sonar_sensor.set_read_interval(float(data['read_interval_s']))
+                settings_changed = True
+            if settings_changed:
+                _save_sonar_config_d0(_sonar_sensor)
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"sonar_threshold error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================
+# REMOTE SONAR API (D1-D5 via REGISTRY)
+# ============================================
+
+DEVICE_IPS = {
+    0: '192.168.99.100',
+    1: '192.168.99.101',
+    2: '192.168.99.102',
+    3: '192.168.99.103',
+    4: '192.168.99.104',
+    5: '192.168.99.105',
+}
+
+@app.route('/api/sonar/devices/status', methods=['GET'])
+def sonar_devices_status():
+    """Get sonar status for all devices (D0 local + D1-D5 from heartbeat)."""
+    devices = []
+    for device_num in range(6):
+        node_ip = DEVICE_IPS[device_num]
+        if device_num == 0:
+            # D0 — use local sensor state
+            running = _sonar_sensor is not None and _sonar_sensor.running
+            devices.append({
+                'device_num': device_num,
+                'name': 'Start (D0)',
+                'ip': node_ip,
+                'online': True,
+                'detection_method': 'local',
+                'sonar_running': running,
+                'sonar_data': _sonar_sensor.get_status() if running else None,
+            })
+        else:
+            node = REGISTRY.nodes.get(node_ip)
+            online = False
+            if node and node.status not in ('Unknown',):
+                if node.last_msg:
+                    try:
+                        last_ts = datetime.fromisoformat(node.last_msg).timestamp()
+                        online = (time.time() - last_ts) <= 15
+                    except Exception:
+                        pass
+            devices.append({
+                'device_num': device_num,
+                'name': f'Cone {device_num} (D{device_num})',
+                'ip': node_ip,
+                'online': online,
+                'detection_method': node.detection_method if node else None,
+                'sonar_running': bool(node and node.sonar_data is not None),
+                'sonar_data': node.sonar_data if node else None,
+            })
+    return jsonify({'success': True, 'devices': devices})
+
+
+@app.route('/api/sonar/device/<int:device_num>/start', methods=['POST'])
+def sonar_device_start(device_num):
+    """Start sonar monitoring on a specific device."""
+    global _sonar_sensor
+    if device_num not in DEVICE_IPS:
+        return jsonify({'success': False, 'error': 'Invalid device number'}), 400
+    data = request.get_json(silent=True) or {}
+
+    if device_num == 0:
+        # D0 — use local sensor
+        if _sonar_sensor_class is None:
+            return jsonify({'success': False, 'error': 'sonar_sensor module not available'}), 500
+        try:
+            if _sonar_sensor is None or not _sonar_sensor.running:
+                _sonar_sensor = _sonar_sensor_class(device_id='local')
+                _load_sonar_config_d0(_sonar_sensor)
+            settings_changed = False
+            if 'threshold_cm' in data:
+                _sonar_sensor.set_threshold(float(data['threshold_cm']))
+                settings_changed = True
+            if 'read_interval_s' in data:
+                _sonar_sensor.set_read_interval(float(data['read_interval_s']))
+                settings_changed = True
+            if 'confirm_readings' in data:
+                _sonar_sensor.set_confirm_readings(int(data['confirm_readings']))
+                settings_changed = True
+            if settings_changed:
+                _save_sonar_config_d0(_sonar_sensor)
+            _sonar_sensor.start_monitoring()
+            if not _sonar_sensor.hardware_available:
+                return jsonify({'success': False, 'error': 'Hardware not available'}), 500
+            return jsonify({'success': True, 'status': _sonar_sensor.get_status()})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+    else:
+        # D1-D5 — send sonar_test command via REGISTRY
+        node_ip = DEVICE_IPS[device_num]
+        cmd = {'cmd': 'sonar_test', 'enabled': True}
+        if 'threshold_cm' in data:
+            cmd['threshold_cm'] = float(data['threshold_cm'])
+        if 'read_interval_s' in data:
+            cmd['read_interval_s'] = float(data['read_interval_s'])
+        if 'confirm_readings' in data:
+            cmd['confirm_readings'] = int(data['confirm_readings'])
+        ok = REGISTRY.send_to_node(node_ip, cmd)
+        if not ok:
+            return jsonify({'success': False, 'error': f'Device {device_num} not connected'}), 503
+        return jsonify({'success': True, 'message': f'Sonar test started on D{device_num}'})
+
+
+@app.route('/api/sonar/device/<int:device_num>/stop', methods=['POST'])
+def sonar_device_stop(device_num):
+    """Stop sonar monitoring on a specific device."""
+    global _sonar_sensor
+    if device_num not in DEVICE_IPS:
+        return jsonify({'success': False, 'error': 'Invalid device number'}), 400
+
+    if device_num == 0:
+        try:
+            if _sonar_sensor:
+                _sonar_sensor.stop_monitoring()
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+    else:
+        node_ip = DEVICE_IPS[device_num]
+        ok = REGISTRY.send_to_node(node_ip, {'cmd': 'sonar_test', 'enabled': False})
+        if not ok:
+            return jsonify({'success': False, 'error': f'Device {device_num} not connected'}), 503
+        # Clear sonar_data immediately so the table reflects "Idle" right away
+        # (don't wait for the next heartbeat from the cone)
+        with REGISTRY.nodes_lock:
+            node = REGISTRY.nodes.get(node_ip)
+            if node:
+                node.sonar_data = None
+        return jsonify({'success': True, 'message': f'Sonar test stopped on D{device_num}'})
+
+
+@app.route('/api/sonar/device/<int:device_num>/reading', methods=['GET'])
+def sonar_device_reading(device_num):
+    """Get latest sonar reading from a specific device."""
+    global _sonar_sensor
+    if device_num not in DEVICE_IPS:
+        return jsonify({'success': False, 'error': 'Invalid device number'}), 400
+
+    if device_num == 0:
+        if _sonar_sensor is None:
+            return jsonify({'running': False, 'hardware_available': False})
+        return jsonify(_sonar_sensor.get_status())
+    else:
+        node_ip = DEVICE_IPS[device_num]
+        node = REGISTRY.nodes.get(node_ip)
+        if node is None:
+            return jsonify({'running': False, 'online': False})
+        return jsonify({
+            'running': node.sonar_data is not None,
+            'online': node.status not in ('Offline', 'Unknown'),
+            'detection_method': node.detection_method,
+            **(node.sonar_data or {}),
+        })
 
 
 if __name__ == '__main__':
