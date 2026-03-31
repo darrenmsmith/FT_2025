@@ -99,6 +99,14 @@
                 <i class="fas fa-stop"></i> STOP
             </button>
         </div>
+        <div id="irActiveIndicator" style="display:none;">
+            <div class="alert alert-warning text-center py-2 mb-1">
+                <i class="bi bi-lightning-charge-fill"></i> <strong>IR Auto-Stop Active</strong>
+            </div>
+            <button class="btn btn-outline-danger btn-sm w-100" onclick="doStop()">
+                <i class="fas fa-stop"></i> Manual Override
+            </button>
+        </div>
         <div id="lastResultBanner" class="alert alert-info mt-2 text-center" style="display:none;"></div>
     </div>
 </div>
@@ -133,6 +141,23 @@
                 </div>
             </div>
             {% endfor %}
+            {% if course.timing_mode and course.timing_mode != 'manual' %}
+            {% set cone_labels = {
+                '192.168.99.101': 'Cone 1 (D1)',
+                '192.168.99.102': 'Cone 2 (D2)',
+                '192.168.99.103': 'Cone 3 (D3)',
+                '192.168.99.104': 'Cone 4 (D4)',
+                '192.168.99.105': 'Cone 5 (D5)',
+            } %}
+            <div class="text-center" style="flex:1; min-width:100px;">
+                <div class="mb-2">
+                    <i class="bi bi-lightning-charge-fill text-warning fs-5"></i>
+                    <strong>Finish Cone</strong>
+                </div>
+                <div class="small text-muted">{{ cone_labels.get(course.finish_cone_id, course.finish_cone_id or '—') }}</div>
+                <div class="small text-warning fw-semibold">IR Auto-Stop</div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -182,6 +207,9 @@
 <script>
 const sessionId = '{{ session.session_id }}';
 const countdownInterval = {{ course.countdown_interval or 5 }};
+const timingMode = '{{ course.timing_mode or "manual" }}';
+const autoAdvance = {{ 'true' if course.auto_advance else 'false' }};
+const autoAdvanceDelay = {{ course.auto_advance_delay or 5 }};
 let sessionStatus = '{{ session.status }}';
 
 // ── Timer state ──────────────────────────────────────────────────────────
@@ -216,10 +244,16 @@ function onBeepFired() {
     clockTick = setInterval(tickClock, 50);
     document.getElementById('clockDisplay').classList.add('running');
     document.getElementById('clockDisplay').classList.remove('countdown');
-    document.getElementById('stopBtnWrap').style.display = 'block';
     document.getElementById('lastResultBanner').style.display = 'none';
     const pauseBtn = document.getElementById('pauseBtn');
     if (pauseBtn) pauseBtn.style.display = 'none';
+    if (timingMode === 'manual') {
+        document.getElementById('stopBtnWrap').style.display = 'block';
+    } else {
+        // IR mode — show indicator; keep a small manual override available
+        document.getElementById('stopBtnWrap').style.display = 'none';
+        document.getElementById('irActiveIndicator').style.display = 'block';
+    }
 }
 
 // ── SSE for start signal (primary path) ──────────────────────────────────
@@ -231,6 +265,9 @@ function connectSSE() {
     es.addEventListener('beep_fired', (e) => {
         try { lastBeepTs = JSON.parse(e.data).beep_ts; } catch(_) {}
         onBeepFired();
+    });
+    es.addEventListener('ir_stopped', (e) => {
+        try { onIrStop(JSON.parse(e.data)); } catch(_) {}
     });
 }
 
@@ -285,6 +322,7 @@ async function doGo() {
     document.getElementById('coursePanel').style.display = 'none';
     document.getElementById('lastResultBanner').style.display = 'none';
     document.getElementById('stopBtnWrap').style.display = 'none';
+    document.getElementById('irActiveIndicator').style.display = 'none';
     document.getElementById('clockDisplay').classList.remove('running');
     document.getElementById('clockDisplay').classList.add('countdown');
     document.getElementById('clockDisplay').textContent = countdownInterval.toString();
@@ -334,12 +372,66 @@ async function doStop() {
         if (es) { es.close(); es = null; }
         showResults(data.results || []);
     } else {
-        // Show next athlete with GO button — coach controls when next sprint starts
-        const nextName = data.next_run?.athlete_name || 'Next athlete';
-        startTime = null;
-        document.getElementById('clockDisplay').classList.remove('running', 'countdown');
-        document.getElementById('clockDisplay').textContent = '—';
-        document.getElementById('timingAthleteLabel').textContent = `Next: ${nextName}`;
+        showNextAthlete(data.next_run?.athlete_name || 'Next athlete');
+    }
+}
+
+// ── IR auto-stop — server-computed time, beam was broken ─────────────────
+function onIrStop(d) {
+    if (!timerRunning) return;   // already stopped (e.g. coach tapped STOP first)
+    const elapsed = d.time_seconds;
+    timerRunning = false;
+    if (clockTick) { clearInterval(clockTick); clockTick = null; }
+    document.getElementById('clockDisplay').textContent = fmt(elapsed);
+    document.getElementById('clockDisplay').classList.remove('running');
+    document.getElementById('stopBtnWrap').style.display = 'none';
+    document.getElementById('irActiveIndicator').style.display = 'none';
+
+    const pb = d.is_new_pb ? ' <i class="fas fa-star text-warning" title="New PB!"></i>' : '';
+    document.getElementById('lastResultBanner').innerHTML =
+        `<i class="fas fa-bolt text-warning"></i> IR Auto-Stop: <strong>${elapsed.toFixed(3)}s</strong>${pb}`;
+    document.getElementById('lastResultBanner').style.display = 'block';
+
+    if (d.session_complete) {
+        if (es) { es.close(); es = null; }
+        // Results will populate on next status poll
+        setTimeout(async () => {
+            const r = await fetch(`/api/sprint/results/${sessionId}`);
+            const rd = await r.json();
+            showResults(rd.results || []);
+        }, 300);
+    } else {
+        showNextAthlete(d.next_run?.athlete_name || 'Next athlete');
+    }
+}
+
+// ── Show next athlete — manual GO button or auto-advance countdown ──────────
+let autoAdvanceTimer = null;
+
+function showNextAthlete(nextName) {
+    startTime = null;
+    document.getElementById('clockDisplay').classList.remove('running', 'countdown');
+    document.getElementById('clockDisplay').textContent = '—';
+    document.getElementById('timingAthleteLabel').textContent = `Next: ${nextName}`;
+
+    if (autoAdvance) {
+        let remaining = autoAdvanceDelay;
+        document.getElementById('sessionControls').innerHTML = `
+            <button class="btn btn-warning btn-lg me-2" onclick="cancelAutoAdvance()">
+                <i class="fas fa-hand-paper"></i> Cancel Auto
+            </button>
+            <span id="autoAdvanceCountdown" class="badge bg-success fs-5 ms-2">${remaining}s</span>`;
+        autoAdvanceTimer = setInterval(() => {
+            remaining--;
+            const badge = document.getElementById('autoAdvanceCountdown');
+            if (badge) badge.textContent = `${remaining}s`;
+            if (remaining <= 0) {
+                clearInterval(autoAdvanceTimer);
+                autoAdvanceTimer = null;
+                goNextAthlete();
+            }
+        }, 1000);
+    } else {
         document.getElementById('sessionControls').innerHTML = `
             <button class="btn btn-success big-button me-2" id="goBtn" onclick="goNextAthlete()">
                 <i class="fas fa-play"></i> GO
@@ -353,12 +445,28 @@ async function doStop() {
     }
 }
 
+function cancelAutoAdvance() {
+    if (autoAdvanceTimer) { clearInterval(autoAdvanceTimer); autoAdvanceTimer = null; }
+    const nextName = document.getElementById('timingAthleteLabel').textContent.replace('Next: ', '');
+    document.getElementById('sessionControls').innerHTML = `
+        <button class="btn btn-success big-button me-2" id="goBtn" onclick="goNextAthlete()">
+            <i class="fas fa-play"></i> GO
+        </button>
+        <button class="btn btn-warning me-2" id="pauseBtn" onclick="doPause()">
+            <i class="fas fa-pause"></i> Pause
+        </button>
+        <button class="btn btn-danger" onclick="confirmEnd()">
+            <i class="fas fa-stop"></i> End Session
+        </button>`;
+}
+
 // ── GO for next athlete (session already active, SSE connected) ────────────
 async function goNextAthlete() {
     const btn = document.getElementById('goBtn');
     if (btn) btn.disabled = true;
     document.getElementById('lastResultBanner').style.display = 'none';
     document.getElementById('stopBtnWrap').style.display = 'none';
+    document.getElementById('irActiveIndicator').style.display = 'none';
     document.getElementById('clockDisplay').classList.remove('running');
     document.getElementById('clockDisplay').classList.add('countdown');
     document.getElementById('clockDisplay').textContent = countdownInterval.toString();

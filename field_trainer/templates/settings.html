@@ -660,6 +660,107 @@
     </div>
 </div>
 
+<!-- IR Sensor Card -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-lightning-charge-fill text-warning"></i> IR Sensor — E18-D80NK</h5>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            GPIO 17 (Pin 11). The sensor has a potentiometer (blue trimmer) to set detection range.
+            Turning it <strong>clockwise</strong> increases range. Start a test on any device to calibrate.
+        </p>
+
+        <!-- Device Status Table -->
+        <div class="mb-3">
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered table-hover" id="ir-devices-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Device</th>
+                            <th>Status</th>
+                            <th>IR</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="4" class="text-center text-muted">Loading devices...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="refreshIrDevices()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+
+        <!-- Live Panel (shown when a device test is active) -->
+        <div id="ir-selected-panel" style="display:none;">
+            <hr class="my-3">
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <h6 class="mb-0">
+                    <i class="bi bi-lightning-charge-fill text-warning"></i>
+                    <span id="ir-selected-name">Device</span> — Live Feed
+                </h6>
+                <span id="ir-status-badge" class="badge bg-secondary">Inactive</span>
+                <button id="ir-stop-btn" class="btn btn-danger btn-sm ms-auto" onclick="stopIrTest()">
+                    <i class="bi bi-stop-circle"></i> Stop Test
+                </button>
+            </div>
+            <div class="alert alert-info py-2 mb-2 small">
+                <i class="bi bi-info-circle"></i>
+                Walk through the beam — status should switch to <strong>Beam Broken</strong>.
+                If not detecting: turn the blue potentiometer <strong>clockwise</strong> to increase range.
+            </div>
+            <div class="mb-3">
+                <button class="btn btn-outline-secondary btn-sm" onclick="startIrRangeFinder()"
+                        title="Place an object at your desired detection distance, then click this">
+                    <i class="bi bi-rulers"></i> Set Detection Range
+                </button>
+            </div>
+        </div>
+
+        <!-- IR Log (always visible) -->
+        <div class="mb-2">
+            <label class="form-label fw-bold">IR Log</label>
+            <div class="card bg-dark text-light" style="height: 200px; overflow-y: auto;" id="ir-system-log">
+                <div class="card-body p-2 font-monospace small">
+                    <div id="ir-log-content">
+                        <div class="text-muted">Start a test above to see live beam events...</div>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm mt-1" onclick="clearIrLog()">
+                <i class="bi bi-x-circle"></i> Clear Log
+            </button>
+        </div>
+
+        <!-- Range Finder panel -->
+        <div id="ir-range-panel" class="mt-3" style="display:none;">
+            <div class="card border-warning">
+                <div class="card-body py-2">
+                    <h6 class="card-title"><i class="bi bi-rulers text-warning"></i> Detection Range Finder</h6>
+                    <p class="small text-muted mb-2">
+                        1. Place a target (hand, cone, retroreflector tape) at the exact distance you want the sensor to detect.<br>
+                        2. Slowly turn the potentiometer <strong>clockwise</strong> until the badge turns <strong class="text-danger">Beam Broken</strong>.<br>
+                        3. Back off slightly counter-clockwise so background objects don't trigger it.<br>
+                        4. Click <strong>Confirm Range</strong> to test 10 detections at that distance.
+                    </p>
+                    <div class="d-flex align-items-center gap-3 mb-2">
+                        <span class="fw-semibold small">Live:</span>
+                        <span id="ir-range-badge" class="badge bg-secondary">Waiting...</span>
+                        <span class="text-muted small" id="ir-range-count"></span>
+                    </div>
+                    <button class="btn btn-warning btn-sm me-2" onclick="confirmIrRange()">
+                        <i class="bi bi-check-circle"></i> Confirm Range
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="closeIrRangeFinder()">Close</button>
+                    <div id="ir-range-result" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Status Messages -->
 <div id="status-message" class="alert" style="display: none;"></div>
 

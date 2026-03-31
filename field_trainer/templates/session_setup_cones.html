@@ -181,16 +181,50 @@
                         <label class="form-label">Timing Mode</label>
                         <div class="mt-1">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingManual" value="manual" checked>
+                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingManual" value="manual" checked onchange="onTimingModeChange()">
                                 <label class="form-check-label" for="sprintTimingManual">Manual (Coach STOP)</label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingIR" value="ir" disabled>
-                                <label class="form-check-label text-muted" for="sprintTimingIR">
-                                    IR Detect <span class="badge bg-secondary">Coming Soon</span>
+                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingIR" value="ir_single" onchange="onTimingModeChange()">
+                                <label class="form-check-label" for="sprintTimingIR">
+                                    <i class="bi bi-lightning-charge-fill text-warning"></i> IR Auto-Stop
                                 </label>
                             </div>
                         </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Athlete Advancement</label>
+                        <div class="mt-1">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="sprintAdvance" id="sprintAdvanceManual" value="manual"
+                                    {% if not course.auto_advance %}checked{% endif %}
+                                    onchange="onAdvanceModeChange()">
+                                <label class="form-check-label" for="sprintAdvanceManual">Manual (Coach GO)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="sprintAdvance" id="sprintAdvanceAuto" value="auto"
+                                    {% if course.auto_advance %}checked{% endif %}
+                                    onchange="onAdvanceModeChange()">
+                                <label class="form-check-label" for="sprintAdvanceAuto">
+                                    <i class="bi bi-skip-forward-fill text-success"></i> Auto Advance
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3" id="autoAdvanceDelayRow" style="display:{% if course.auto_advance %}block{% else %}none{% endif %};">
+                        <label class="form-label">Delay Between Athletes</label>
+                        <select id="autoAdvanceDelay" class="form-select">
+                            <option value="3" {% if course.auto_advance_delay == 3 %}selected{% endif %}>3 seconds</option>
+                            <option value="5" {% if not course.auto_advance_delay or course.auto_advance_delay == 5 %}selected{% endif %}>5 seconds</option>
+                            <option value="10" {% if course.auto_advance_delay == 10 %}selected{% endif %}>10 seconds</option>
+                        </select>
+                    </div>
+                    <div class="col-12 mb-3" id="finishConeRow" style="display:none;">
+                        <label class="form-label fw-semibold">Finish Cone <span class="text-danger">*</span></label>
+                        <select id="finishConeId" class="form-select">
+                            <option value="">— select finish cone —</option>
+                        </select>
+                        <div class="form-text">The cone at the finish line with the IR sensor mounted on it.</div>
                     </div>
                 </div>
             </div>
@@ -270,6 +304,42 @@ function onSprintDistanceChange() {
     if (sel && custom) custom.style.display = sel.value === 'custom' ? 'inline-block' : 'none';
 }
 
+function onAdvanceModeChange() {
+    const mode = document.querySelector('input[name="sprintAdvance"]:checked')?.value;
+    const row = document.getElementById('autoAdvanceDelayRow');
+    if (row) row.style.display = (mode === 'auto') ? 'block' : 'none';
+}
+
+function onTimingModeChange() {
+    const mode = document.querySelector('input[name="sprintTiming"]:checked')?.value;
+    const row = document.getElementById('finishConeRow');
+    if (!row) return;
+    if (mode && mode !== 'manual') {
+        row.style.display = 'block';
+        loadFinishCones();
+    } else {
+        row.style.display = 'none';
+    }
+}
+
+async function loadFinishCones() {
+    const sel = document.getElementById('finishConeId');
+    if (!sel || sel.options.length > 1) return;  // already loaded
+    try {
+        const r = await fetch('/api/ir/devices/status');
+        const d = await r.json();
+        sel.innerHTML = '<option value="">— select finish cone —</option>';
+        for (const dev of d.devices || []) {
+            if (dev.device_num === 0) continue;  // D0 is start, not finish
+            const opt = document.createElement('option');
+            opt.value = dev.ip;
+            opt.textContent = `${dev.name}${dev.online ? '' : ' (offline)'}`;
+            opt.disabled = !dev.online;
+            sel.appendChild(opt);
+        }
+    } catch(e) {}
+}
+
 // Prepare course (amber LEDs)
 async function prepareCourse() {
     try {
@@ -295,16 +365,20 @@ async function prepareCourse() {
 
 function updateConeStatus(devices, status) {
     const container = document.getElementById('coneStatusContainer');
-    const isReady = (status === 'amber');
     const isDeployed = (status === 'green');
-    
+
     const html = devices.map(device => {
-        const deviceNum = device.device_id.split('.').pop();
-        const label = deviceNum === '100' ? 'Start (Device 0)' : `Cone ${parseInt(deviceNum) - 100}`;
-        const statusClass = isDeployed ? 'deployed' : 'ready';
-        const indicatorClass = isDeployed ? 'status-green' : 'status-amber';
-        const statusText = isDeployed ? 'GREEN - Deployed' : 'AMBER - Ready';
-        
+        const lastOctet = device.device_id.split('.').pop();
+        const label = lastOctet === '100' ? 'Start (D0)' : `Cone ${parseInt(lastOctet) - 100} (D${parseInt(lastOctet) - 100})`;
+        const online = device.online !== false;
+        let statusClass, indicatorClass, statusText;
+        if (!online) {
+            statusClass = 'offline'; indicatorClass = 'status-offline'; statusText = 'Offline';
+        } else if (isDeployed) {
+            statusClass = 'deployed'; indicatorClass = 'status-green'; statusText = 'GREEN — Deployed';
+        } else {
+            statusClass = 'ready'; indicatorClass = 'status-amber'; statusText = 'AMBER — Ready';
+        }
         return `
             <div class="cone-status-box ${statusClass}">
                 <div class="status-indicator ${indicatorClass}"></div>
@@ -312,10 +386,9 @@ function updateConeStatus(devices, status) {
                     <strong>${label}</strong>
                     <span class="text-muted ms-3">${statusText}</span>
                 </div>
-            </div>
-        `;
+            </div>`;
     }).join('');
-    
+
     container.innerHTML = html;
 }
 
@@ -375,10 +448,23 @@ document.getElementById('deployBtn').addEventListener('click', async function() 
         const dist = sprintDistSel.value === 'custom'
             ? parseInt(document.getElementById('sprintDistanceCustom').value)
             : parseInt(sprintDistSel.value);
+        const finishConeId = document.getElementById('finishConeId')?.value || null;
+        const timingMode = sprintTiming.value;
+        if (timingMode !== 'manual' && !finishConeId) {
+            alert('Please select a finish cone for IR Auto-Stop.');
+            this.disabled = false;
+            this.innerHTML = '<i class="fas fa-check-circle"></i> Deploy Course';
+            return;
+        }
+        const advanceMode = document.querySelector('input[name="sprintAdvance"]:checked')?.value;
+        const autoAdvanceDelay = document.getElementById('autoAdvanceDelay');
         requestBody.sprint_config = {
             distance: dist,
             countdown_interval: parseInt(sprintCountdown.value),
-            timing_mode: sprintTiming.value
+            timing_mode: timingMode,
+            finish_cone_id: timingMode !== 'manual' ? finishConeId : null,
+            auto_advance: advanceMode === 'auto',
+            auto_advance_delay: autoAdvanceDelay ? parseInt(autoAdvanceDelay.value) : 5,
         };
     }
 

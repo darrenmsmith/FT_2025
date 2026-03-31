@@ -94,6 +94,8 @@ class Registry:
         
         # Touch event handler (set by coach_interface)
         self._touch_handler = None
+        # IR trip handler (set by coach_interface)
+        self._ir_handler = None
 
     def _load_courses_from_db(self) -> Dict[str, Any]:
         """Load courses from database in JSON-compatible format for deployment"""
@@ -580,6 +582,22 @@ class Registry:
             self.log("No touch handler registered - touch event ignored", level="warning")
     
         print(f"{'='*80}\n")
+
+    def set_ir_handler(self, handler_func) -> None:
+        """Register the IR trip handler from coach_interface."""
+        self._ir_handler = handler_func
+        self.log("IR trip handler registered")
+
+    def handle_ir_event(self, device_id: str, trip_time: float = None) -> None:
+        """Called when a field cone reports an IR beam break."""
+        self.log(f"IR trip: {device_id}")
+        if self._ir_handler:
+            try:
+                self._ir_handler(device_id, trip_time=trip_time)
+            except Exception as e:
+                self.log(f"IR handler error: {e}", level="error")
+        else:
+            self.log("No IR handler registered — trip ignored", level="warning")
 
     def load_active_session(self) -> None:
         """Check for active session on startup (crash recovery)"""

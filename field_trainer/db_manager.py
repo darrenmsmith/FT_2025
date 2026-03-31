@@ -256,6 +256,7 @@ class DatabaseManager:
                 "distance_unit TEXT",
                 "countdown_interval INTEGER DEFAULT 5",
                 "timing_mode TEXT DEFAULT 'manual'",
+                "finish_cone_id TEXT",          # IP of finish-line cone (NULL = manual stop)
             ]:
                 try:
                     conn.execute(f"ALTER TABLE courses ADD COLUMN {col_def}")

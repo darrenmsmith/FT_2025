@@ -324,11 +324,39 @@ def connect_to_device0(node_id):
     current_detection_method = ['touch']  # 'touch' | 'proximity' | 'none'
     test_mode_active = [False]  # True while calibration test mode is running
     sonar_test_active = [False]  # True while sonar test mode is running (from settings page)
+    ir_armed = [False]           # True while IR sensor is armed for sprint finish detection
+    ir_test_active = [False]     # True while IR test mode active (settings page)
+    ir_trip_pending = [False]    # Set by IR callback to send immediate trip message
+    ir_trip_event = __import__('threading').Event()  # Interrupts heartbeat sleep on trip
     heartbeat_interval = [5]  # Default 5 seconds, can be changed by deployment
+
+    # Initialise IR sensor (GPIO 17)
+    ir_sensor = None
+    try:
+        from ft_ir import IrSensor as _IrSensorClass
+        ir_sensor = _IrSensorClass()
+        print(f"IR sensor initialized on GPIO {ir_sensor.gpio_pin}")
+    except Exception as _e:
+        print(f"IR sensor not available: {_e}")
 
     # Set touch callback with audio manager and current action
     touch_sensor.set_touch_callback(lambda: touch_detected_callback(audio_manager, current_action[0]))
     print("Touch sensor initialized (detection disabled until course deployed)")
+
+    ir_trip_time = [None]  # Timestamp captured at the exact moment of beam break
+
+    def _on_ir_trip(trip_time):
+        """Fires from gpiozero callback thread when beam breaks while armed."""
+        if ir_armed[0]:
+            ir_armed[0] = False  # Disarm immediately — prevent any double-count
+            ir_trip_time[0] = trip_time
+            audio_manager.play("default_beep.mp3", blocking=False)
+            ir_trip_pending[0] = True
+            ir_trip_event.set()
+            print("🚦 IR trip — sending to gateway")
+
+    if ir_sensor:
+        ir_sensor.set_detection_callback(_on_ir_trip)
 
     while True:
         try:
@@ -371,6 +399,14 @@ def connect_to_device0(node_id):
                 else:
                     heartbeat["touch_detected"] = False
                     heartbeat["touch_timestamp"] = None
+
+                # Include IR live data when test mode active (for settings page)
+                if ir_sensor and ir_test_active[0]:
+                    val = ir_sensor.get_current_value()
+                    heartbeat["ir"] = {
+                        "value": val,
+                        "status": "beam_broken" if val == 1 else "clear",
+                    }
 
                 # Include sonar live data when active (for remote monitoring / test UI)
                 heartbeat["detection_method"] = current_detection_method[0]
@@ -512,6 +548,51 @@ def connect_to_device0(node_id):
                                         test_mode_active[0] = False
                                         print("🧪 Test mode stopped")
 
+                            # Process IR test mode command (settings page)
+                            if "cmd" in data and data["cmd"] == "ir_test":
+                                enabled = data.get("enabled", False)
+                                if enabled:
+                                    ir_test_active[0] = True
+                                    print("🚦 IR test mode started")
+                                else:
+                                    ir_test_active[0] = False
+                                    print("🚦 IR test mode stopped")
+
+                            # Process IR arm/disarm command (sprint finish line)
+                            if "cmd" in data and data["cmd"] == "ir_arm":
+                                if ir_sensor and ir_sensor.available:
+                                    ir_armed[0] = True
+                                    ir_sensor.arm()
+                                    print("🚦 IR sensor armed (sprint finish)")
+                                else:
+                                    print("🚦 IR arm command received but sensor unavailable")
+
+                            if "cmd" in data and data["cmd"] == "ir_disarm":
+                                ir_armed[0] = False
+                                if ir_sensor:
+                                    ir_sensor.disarm()
+                                ir_trip_pending[0] = False
+                                print("🚦 IR sensor disarmed")
+
+                            # Clock sync from D0
+                            if "cmd" in data and data["cmd"] == "clock_sync":
+                                server_time = data.get("server_time")
+                                if server_time:
+                                    local_time = time.time()
+                                    drift_s = abs(server_time - local_time)
+                                    if drift_s > 1.0:
+                                        try:
+                                            import subprocess
+                                            subprocess.run(
+                                                ["sudo", "date", "-s", f"@{server_time:.3f}"],
+                                                check=True, capture_output=True
+                                            )
+                                            print(f"🕐 Clock synced: drift was {drift_s:.1f}s")
+                                        except Exception as _e:
+                                            print(f"🕐 Clock sync failed: {_e}")
+                                    else:
+                                        print(f"🕐 Clock OK: drift {drift_s*1000:.1f}ms")
+
                             # Process sonar test command (from settings page)
                             if "cmd" in data and data["cmd"] == "sonar_test":
                                 enabled = data.get("enabled", False)
@@ -613,7 +694,7 @@ def connect_to_device0(node_id):
                                         touch_sensor.start_detection()
                                         touch_detection_active[0] = True
                                         print("Touch detection started (course active)")
-                            elif not test_mode_active[0] and not sonar_test_active[0]:
+                            elif not test_mode_active[0] and not sonar_test_active[0] and not ir_armed[0] and not ir_test_active[0]:
                                 # Course inactive — stop all detection sensors
                                 if touch_detection_active[0]:
                                     touch_sensor.stop_detection()
@@ -627,7 +708,21 @@ def connect_to_device0(node_id):
                         except json.JSONDecodeError as e:
                             print(f"JSON decode error for message '{message}': {e}")
 
-                time.sleep(heartbeat_interval[0])
+                # Sleep until next heartbeat, but wake immediately if IR trips.
+                # Use short interval during IR test mode so UI sees live beam state.
+                wait_s = 0.2 if ir_test_active[0] else heartbeat_interval[0]
+                ir_trip_event.wait(timeout=wait_s)
+                ir_trip_event.clear()
+
+                # If IR tripped during sleep, send immediate notification to gateway
+                if ir_trip_pending[0]:
+                    ir_trip_pending[0] = False
+                    try:
+                        trip_msg = json.dumps({"node_id": node_id, "ir_trip": True, "trip_time": ir_trip_time[0]}) + "\n"
+                        sock.sendall(trip_msg.encode("utf-8"))
+                        sock.recv(1024)  # consume gateway ACK
+                    except Exception as _e:
+                        print(f"🚦 Failed to send IR trip to gateway: {_e}")
 
         except ConnectionRefusedError:
             print("Connection refused - Device 0 server not available")

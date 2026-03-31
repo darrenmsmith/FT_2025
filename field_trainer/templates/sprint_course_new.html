@@ -14,6 +14,27 @@
                        placeholder="e.g. Sprint, Sprint — Men, Sprint 40 yds" maxlength="80">
             </div>
 
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Finish Line Detection</label>
+                <select id="timingMode" class="form-select" onchange="onTimingModeChange()">
+                    <option value="manual">Manual — coach taps STOP</option>
+                    <option value="ir_single">IR Auto-Stop — single sensor</option>
+                    <option value="ir_retroreflector">IR Auto-Stop — sensor + retroreflector tape</option>
+                    <option value="ir_dual">IR Auto-Stop — dual sensors, same side</option>
+                </select>
+            </div>
+
+            <div id="finishConeRow" class="mb-4" style="display:none;">
+                <label class="form-label fw-semibold">Finish Cone</label>
+                <select id="finishConeId" class="form-select">
+                    <option value="">— select finish cone —</option>
+                    {% for d in field_devices %}
+                    <option value="{{ d.ip }}">{{ d.label }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">The cone at the finish line that has the IR sensor mounted on it.</div>
+            </div>
+
             <div id="errorMsg" class="alert alert-danger" style="display:none;"></div>
 
             <div class="d-flex gap-2">
@@ -29,17 +50,28 @@
 
 {% block extra_js %}
 <script>
+function onTimingModeChange() {
+    const mode = document.getElementById('timingMode').value;
+    document.getElementById('finishConeRow').style.display = mode === 'manual' ? 'none' : 'block';
+}
+
 async function createCourse() {
-    const name = document.getElementById('courseName').value.trim();
+    const name        = document.getElementById('courseName').value.trim();
+    const timingMode  = document.getElementById('timingMode').value;
+    const finishConeId = document.getElementById('finishConeId').value;
     const err = document.getElementById('errorMsg');
     err.style.display = 'none';
 
     if (!name) { err.textContent = 'Course name is required.'; err.style.display = 'block'; return; }
+    if (timingMode !== 'manual' && !finishConeId) {
+        err.textContent = 'Please select the finish cone for IR auto-stop.';
+        err.style.display = 'block'; return;
+    }
 
     const resp = await fetch('/sprint/course/create', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, timing_mode: timingMode, finish_cone_id: finishConeId || null })
     });
     const data = await resp.json();
     if (data.success) {

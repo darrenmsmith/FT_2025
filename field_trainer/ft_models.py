@@ -47,5 +47,8 @@ class NodeInfo:
     # Latest sonar reading reported in heartbeat (None when sonar not active)
     sonar_data: Optional[Dict[str, Any]] = None
 
+    # Latest IR reading reported in heartbeat (None when IR test not active)
+    ir_data: Optional[Dict[str, Any]] = None
+
     # Transient socket writer; not included in snapshots
     _writer: Any = field(default=None, repr=False, compare=False)

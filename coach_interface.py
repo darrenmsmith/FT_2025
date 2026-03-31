@@ -80,6 +80,66 @@ except ImportError:
     _sonar_sensor_class = None
     logger.warning("sonar_sensor module not found — sonar API will be unavailable")
 
+# IR sensor — always instantiated; GPIO claimed on init (simple digital input)
+try:
+    from ft_ir import IrSensor as _IrSensorClass
+    _ir_sensor = _IrSensorClass()
+except Exception as _e:
+    _ir_sensor = None
+    logger.warning(f"IR sensor not available: {_e}")
+
+def _ir_auto_stop_callback(trip_time=None):
+    """Called by D0 local IR sensor when beam is broken during an armed sprint run."""
+    from services.sprint_service import get_sprint_service
+    svc = get_sprint_service()
+    session_id = svc.get_active_session_id()
+    if session_id:
+        svc.auto_stop(session_id, from_device_id='192.168.99.100', trip_time=trip_time)
+
+def _ir_trip_from_field(device_id: str, trip_time: float = None):
+    """Called by REGISTRY when a field cone (D1-D5) sends an ir_trip message."""
+    from services.sprint_service import get_sprint_service
+    svc = get_sprint_service()
+    session_id = svc.get_active_session_id()
+    if session_id:
+        svc.auto_stop(session_id, from_device_id=device_id, trip_time=trip_time)
+        # Beep D0 so the coach hears confirmation (D1 beeps locally on detection)
+        if REGISTRY._audio:
+            REGISTRY._audio.play("default_beep.mp3", blocking=False)
+
+def _ir_arm():
+    """Arm the finish-cone IR — called by sprint_service after beep fires."""
+    from services.sprint_service import get_sprint_service
+    svc = get_sprint_service()
+    with svc.state_lock:
+        finish_cone_id = svc.session_state.get('finish_cone_id')
+        timing_mode    = svc.session_state.get('timing_mode', 'manual')
+    if not finish_cone_id or timing_mode == 'manual':
+        return
+    if finish_cone_id == '192.168.99.100':
+        # D0 is the finish cone — arm local sensor
+        if _ir_sensor:
+            _ir_sensor.set_detection_callback(_ir_auto_stop_callback)
+            _ir_sensor.arm()
+    else:
+        # Field cone — send arm command
+        REGISTRY.send_to_node(finish_cone_id, {'cmd': 'ir_arm'})
+
+def _ir_disarm():
+    """Disarm the finish-cone IR — called by sprint_service when run ends."""
+    from services.sprint_service import get_sprint_service
+    svc = get_sprint_service()
+    with svc.state_lock:
+        finish_cone_id = svc.session_state.get('finish_cone_id')
+        timing_mode    = svc.session_state.get('timing_mode', 'manual')
+    if not finish_cone_id or timing_mode == 'manual':
+        return
+    if finish_cone_id == '192.168.99.100':
+        if _ir_sensor:
+            _ir_sensor.disarm()
+    else:
+        REGISTRY.send_to_node(finish_cone_id, {'cmd': 'ir_disarm'})
+
 _sonar_sensor = None  # Active instance (None when not monitoring)
 _SONAR_CONFIG_D0 = '/opt/field_trainer/config/sonar_config_device100.json'
 
@@ -726,6 +786,21 @@ def register_touch_handler():
         return False
 
 
+def register_ir_handler():
+    """Register IR trip handler and wire sprint_service arm/disarm callbacks."""
+    try:
+        REGISTRY.set_ir_handler(_ir_trip_from_field)
+        from services.sprint_service import get_sprint_service
+        get_sprint_service().set_ir_callbacks(_ir_arm, _ir_disarm)
+        print("✅ IR handler registered with REGISTRY")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to register IR handler: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("Field Trainer Coach Interface")
@@ -748,6 +823,9 @@ if __name__ == '__main__':
         print("⚠️  WARNING: Touch handler registration failed!")
         print("   Relay system will not work properly")
         print("=" * 60)
+
+    # Register IR handler and wire sprint_service callbacks
+    register_ir_handler()
     print()  # blank line before Flask output
 #    app.run(host='0.0.0.0', port=5001, debug=True)
     # app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
@@ -2408,6 +2486,172 @@ def sonar_device_reading(device_num):
             'online': node.status not in ('Offline', 'Unknown'),
             'detection_method': node.detection_method,
             **(node.sonar_data or {}),
+        })
+
+
+# ===========================================================================
+# Timing API
+# ===========================================================================
+
+@app.route('/api/timing/trip', methods=['POST'])
+def api_timing_trip():
+    """Generic timing trip endpoint — records a timed event for the active session.
+
+    Body (JSON):
+        device_id  : IP of the device that detected the trip (e.g. "192.168.99.101")
+        trip_time  : Unix timestamp (float) captured on the device at the exact moment
+                     of detection. Omit to use server receive time (less accurate).
+
+    Currently wired to sprint auto-stop. Future course types can register their own
+    handlers via REGISTRY or extend this endpoint.
+    """
+    body = request.get_json(silent=True) or {}
+    device_id = body.get('device_id')
+    trip_time  = body.get('trip_time')
+
+    if not device_id:
+        return jsonify({'success': False, 'error': 'device_id required'}), 400
+
+    from services.sprint_service import get_sprint_service
+    svc = get_sprint_service()
+    session_id = svc.get_active_session_id()
+    if session_id:
+        result = svc.auto_stop(session_id, from_device_id=device_id, trip_time=trip_time)
+        return jsonify(result)
+
+    return jsonify({'success': False, 'error': 'No active session'})
+
+
+# System API
+# ===========================================================================
+
+@app.route('/api/system/clock-sync', methods=['POST'])
+def api_clock_sync():
+    """Push current D0 time to all connected field devices so they correct drift."""
+    server_time = time.time()
+    results = {}
+
+    # D1-D5 field cones
+    for device_num in range(1, 6):
+        node_ip = DEVICE_IPS[device_num]
+        node = REGISTRY.nodes.get(node_ip)
+        online = False
+        if node and node.last_msg:
+            try:
+                last_ts = datetime.fromisoformat(node.last_msg).timestamp()
+                online = (server_time - last_ts) <= 15
+            except Exception:
+                pass
+        if not online:
+            results[f'D{device_num}'] = 'offline'
+            continue
+        sent = REGISTRY.send_to_node(node_ip, {"cmd": "clock_sync", "server_time": server_time})
+        results[f'D{device_num}'] = 'sent' if sent else 'failed'
+
+    REGISTRY.log(f"Clock sync pushed: {results}")
+    return jsonify({'success': True, 'server_time': server_time, 'devices': results})
+
+
+# IR Sensor API
+# ===========================================================================
+
+@app.route('/api/ir/devices/status', methods=['GET'])
+def ir_devices_status():
+    """Get IR status for all devices (D0 local + D1-D5 from heartbeat)."""
+    devices = []
+    for device_num in range(6):
+        node_ip = DEVICE_IPS[device_num]
+        if device_num == 0:
+            val = _ir_sensor.get_current_value() if _ir_sensor else None
+            devices.append({
+                'device_num': device_num,
+                'name': 'Start (D0)',
+                'ip': node_ip,
+                'online': True,
+                'available': _ir_sensor.available if _ir_sensor else False,
+                'ir_test_active': _ir_sensor._test_mode if _ir_sensor else False,
+                'ir_data': {
+                    'value': val,
+                    'status': 'beam_broken' if val == 1 else 'clear',
+                } if val is not None else None,
+            })
+        else:
+            node = REGISTRY.nodes.get(node_ip)
+            online = False
+            if node and node.status not in ('Unknown',):
+                if node.last_msg:
+                    try:
+                        last_ts = datetime.fromisoformat(node.last_msg).timestamp()
+                        online = (time.time() - last_ts) <= 15
+                    except Exception:
+                        pass
+            devices.append({
+                'device_num': device_num,
+                'name': f'Cone {device_num} (D{device_num})',
+                'ip': node_ip,
+                'online': online,
+                'available': online,
+                'ir_test_active': bool(node and node.ir_data is not None),
+                'ir_data': node.ir_data if node else None,
+            })
+    return jsonify({'success': True, 'devices': devices})
+
+
+@app.route('/api/ir/device/<int:device_num>/test', methods=['POST'])
+def ir_device_test(device_num):
+    """Start or stop IR test mode on a specific device."""
+    if device_num not in DEVICE_IPS:
+        return jsonify({'success': False, 'error': 'Invalid device number'}), 400
+    data = request.get_json(silent=True) or {}
+    active = bool(data.get('active'))
+
+    if device_num == 0:
+        if _ir_sensor is None:
+            return jsonify({'success': False, 'error': 'IR sensor not available on D0'}), 500
+        if active:
+            _ir_sensor.start_test_mode(lambda payload: None)
+        else:
+            _ir_sensor.stop_test_mode()
+        return jsonify({'success': True})
+    else:
+        node_ip = DEVICE_IPS[device_num]
+        ok = REGISTRY.send_to_node(node_ip, {'cmd': 'ir_test', 'enabled': active})
+        if not ok:
+            return jsonify({'success': False, 'error': f'Device {device_num} not connected'}), 503
+        if not active:
+            # Clear ir_data immediately so table reflects Idle right away
+            with REGISTRY.nodes_lock:
+                node = REGISTRY.nodes.get(node_ip)
+                if node:
+                    node.ir_data = None
+        return jsonify({'success': True, 'message': f'IR test {"started" if active else "stopped"} on D{device_num}'})
+
+
+@app.route('/api/ir/device/<int:device_num>/reading', methods=['GET'])
+def ir_device_reading(device_num):
+    """Get latest IR reading from a specific device."""
+    if device_num not in DEVICE_IPS:
+        return jsonify({'success': False, 'error': 'Invalid device number'}), 400
+
+    if device_num == 0:
+        if _ir_sensor is None:
+            return jsonify({'available': False})
+        val = _ir_sensor.get_current_value()
+        return jsonify({
+            'available': _ir_sensor.available,
+            'value': val,
+            'status': 'beam_broken' if val == 1 else 'clear',
+        })
+    else:
+        node_ip = DEVICE_IPS[device_num]
+        node = REGISTRY.nodes.get(node_ip)
+        if node is None:
+            return jsonify({'available': False, 'online': False})
+        return jsonify({
+            'available': node.status not in ('Offline', 'Unknown'),
+            'online': node.status not in ('Offline', 'Unknown'),
+            'ir_test_active': node.ir_data is not None,
+            **(node.ir_data or {}),
         })
 
 

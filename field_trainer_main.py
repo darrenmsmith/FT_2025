@@ -161,8 +161,9 @@ def main() -> int:
     try:
         import coach_interface as coach_app
 
-        # Call the registration function from coach_interface
+        # Call the registration functions from coach_interface
         coach_app.register_touch_handler()
+        coach_app.register_ir_handler()
 
         def run_coach_interface():
             coach_app.app.run(host='0.0.0.0', port=5001, use_reloader=False, debug=False)

@@ -104,6 +104,7 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                         touch_timestamp=msg.get("touch_timestamp"),
                         detection_method=msg.get("detection_method"),
                         sonar_data=msg.get("sonar"),
+                        ir_data=msg.get("ir"),
                     )                    
                     # Handle touch events (Phase 1)
                     print(f"📨 Heartbeat from {node_id}: touch_detected={msg.get('touch_detected')}, timestamp={msg.get('touch_timestamp')}")
@@ -147,6 +148,15 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                                            if current_time - entry['received_at'] > 10.0]
                             for dev in stale_devices:
                                 del _TOUCH_DEDUP_DICT[dev]
+
+                    # Handle IR beam-break trip (immediate non-heartbeat message)
+                    if msg.get('ir_trip'):
+                        threading.Thread(
+                            target=REGISTRY.handle_ir_event,
+                            args=(node_id,),
+                            kwargs={'trip_time': msg.get('trip_time')},
+                            daemon=True
+                        ).start()
 
                     # Optional time-drift correction trigger (if device reports skew)
                     try:

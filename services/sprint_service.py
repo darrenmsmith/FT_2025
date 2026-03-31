@@ -18,6 +18,14 @@ class SprintService:
         self.registry = registry
         self.session_state = {}
         self.state_lock = threading.Lock()
+        # Callbacks set by coach_interface to arm/disarm the finish-cone IR sensor
+        self._arm_fn   = None   # called when beep fires (athlete leaves start)
+        self._disarm_fn = None  # called when run ends
+
+    def set_ir_callbacks(self, arm_fn, disarm_fn) -> None:
+        """Register arm/disarm functions for the finish-cone IR sensor."""
+        self._arm_fn   = arm_fn
+        self._disarm_fn = disarm_fn
 
     # ------------------------------------------------------------------ #
     # Session lifecycle                                                    #
@@ -52,6 +60,8 @@ class SprintService:
             self.session_state = {
                 'session_id': session_id,
                 'start_cone_id': start_cone_id,
+                'finish_cone_id': course.get('finish_cone_id'),   # None = manual timing
+                'timing_mode': course.get('timing_mode', 'manual'),
                 'countdown_interval': course.get('countdown_interval') or 5,
                 'distance': course.get('distance'),
                 'distance_unit': course.get('distance_unit', 'yards'),
@@ -60,6 +70,7 @@ class SprintService:
                 'beep_fired_at': None,
                 'countdown_active': False,
                 'countdown_remaining': 0,
+                'ir_auto_stop_result': None,
             }
 
         self.registry.log(f"[SPRINT] Session started — cone {start_cone_id}, "
@@ -161,8 +172,16 @@ class SprintService:
             self.session_state['beep_fired_at'] = beep_ts
             self.session_state['countdown_active'] = False
             self.session_state['countdown_remaining'] = 0
+            self.session_state['ir_auto_stop_result'] = None  # clear any previous result
 
         self.registry.log(f"[SPRINT] Beep fired for run {run_id[:8]}", source='sprint')
+
+        # Arm finish-cone IR sensor now that athlete is running
+        if self._arm_fn:
+            try:
+                self._arm_fn()
+            except Exception as e:
+                self.registry.log(f"[SPRINT] IR arm failed: {e}", source='sprint')
 
     def stop(self, session_id: str, time_seconds: float) -> dict:
         """Coach taps STOP — record time, check PB, advance to next athlete."""
@@ -186,6 +205,13 @@ class SprintService:
                     'UPDATE runs SET sprint_distance = ?, sprint_distance_unit = ? WHERE run_id = ?',
                     (distance, distance_unit, run_id)
                 )
+
+        # Disarm finish-cone IR sensor — run is over
+        if self._disarm_fn:
+            try:
+                self._disarm_fn()
+            except Exception as e:
+                self.registry.log(f"[SPRINT] IR disarm failed: {e}", source='sprint')
 
         # Cone back to amber
         self.registry.set_led(start_cone_id, 'solid_amber')
@@ -228,6 +254,55 @@ class SprintService:
         }
 
     # ------------------------------------------------------------------ #
+    # IR auto-stop                                                         #
+    # ------------------------------------------------------------------ #
+
+    def auto_stop(self, session_id: str, from_device_id: str = None, trip_time: float = None) -> dict:
+        """Called when finish-cone IR sensor is tripped — compute elapsed time server-side.
+
+        trip_time: Unix timestamp captured on the field device at the exact moment of beam
+                   break. Used in preference to time.time() to eliminate TCP transit latency
+                   from the recorded split. Falls back to time.time() if not provided.
+        """
+        with self.state_lock:
+            if self.session_state.get('session_id') != session_id:
+                return {'success': False, 'error': 'Session not active'}
+            beep_ts_str = self.session_state.get('beep_fired_at')
+            if not beep_ts_str:
+                return {'success': False, 'error': 'Timer not running — beep not yet fired'}
+            finish_cone_id = self.session_state.get('finish_cone_id')
+            # If a specific finish cone is designated, only accept trips from that device
+            if from_device_id and finish_cone_id and from_device_id != finish_cone_id:
+                return {'success': False, 'error': f'IR trip from {from_device_id}, expected {finish_cone_id}'}
+
+        # Compute elapsed — prefer device timestamp to eliminate TCP transit latency
+        try:
+            from datetime import datetime as _dt
+            beep_epoch = _dt.fromisoformat(beep_ts_str).timestamp()
+            stop_epoch = trip_time if trip_time else time.time()
+            time_seconds = round(stop_epoch - beep_epoch, 3)
+        except Exception:
+            return {'success': False, 'error': 'Could not parse beep timestamp'}
+
+        result = self.stop(session_id, time_seconds)
+        if result.get('success'):
+            with self.state_lock:
+                self.session_state['ir_auto_stop_result'] = {
+                    'time_seconds': time_seconds,
+                    'is_new_pb': result.get('is_new_pb', False),
+                    'next_run': result.get('next_run'),
+                    'session_complete': result.get('session_complete', False),
+                }
+        return result
+
+    def get_active_session_id(self) -> str:
+        """Return current session_id if one is active, else None."""
+        with self.state_lock:
+            if self.session_state.get('status') == 'active':
+                return self.session_state.get('session_id')
+        return None
+
+    # ------------------------------------------------------------------ #
     # Pause / Resume                                                       #
     # ------------------------------------------------------------------ #
 
@@ -249,6 +324,12 @@ class SprintService:
                     f"[SPRINT] Pause — aborted {aborted_athlete}, moved to end of queue",
                     source='sprint'
                 )
+
+        if self._disarm_fn:
+            try:
+                self._disarm_fn()
+            except Exception:
+                pass
 
         self.registry.set_led(start_cone_id, 'blink_amber')
 

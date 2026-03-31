@@ -29,7 +29,14 @@ def course_new():
     """Sprint course creation form."""
     settings = db.get_coach_preferences()
     distance_unit = settings.get('distance_unit', 'yards')
-    return render_template('sprint_course_new.html', distance_unit=distance_unit)
+    # Provide field devices D1-D5 so coach can designate a finish cone
+    field_devices = [
+        {'ip': f'192.168.99.10{i}', 'label': f'Cone {i} (D{i})'}
+        for i in range(1, 6)
+    ]
+    return render_template('sprint_course_new.html',
+                           distance_unit=distance_unit,
+                           field_devices=field_devices)
 
 
 def _sprint_diagram_svg():
@@ -84,10 +91,12 @@ def course_create():
         # Set sprint-specific columns and diagram (not in create_course signature)
         settings = db.get_coach_preferences()
         distance_unit = settings.get('distance_unit', 'yards')
+        finish_cone_id = data.get('finish_cone_id') or None   # None = manual timing
+        timing_mode    = data.get('timing_mode', 'manual')
         with db.get_connection() as conn:
             conn.execute(
-                'UPDATE courses SET distance_unit = ?, countdown_interval = ?, timing_mode = ?, diagram_svg = ? WHERE course_id = ?',
-                (distance_unit, 5, 'manual', _sprint_diagram_svg(), course_id)
+                'UPDATE courses SET distance_unit = ?, countdown_interval = ?, timing_mode = ?, finish_cone_id = ?, diagram_svg = ? WHERE course_id = ?',
+                (distance_unit, 5, timing_mode, finish_cone_id, _sprint_diagram_svg(), course_id)
             )
 
         REGISTRY.log(f"[SPRINT] Course created: {name}", source='sprint')
@@ -130,8 +139,9 @@ def monitor(session_id):
 # ===========================================================================
 
 def _timer_event_generator(session_id):
-    """Generator for SSE stream — yields beep_fired event when GO fires."""
-    last_beep_ts = None
+    """Generator for SSE stream — yields beep_fired and ir_stopped events."""
+    last_beep_ts    = None
+    last_ir_result  = None
     deadline = time.time() + 3600  # 1-hour max connection
 
     while time.time() < deadline:
@@ -142,6 +152,11 @@ def _timer_event_generator(session_id):
         if beep_ts and beep_ts != last_beep_ts:
             last_beep_ts = beep_ts
             yield f"event: beep_fired\ndata: {json.dumps({'beep_ts': beep_ts})}\n\n"
+
+        ir_result = state.get('ir_auto_stop_result')
+        if ir_result and ir_result != last_ir_result:
+            last_ir_result = ir_result
+            yield f"event: ir_stopped\ndata: {json.dumps(ir_result)}\n\n"
 
         yield ": keepalive\n\n"
         time.sleep(0.1)
@@ -164,6 +179,26 @@ def timer_stream(session_id):
 @sprint_bp.route('/api/sprint/start/<session_id>', methods=['POST'])
 def start_session(session_id):
     """Start sprint session (GO on setup screen)."""
+    # Sync clocks on all field devices before starting so IR timestamps are accurate
+    try:
+        import time as _time
+        from field_trainer.ft_registry import REGISTRY
+        server_time = _time.time()
+        from datetime import datetime as _dt
+        _DEVICE_IPS = {i: f'192.168.99.{100 + i}' for i in range(1, 6)}
+        for device_num, node_ip in _DEVICE_IPS.items():
+            node = REGISTRY.nodes.get(node_ip)
+            if node and node.last_msg:
+                try:
+                    last_ts = _dt.fromisoformat(node.last_msg).timestamp()
+                    if (server_time - last_ts) <= 15:
+                        REGISTRY.send_to_node(node_ip, {"cmd": "clock_sync", "server_time": server_time})
+                except Exception:
+                    pass
+        REGISTRY.log("Clock sync pushed at sprint start")
+    except Exception as _e:
+        pass  # Non-fatal — sprint continues even if sync fails
+
     svc = get_sprint_service()
     result = svc.start_session(session_id)
     return jsonify(result)

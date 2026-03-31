@@ -2238,3 +2238,247 @@ window.addEventListener('beforeunload', function() {
         fetch(`/api/sonar/device/${sonarSelectedDevice}/stop`, { method: 'POST', keepalive: true });
     }
 });
+
+// ===========================================================================
+// IR Sensor — Finish Line (multi-device)
+// ===========================================================================
+
+let irActiveDeviceNum = null;   // which device is currently in test mode
+let irPollInterval = null;
+let irLastStatus = null;        // track previous state to only log on transitions
+
+// Load device table on page load
+refreshIrDevices();
+
+async function refreshIrDevices() {
+    try {
+        const r = await fetch('/api/ir/devices/status');
+        const d = await r.json();
+        if (!d.success) return;
+        renderIrDevicesTable(d.devices);
+    } catch(e) {}
+}
+
+function renderIrDevicesTable(devices) {
+    const tbody = document.querySelector('#ir-devices-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    for (const dev of devices) {
+        const onlineBadge = dev.online
+            ? '<span class="badge bg-success">Online</span>'
+            : '<span class="badge bg-secondary">Offline</span>';
+        const irBadge = dev.ir_test_active
+            ? '<span class="badge bg-warning text-dark">Testing</span>'
+            : '<span class="badge bg-light text-muted border">Idle</span>';
+        const btnDisabled = !dev.online ? 'disabled' : '';
+        const btnClass = (irActiveDeviceNum === dev.device_num)
+            ? 'btn btn-danger btn-sm' : 'btn btn-outline-primary btn-sm';
+        const btnLabel = (irActiveDeviceNum === dev.device_num)
+            ? '<i class="bi bi-stop-circle"></i> Stop'
+            : '<i class="bi bi-play-circle"></i> Start Test';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${dev.name}</td>
+            <td>${onlineBadge}</td>
+            <td>${irBadge}</td>
+            <td>
+                <button class="${btnClass}" ${btnDisabled}
+                    onclick="toggleIrDeviceTest(${dev.device_num})">
+                    ${btnLabel}
+                </button>
+            </td>`;
+        tbody.appendChild(tr);
+    }
+}
+
+function toggleIrDeviceTest(deviceNum) {
+    if (irActiveDeviceNum === deviceNum) {
+        stopIrTest();
+    } else {
+        if (irActiveDeviceNum !== null) {
+            // Stop whichever device is currently active
+            fetch(`/api/ir/device/${irActiveDeviceNum}/test`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ active: false })
+            });
+        }
+        startIrTest(deviceNum);
+    }
+}
+
+async function startIrTest(deviceNum) {
+    irActiveDeviceNum = deviceNum;
+    irLastStatus = null;
+    const nameMap = {0:'Start (D0)',1:'Cone 1 (D1)',2:'Cone 2 (D2)',3:'Cone 3 (D3)',4:'Cone 4 (D4)',5:'Cone 5 (D5)'};
+    document.getElementById('ir-selected-name').textContent = nameMap[deviceNum] || `D${deviceNum}`;
+    document.getElementById('ir-selected-panel').style.display = 'block';
+    document.getElementById('ir-status-badge').textContent = 'Starting...';
+    document.getElementById('ir-status-badge').className = 'badge bg-secondary';
+    const btn = document.getElementById('ir-stop-btn');
+    if (btn) {
+        btn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Test';
+        btn.className = 'btn btn-danger btn-sm ms-auto';
+        btn.onclick = stopIrTest;
+    }
+
+    await fetch(`/api/ir/device/${deviceNum}/test`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ active: true })
+    });
+
+    clearInterval(irPollInterval);
+    irPollInterval = setInterval(pollIrReading, 150);
+    refreshIrDevices();
+}
+
+async function stopIrTest() {
+    const devNum = irActiveDeviceNum;
+    irActiveDeviceNum = null;
+    clearInterval(irPollInterval);
+    irPollInterval = null;
+    // Keep panel open so log stays readable — swap button to Close Log
+    const btn = document.getElementById('ir-stop-btn');
+    if (btn) {
+        btn.innerHTML = '<i class="bi bi-x-circle"></i> Close Log';
+        btn.className = 'btn btn-outline-secondary btn-sm ms-auto';
+        btn.onclick = closeIrPanel;
+    }
+    document.getElementById('ir-range-panel').style.display = 'none';
+    if (devNum !== null) {
+        await fetch(`/api/ir/device/${devNum}/test`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ active: false })
+        });
+    }
+    refreshIrDevices();
+}
+
+function closeIrPanel() {
+    document.getElementById('ir-selected-panel').style.display = 'none';
+    document.getElementById('ir-range-panel').style.display = 'none';
+    const btn = document.getElementById('ir-stop-btn');
+    if (btn) {
+        btn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Test';
+        btn.className = 'btn btn-danger btn-sm ms-auto';
+        btn.onclick = stopIrTest;
+    }
+}
+
+async function pollIrReading() {
+    if (irActiveDeviceNum === null) return;
+    try {
+        const r = await fetch(`/api/ir/device/${irActiveDeviceNum}/reading`);
+        const d = await r.json();
+        if (!d.available) return;
+        const status = d.status || (d.value === 1 ? 'beam_broken' : 'clear');
+        updateIrBadge(status);
+        if (status !== irLastStatus) {
+            if (status === 'beam_broken') irLogLine('🚦 Beam Broken');
+            else if (irLastStatus !== null) irLogLine('✅ Beam Clear');
+            irLastStatus = status;
+        }
+    } catch(e) {}
+}
+
+function updateIrBadge(status) {
+    const badge = document.getElementById('ir-status-badge');
+    if (!badge) return;
+    if (status === 'beam_broken') {
+        badge.textContent = 'Beam Broken';
+        badge.className = 'badge bg-danger fs-6';
+    } else {
+        badge.textContent = 'Beam Clear';
+        badge.className = 'badge bg-success fs-6';
+    }
+}
+
+function irLogLine(msg) {
+    const content = document.getElementById('ir-log-content');
+    if (!content) return;
+    const now = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.textContent = `[${now}] ${msg}`;
+    content.appendChild(line);
+    const logBox = document.getElementById('ir-system-log');
+    if (logBox) logBox.scrollTop = logBox.scrollHeight;
+}
+
+function clearIrLog() {
+    const content = document.getElementById('ir-log-content');
+    if (content) content.innerHTML = '<div class="text-muted">Log cleared.</div>';
+}
+
+// IR Range Finder
+let irRangePollInterval = null;
+
+function startIrRangeFinder() {
+    document.getElementById('ir-range-panel').style.display = 'block';
+    document.getElementById('ir-range-result').innerHTML = '';
+    document.getElementById('ir-range-count').textContent = '';
+    if (!irRangePollInterval) {
+        irRangePollInterval = setInterval(pollIrRangeStatus, 200);
+    }
+}
+
+function closeIrRangeFinder() {
+    clearInterval(irRangePollInterval);
+    irRangePollInterval = null;
+    document.getElementById('ir-range-panel').style.display = 'none';
+}
+
+async function pollIrRangeStatus() {
+    if (irActiveDeviceNum === null) return;
+    try {
+        const r = await fetch(`/api/ir/device/${irActiveDeviceNum}/reading`);
+        const d = await r.json();
+        if (!d.available) return;
+        const status = d.status || (d.value === 1 ? 'beam_broken' : 'clear');
+        const badge = document.getElementById('ir-range-badge');
+        if (status === 'beam_broken') {
+            badge.textContent = 'Beam Broken';
+            badge.className = 'badge bg-danger';
+        } else {
+            badge.textContent = 'Beam Clear';
+            badge.className = 'badge bg-success';
+        }
+        updateIrBadge(status);
+    } catch(e) {}
+}
+
+async function confirmIrRange() {
+    if (irActiveDeviceNum === null) return;
+    const resultEl = document.getElementById('ir-range-result');
+    const countEl  = document.getElementById('ir-range-count');
+    resultEl.innerHTML = '<span class="text-muted small">Sampling 10 readings...</span>';
+
+    let detected = 0;
+    for (let i = 0; i < 10; i++) {
+        try {
+            const r = await fetch(`/api/ir/device/${irActiveDeviceNum}/reading`);
+            const d = await r.json();
+            const status = d.status || (d.value === 1 ? 'beam_broken' : 'clear');
+            if (status === 'beam_broken') detected++;
+            countEl.textContent = `${i+1}/10`;
+        } catch(e) {}
+        await new Promise(res => setTimeout(res, 150));
+    }
+
+    const pct = Math.round(detected / 10 * 100);
+    if (pct >= 80) {
+        resultEl.innerHTML = `<div class="alert alert-success py-1 small mb-0">
+            ✅ Reliable detection at this distance — ${pct}% of readings triggered.<br>
+            Range is set correctly. If background objects trigger the sensor, turn the potentiometer slightly counter-clockwise.
+        </div>`;
+    } else if (pct >= 40) {
+        resultEl.innerHTML = `<div class="alert alert-warning py-1 small mb-0">
+            ⚠️ Marginal detection — ${pct}% of readings triggered.<br>
+            Turn the potentiometer slightly clockwise to increase range reliability.
+        </div>`;
+    } else {
+        resultEl.innerHTML = `<div class="alert alert-danger py-1 small mb-0">
+            ❌ Not detecting reliably at this distance — ${pct}% of readings triggered.<br>
+            Move the target closer or turn the potentiometer clockwise to extend range.
+        </div>`;
+    }
+    countEl.textContent = '';
+}

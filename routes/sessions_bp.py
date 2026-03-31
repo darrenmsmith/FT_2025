@@ -266,9 +266,30 @@ def prepare_course(session_id):
                 REGISTRY.set_led(device['device_id'], pattern='solid_amber')
             except Exception as e:
                 print(f"⚠️  Failed to set {device['device_id']} to amber: {e}")
-        
+
+        # For sprint, also include all known mesh nodes in the status list
+        # so the coach can see which cones are online/offline
+        if course.get('course_type') == 'sprint':
+            import time as _time
+            all_ips = {f'192.168.99.10{i}': i for i in range(1, 6)}
+            for ip, num in all_ips.items():
+                if ip in device_ids_seen:
+                    continue
+                node = REGISTRY.nodes.get(ip)
+                online = False
+                if node and node.last_msg:
+                    try:
+                        online = (_time.time() - datetime.fromisoformat(node.last_msg).timestamp()) <= 15
+                    except Exception:
+                        pass
+                devices.append({
+                    'device_id': ip,
+                    'device_name': f'Cone {num} (D{num})',
+                    'online': online,
+                })
+
         REGISTRY.log(f"Course prepared for deployment: {course['course_name']}")
-        
+
         return jsonify({
             'success': True,
             'devices': devices
@@ -479,10 +500,13 @@ def deploy_course(session_id):
                 print(f"   ⚡ Sprint config: {sprint_config}")
                 with db.get_connection() as conn:
                     conn.execute(
-                        'UPDATE courses SET distance = ?, countdown_interval = ?, timing_mode = ? WHERE course_id = ?',
+                        'UPDATE courses SET distance = ?, countdown_interval = ?, timing_mode = ?, finish_cone_id = ?, auto_advance = ?, auto_advance_delay = ? WHERE course_id = ?',
                         (sprint_config.get('distance', 40),
                          sprint_config.get('countdown_interval', 5),
                          sprint_config.get('timing_mode', 'manual'),
+                         sprint_config.get('finish_cone_id'),
+                         1 if sprint_config.get('auto_advance') else 0,
+                         sprint_config.get('auto_advance_delay', 5),
                          course['course_id'])
                     )
 
