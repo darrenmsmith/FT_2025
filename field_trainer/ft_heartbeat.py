@@ -105,6 +105,8 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                         detection_method=msg.get("detection_method"),
                         sonar_data=msg.get("sonar"),
                         ir_data=msg.get("ir"),
+                        ir_sensor_type=msg.get("ir_sensor_type"),
+                        ir_role=msg.get("ir_role"),
                     )                    
                     # Handle touch events (Phase 1)
                     print(f"📨 Heartbeat from {node_id}: touch_detected={msg.get('touch_detected')}, timestamp={msg.get('touch_timestamp')}")
@@ -151,10 +153,15 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
 
                     # Handle IR beam-break trip (immediate non-heartbeat message)
                     if msg.get('ir_trip'):
+                        # Use D0's clock at receipt rather than the device's trip_time.
+                        # D5's clock can be several seconds out of sync despite correction
+                        # attempts (sudo date -s PAM overhead ~3s on Pi Zero). TCP latency
+                        # D5→D0 on the same WiFi mesh is 1–10ms — far more accurate.
+                        _receipt_time = time.time()
                         threading.Thread(
                             target=REGISTRY.handle_ir_event,
                             args=(node_id,),
-                            kwargs={'trip_time': msg.get('trip_time')},
+                            kwargs={'trip_time': _receipt_time},
                             daemon=True
                         ).start()
 

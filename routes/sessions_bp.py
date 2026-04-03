@@ -267,26 +267,41 @@ def prepare_course(session_id):
             except Exception as e:
                 print(f"⚠️  Failed to set {device['device_id']} to amber: {e}")
 
-        # For sprint, also include all known mesh nodes in the status list
-        # so the coach can see which cones are online/offline
+        # For sprint, include the relevant finish cones based on timing_mode
         if course.get('course_type') == 'sprint':
             import time as _time
-            all_ips = {f'192.168.99.10{i}': i for i in range(1, 6)}
-            for ip, num in all_ips.items():
+            timing_mode = course.get('timing_mode', 'manual')
+            finish_cone_id = course.get('finish_cone_id')
+            _ips_to_show = set()
+            if timing_mode == 'ir_breakbeam':
+                # Show emitter + receiver
+                if finish_cone_id:
+                    _ips_to_show.add(finish_cone_id)
+                with REGISTRY.nodes_lock:
+                    for ip, node in REGISTRY.nodes.items():
+                        if node.ir_role == 'emitter' and node.ir_sensor_type == 'adafruit_breakbeam':
+                            _ips_to_show.add(ip)
+            elif timing_mode == 'ir_single' and finish_cone_id:
+                _ips_to_show.add(finish_cone_id)
+            for ip in _ips_to_show:
                 if ip in device_ids_seen:
                     continue
                 node = REGISTRY.nodes.get(ip)
+                num = int(ip.split('.')[-1]) - 100
                 online = False
                 if node and node.last_msg:
                     try:
                         online = (_time.time() - datetime.fromisoformat(node.last_msg).timestamp()) <= 15
                     except Exception:
                         pass
-                devices.append({
-                    'device_id': ip,
-                    'device_name': f'Cone {num} (D{num})',
-                    'online': online,
-                })
+                role = node.ir_role if node else None
+                label = f'Cone {num} (D{num})'
+                if role == 'emitter':
+                    label += ' — Emitter'
+                elif role == 'receiver':
+                    label += ' — Finish'
+                devices.append({'device_id': ip, 'device_name': label, 'online': online})
+                device_ids_seen.add(ip)
 
         REGISTRY.log(f"Course prepared for deployment: {course['course_name']}")
 
@@ -467,13 +482,42 @@ def deploy_course(session_id):
         actions = db.get_course_actions(course['course_id'])
         devices = []
         device_ids_seen = set()
-        
+
         for action in actions:
             device_id = action['device_id']
             if device_id not in device_ids_seen:
                 devices.append({'device_id': device_id, 'device_name': action['device_name']})
                 device_ids_seen.add(device_id)
-        
+
+        # For sprint, add finish cone(s) to the status display
+        if course.get('course_type') == 'sprint':
+            import time as _td
+            timing_mode = course.get('timing_mode', 'manual')
+            finish_cone_id = course.get('finish_cone_id')
+            _ips_to_show = set()
+            if timing_mode == 'ir_breakbeam':
+                if finish_cone_id:
+                    _ips_to_show.add(finish_cone_id)
+                with REGISTRY.nodes_lock:
+                    for ip, node in REGISTRY.nodes.items():
+                        if node.ir_role == 'emitter' and node.ir_sensor_type == 'adafruit_breakbeam':
+                            _ips_to_show.add(ip)
+            elif timing_mode == 'ir_single' and finish_cone_id:
+                _ips_to_show.add(finish_cone_id)
+            for ip in _ips_to_show:
+                if ip in device_ids_seen:
+                    continue
+                node = REGISTRY.nodes.get(ip)
+                num = int(ip.split('.')[-1]) - 100
+                role = node.ir_role if node else None
+                label = f'Cone {num} (D{num})'
+                if role == 'emitter':
+                    label += ' — Emitter'
+                elif role == 'receiver':
+                    label += ' — Finish'
+                devices.append({'device_id': ip, 'device_name': label})
+                device_ids_seen.add(ip)
+
         # Deploy the course first (loads into REGISTRY)
         course_name = course['course_name']
         try:
@@ -494,6 +538,25 @@ def deploy_course(session_id):
 
         # Check course_type FIRST (more specific than mode)
         if course.get('course_type') == 'sprint':
+            # Sync clocks on all online field devices before sprint begins
+            try:
+                import time as _t
+                _server_time = _t.time()
+                _DEVICE_IPS = {i: f'192.168.99.{100 + i}' for i in range(1, 6)}
+                from datetime import datetime as _dt
+                for _ip in _DEVICE_IPS.values():
+                    _node = REGISTRY.nodes.get(_ip)
+                    if _node and _node.last_msg:
+                        try:
+                            _last_ts = _dt.fromisoformat(_node.last_msg).timestamp()
+                            if (_t.time() - _last_ts) <= 15:
+                                REGISTRY.send_to_node(_ip, {"cmd": "clock_sync", "server_time": _server_time})
+                        except Exception:
+                            pass
+                REGISTRY.log("Clock sync pushed to field devices at sprint deploy", source='sprint')
+            except Exception:
+                pass
+
             # Save sprint config if provided (distance, countdown, timing from deploy page)
             sprint_config = request_data.get('sprint_config', {})
             if sprint_config:

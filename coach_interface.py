@@ -105,7 +105,7 @@ def _ir_trip_from_field(device_id: str, trip_time: float = None):
         svc.auto_stop(session_id, from_device_id=device_id, trip_time=trip_time)
         # Beep D0 so the coach hears confirmation (D1 beeps locally on detection)
         if REGISTRY._audio:
-            REGISTRY._audio.play("default_beep.mp3", blocking=False)
+            REGISTRY._audio.play("default_beep")
 
 def _ir_arm():
     """Arm the finish-cone IR — called by sprint_service after beep fires."""
@@ -2563,12 +2563,15 @@ def ir_devices_status():
         node_ip = DEVICE_IPS[device_num]
         if device_num == 0:
             val = _ir_sensor.get_current_value() if _ir_sensor else None
+            d0_cfg = _ir_sensor.get_config() if _ir_sensor else {}
             devices.append({
                 'device_num': device_num,
                 'name': 'Start (D0)',
                 'ip': node_ip,
                 'online': True,
                 'available': _ir_sensor.available if _ir_sensor else False,
+                'sensor_type': d0_cfg.get('sensor_type'),
+                'role': d0_cfg.get('role', 'receiver'),
                 'ir_test_active': _ir_sensor._test_mode if _ir_sensor else False,
                 'ir_data': {
                     'value': val,
@@ -2585,12 +2588,16 @@ def ir_devices_status():
                         online = (time.time() - last_ts) <= 15
                     except Exception:
                         pass
+            sensor_type = node.ir_sensor_type if node else None
+            role = node.ir_role if node else None
             devices.append({
                 'device_num': device_num,
                 'name': f'Cone {device_num} (D{device_num})',
                 'ip': node_ip,
                 'online': online,
                 'available': online,
+                'sensor_type': sensor_type,
+                'role': role,
                 'ir_test_active': bool(node and node.ir_data is not None),
                 'ir_data': node.ir_data if node else None,
             })

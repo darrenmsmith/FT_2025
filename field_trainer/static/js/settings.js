@@ -2263,6 +2263,10 @@ function renderIrDevicesTable(devices) {
     const tbody = document.querySelector('#ir-devices-table tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
+    const sensorLabels = {
+        'mh_flying_fish': 'E18-D80NK',
+        'adafruit_breakbeam': 'Break-Beam',
+    };
     for (const dev of devices) {
         const onlineBadge = dev.online
             ? '<span class="badge bg-success">Online</span>'
@@ -2270,23 +2274,31 @@ function renderIrDevicesTable(devices) {
         const irBadge = dev.ir_test_active
             ? '<span class="badge bg-warning text-dark">Testing</span>'
             : '<span class="badge bg-light text-muted border">Idle</span>';
-        const btnDisabled = !dev.online ? 'disabled' : '';
-        const btnClass = (irActiveDeviceNum === dev.device_num)
-            ? 'btn btn-danger btn-sm' : 'btn btn-outline-primary btn-sm';
-        const btnLabel = (irActiveDeviceNum === dev.device_num)
-            ? '<i class="bi bi-stop-circle"></i> Stop'
-            : '<i class="bi bi-play-circle"></i> Start Test';
+        const sensorLabel = sensorLabels[dev.sensor_type] || (dev.sensor_type || '—');
+        const roleLabel = dev.role === 'emitter'
+            ? '<span class="badge bg-info text-dark">Emitter</span>'
+            : '';
+        const isEmitter = dev.role === 'emitter';
+        let actionCell;
+        if (isEmitter) {
+            actionCell = '<span class="text-muted small">Power only — no test</span>';
+        } else {
+            const btnDisabled = !dev.online ? 'disabled' : '';
+            const btnClass = (irActiveDeviceNum === dev.device_num)
+                ? 'btn btn-danger btn-sm' : 'btn btn-outline-primary btn-sm';
+            const btnLabel = (irActiveDeviceNum === dev.device_num)
+                ? '<i class="bi bi-stop-circle"></i> Stop'
+                : '<i class="bi bi-play-circle"></i> Start Test';
+            actionCell = `<button class="${btnClass}" ${btnDisabled}
+                onclick="toggleIrDeviceTest(${dev.device_num})">${btnLabel}</button>`;
+        }
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>${dev.name}</td>
             <td>${onlineBadge}</td>
-            <td>${irBadge}</td>
-            <td>
-                <button class="${btnClass}" ${btnDisabled}
-                    onclick="toggleIrDeviceTest(${dev.device_num})">
-                    ${btnLabel}
-                </button>
-            </td>`;
+            <td>${sensorLabel} ${roleLabel}</td>
+            <td>${isEmitter ? '<span class="badge bg-light text-muted border">N/A</span>' : irBadge}</td>
+            <td>${actionCell}</td>`;
         tbody.appendChild(tr);
     }
 }

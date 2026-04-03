@@ -50,5 +50,9 @@ class NodeInfo:
     # Latest IR reading reported in heartbeat (None when IR test not active)
     ir_data: Optional[Dict[str, Any]] = None
 
+    # IR sensor configuration reported by device (sensor_type, role)
+    ir_sensor_type: Optional[str] = None
+    ir_role: Optional[str] = None
+
     # Transient socket writer; not included in snapshots
     _writer: Any = field(default=None, repr=False, compare=False)

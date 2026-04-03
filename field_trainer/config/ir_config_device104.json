@@ -1,0 +1,7 @@
+{
+  "sensor_type": "adafruit_breakbeam",
+  "role": "emitter",
+  "gpio_pin": 17,
+  "enabled": true,
+  "debounce_ms": 200
+}

@@ -328,14 +328,36 @@ def connect_to_device0(node_id):
     ir_test_active = [False]     # True while IR test mode active (settings page)
     ir_trip_pending = [False]    # Set by IR callback to send immediate trip message
     ir_trip_event = __import__('threading').Event()  # Interrupts heartbeat sleep on trip
+    _last_clock_sync = [0.0]     # epoch of last clock correction — rate-limit to once/minute
+    _clock_sync_pending = [False]  # True = sync requested (e.g. at deploy); use next fresh master_time
     heartbeat_interval = [5]  # Default 5 seconds, can be changed by deployment
+
+    # Load per-device IR config (sensor_type / role)
+    _ir_config = {'sensor_type': 'mh_flying_fish', 'role': 'receiver', 'gpio_pin': 17,
+                  'enabled': True, 'debounce_ms': 200}
+    try:
+        import json as _json
+        _ip_suffix = node_id.split('.')[-1]
+        _cfg_path = f'/opt/field_trainer/config/ir_config_device{_ip_suffix}.json'
+        with open(_cfg_path) as _f:
+            _ir_config.update(_json.load(_f))
+        print(f"IR config loaded: type={_ir_config['sensor_type']}, role={_ir_config['role']}")
+    except FileNotFoundError:
+        print("No IR config file — using defaults (mh_flying_fish / receiver)")
+    except Exception as _e:
+        print(f"IR config load error: {_e}")
 
     # Initialise IR sensor (GPIO 17)
     ir_sensor = None
     try:
-        from ft_ir import IrSensor as _IrSensorClass
-        ir_sensor = _IrSensorClass()
-        print(f"IR sensor initialized on GPIO {ir_sensor.gpio_pin}")
+        from ft_ir import IrSensor as _IrSensorClass, _load_ir_config, ROLE_EMITTER
+        ir_sensor = _IrSensorClass(
+            gpio_pin=_ir_config.get('gpio_pin', 17),
+            sensor_type=_ir_config.get('sensor_type', 'mh_flying_fish'),
+            role=_ir_config.get('role', 'receiver'),
+            debounce_s=_ir_config.get('debounce_ms', 200) / 1000.0,
+        )
+        print(f"IR sensor initialized: type={ir_sensor.sensor_type}, role={ir_sensor.role}, available={ir_sensor.available}")
     except Exception as _e:
         print(f"IR sensor not available: {_e}")
 
@@ -355,7 +377,8 @@ def connect_to_device0(node_id):
             ir_trip_event.set()
             print("🚦 IR trip — sending to gateway")
 
-    if ir_sensor:
+    # Only wire detection callback on receiver cones — emitters have no GPIO
+    if ir_sensor and ir_sensor.role != 'emitter':
         ir_sensor.set_detection_callback(_on_ir_trip)
 
     while True:
@@ -399,6 +422,10 @@ def connect_to_device0(node_id):
                 else:
                     heartbeat["touch_detected"] = False
                     heartbeat["touch_timestamp"] = None
+
+                # Always report IR sensor config so D0 knows type/role
+                heartbeat["ir_sensor_type"] = _ir_config.get('sensor_type', 'mh_flying_fish')
+                heartbeat["ir_role"] = _ir_config.get('role', 'receiver')
 
                 # Include IR live data when test mode active (for settings page)
                 if ir_sensor and ir_test_active[0]:
@@ -574,24 +601,41 @@ def connect_to_device0(node_id):
                                 ir_trip_pending[0] = False
                                 print("🚦 IR sensor disarmed")
 
-                            # Clock sync from D0
-                            if "cmd" in data and data["cmd"] == "clock_sync":
-                                server_time = data.get("server_time")
-                                if server_time:
-                                    local_time = time.time()
-                                    drift_s = abs(server_time - local_time)
-                                    if drift_s > 1.0:
+                            # Clock sync — uses fresh master_time from each heartbeat ACK.
+                            # clock_sync command sets a pending flag; actual correction runs on
+                            # the next heartbeat using that response's master_time (< 10ms old).
+                            # Fallback: also correct extreme drift (>30s) from cold boot.
+                            _master_time_ms = data.get("master_time")
+                            if _master_time_ms and not ir_armed[0]:
+                                _now = time.time()
+                                _server_time = _master_time_ms / 1000.0
+                                _drift_s = _now - _server_time
+                                _routine_due = (_now - _last_clock_sync[0] >= 60.0) and abs(_drift_s) > 30.0
+                                if (_clock_sync_pending[0] or _routine_due):
+                                    if abs(_drift_s) > 0.05:
                                         try:
-                                            import subprocess
-                                            subprocess.run(
-                                                ["sudo", "date", "-s", f"@{server_time:.3f}"],
-                                                check=True, capture_output=True
-                                            )
-                                            print(f"🕐 Clock synced: drift was {drift_s:.1f}s")
+                                            import subprocess as _sp
+                                            _t0 = time.monotonic()
+                                            _sp.run(["sudo", "date", "-s", f"@{_server_time:.3f}"],
+                                                    check=True, capture_output=True)
+                                            _elapsed = time.monotonic() - _t0
+                                            if _elapsed > 0.5:
+                                                _sp.run(["sudo", "date", "-s",
+                                                         f"@{(_server_time + _elapsed):.3f}"],
+                                                        capture_output=True)
+                                            print(f"🕐 Clock synced: drift was {_drift_s:+.2f}s, sudo took {_elapsed:.1f}s")
                                         except Exception as _e:
                                             print(f"🕐 Clock sync failed: {_e}")
                                     else:
-                                        print(f"🕐 Clock OK: drift {drift_s*1000:.1f}ms")
+                                        print(f"🕐 Clock OK: drift {_drift_s*1000:.0f}ms")
+                                    _clock_sync_pending[0] = False
+                                    _last_clock_sync[0] = _now
+
+                            # clock_sync command — just sets pending flag; sync runs on next
+                            # heartbeat ACK so master_time is always fresh, never stale.
+                            if "cmd" in data and data["cmd"] == "clock_sync":
+                                _clock_sync_pending[0] = True
+                                print("🕐 Clock sync requested — will apply on next heartbeat ACK")
 
                             # Process sonar test command (from settings page)
                             if "cmd" in data and data["cmd"] == "sonar_test":

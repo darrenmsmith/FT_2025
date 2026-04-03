@@ -181,13 +181,25 @@
                         <label class="form-label">Timing Mode</label>
                         <div class="mt-1">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingManual" value="manual" checked onchange="onTimingModeChange()">
+                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingManual" value="manual"
+                                    {% if not course.timing_mode or course.timing_mode == 'manual' %}checked{% endif %}
+                                    onchange="onTimingModeChange()">
                                 <label class="form-check-label" for="sprintTimingManual">Manual (Coach STOP)</label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingIR" value="ir_single" onchange="onTimingModeChange()">
+                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingIR" value="ir_single"
+                                    {% if course.timing_mode == 'ir_single' %}checked{% endif %}
+                                    onchange="onTimingModeChange()">
                                 <label class="form-check-label" for="sprintTimingIR">
-                                    <i class="bi bi-lightning-charge-fill text-warning"></i> IR Auto-Stop
+                                    <i class="bi bi-lightning-charge-fill text-warning"></i> IR Auto-Stop (single cone)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="sprintTiming" id="sprintTimingBreakBeam" value="ir_breakbeam"
+                                    {% if course.timing_mode == 'ir_breakbeam' %}checked{% endif %}
+                                    onchange="onTimingModeChange()">
+                                <label class="form-check-label" for="sprintTimingBreakBeam">
+                                    <i class="bi bi-reception-4 text-info"></i> Break-Beam Auto-Stop
                                 </label>
                             </div>
                         </div>
@@ -320,22 +332,98 @@ function onTimingModeChange() {
     } else {
         row.style.display = 'none';
     }
+    updateSprintDiagram(mode);
+}
+
+function updateSprintDiagram(mode) {
+    const el = document.getElementById('coneDiagram');
+    if (!el) return;
+    const svgs = {
+        manual: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 160" style="max-width:100%;font-family:Arial,sans-serif;">
+            <polygon points="55,118 95,118 75,52" fill="#FF9800" stroke="#E65100" stroke-width="2"/>
+            <text x="75" y="138" text-anchor="middle" font-size="13" fill="#555">Start (D0)</text>
+            <line x1="100" y1="88" x2="415" y2="88" stroke="#495057" stroke-width="2.5" stroke-dasharray="10,5"/>
+            <polygon points="415,88 403,82 403,94" fill="#495057"/>
+            <text x="257" y="76" text-anchor="middle" font-size="13" fill="#495057">Distance</text>
+            <line x1="430" y1="44" x2="430" y2="128" stroke="#6c757d" stroke-width="4"/>
+            <text x="448" y="88" text-anchor="start" font-size="13" fill="#6c757d">Finish</text>
+            <text x="448" y="104" text-anchor="start" font-size="11" fill="#6c757d">(Coach STOP)</text>
+        </svg>`,
+        ir_single: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 160" style="max-width:100%;font-family:Arial,sans-serif;">
+            <polygon points="55,118 95,118 75,52" fill="#FF9800" stroke="#E65100" stroke-width="2"/>
+            <text x="75" y="138" text-anchor="middle" font-size="13" fill="#555">Start (D0)</text>
+            <line x1="100" y1="88" x2="390" y2="88" stroke="#495057" stroke-width="2.5" stroke-dasharray="10,5"/>
+            <polygon points="390,88 378,82 378,94" fill="#495057"/>
+            <text x="245" y="76" text-anchor="middle" font-size="13" fill="#495057">Distance</text>
+            <polygon points="410,118 450,118 430,52" fill="#FF9800" stroke="#E65100" stroke-width="2"/>
+            <text x="430" y="138" text-anchor="middle" font-size="13" fill="#555">Finish (D1–D3)</text>
+            <circle cx="430" cy="38" r="10" fill="none" stroke="#dc3545" stroke-width="2"/>
+            <line x1="424" y1="32" x2="436" y2="44" stroke="#dc3545" stroke-width="2"/>
+            <text x="430" y="22" text-anchor="middle" font-size="11" fill="#dc3545">IR</text>
+        </svg>`,
+        ir_breakbeam: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 180" style="max-width:100%;font-family:Arial,sans-serif;">
+            <polygon points="35,128 75,128 55,62" fill="#FF9800" stroke="#E65100" stroke-width="2"/>
+            <text x="55" y="148" text-anchor="middle" font-size="12" fill="#555">Start (D0)</text>
+            <line x1="80" y1="98" x2="370" y2="98" stroke="#495057" stroke-width="2.5" stroke-dasharray="10,5"/>
+            <polygon points="370,98 358,92 358,104" fill="#495057"/>
+            <text x="225" y="86" text-anchor="middle" font-size="13" fill="#495057">Distance</text>
+            <polygon points="390,50 420,50 405,10" fill="#17a2b8" stroke="#117a8b" stroke-width="2"/>
+            <text x="405" y="66" text-anchor="middle" font-size="11" fill="#117a8b">D4</text>
+            <text x="405" y="79" text-anchor="middle" font-size="10" fill="#117a8b">Emitter</text>
+            <polygon points="390,148 420,148 405,108" fill="#28a745" stroke="#1e7e34" stroke-width="2"/>
+            <text x="405" y="164" text-anchor="middle" font-size="11" fill="#1e7e34">D5</text>
+            <text x="405" y="177" text-anchor="middle" font-size="10" fill="#1e7e34">Receiver</text>
+            <line x1="405" y1="52" x2="405" y2="106" stroke="#dc3545" stroke-width="2" stroke-dasharray="4,3"/>
+            <text x="422" y="82" text-anchor="start" font-size="11" fill="#dc3545">beam</text>
+            <line x1="440" y1="30" x2="440" y2="168" stroke="#28a745" stroke-width="3"/>
+            <text x="458" y="100" text-anchor="start" font-size="12" fill="#28a745">Finish</text>
+        </svg>`
+    };
+    el.innerHTML = svgs[mode] || svgs['manual'];
 }
 
 async function loadFinishCones() {
     const sel = document.getElementById('finishConeId');
-    if (!sel || sel.options.length > 1) return;  // already loaded
+    if (!sel) return;
+    const timingMode = document.querySelector('input[name="sprintTiming"]:checked')?.value || 'ir_single';
+    const savedFinishConeId = '{{ course.finish_cone_id or "" }}';
     try {
         const r = await fetch('/api/ir/devices/status');
         const d = await r.json();
         sel.innerHTML = '<option value="">— select finish cone —</option>';
-        for (const dev of d.devices || []) {
-            if (dev.device_num === 0) continue;  // D0 is start, not finish
-            const opt = document.createElement('option');
-            opt.value = dev.ip;
-            opt.textContent = `${dev.name}${dev.online ? '' : ' (offline)'}`;
-            opt.disabled = !dev.online;
-            sel.appendChild(opt);
+        const devices = d.devices || [];
+
+        if (timingMode === 'ir_breakbeam') {
+            // Only show break-beam pairs
+            const emitters = devices.filter(dv => dv.role === 'emitter' && dv.sensor_type === 'adafruit_breakbeam' && dv.device_num !== 0);
+            const receivers = devices.filter(dv => dv.role === 'receiver' && dv.sensor_type === 'adafruit_breakbeam' && dv.device_num !== 0);
+            for (const rx of receivers) {
+                const em = emitters.find(e => e.sensor_type === 'adafruit_breakbeam');
+                if (em) {
+                    const bothOnline = rx.online && em.online;
+                    const opt = document.createElement('option');
+                    opt.value = rx.ip;
+                    opt.textContent = `Break-Beam (Cone ${em.device_num} & Cone ${rx.device_num})${bothOnline ? '' : ' (offline)'}`;
+                    opt.disabled = !bothOnline;
+                    sel.appendChild(opt);
+                }
+            }
+        } else {
+            // ir_single — only show single-cone (non-breakbeam) receivers
+            for (const dev of devices) {
+                if (dev.device_num === 0) continue;
+                if (dev.role === 'emitter') continue;
+                if (dev.sensor_type === 'adafruit_breakbeam') continue;
+                const opt = document.createElement('option');
+                opt.value = dev.ip;
+                opt.textContent = `${dev.name}${dev.online ? '' : ' (offline)'}`;
+                opt.disabled = !dev.online;
+                sel.appendChild(opt);
+            }
+        }
+        // Restore saved selection (repeat session)
+        if (savedFinishConeId && sel.querySelector(`option[value="${savedFinishConeId}"]`)) {
+            sel.value = savedFinishConeId;
         }
     } catch(e) {}
 }
@@ -507,6 +595,11 @@ document.getElementById('deployBtn').addEventListener('click', async function() 
         this.innerHTML = '<i class="fas fa-check-circle"></i> Deploy Course';
     }
 });
+
+// Initialise UI state from saved course values on page load
+const _savedTimingMode = document.querySelector('input[name="sprintTiming"]:checked')?.value || 'manual';
+onTimingModeChange();   // shows/hides finish cone row + sets correct SVG
+onAdvanceModeChange();  // shows/hides auto-advance delay row
 
 // Prepare on page load
 prepareCourse();
