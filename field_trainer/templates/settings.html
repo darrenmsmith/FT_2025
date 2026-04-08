@@ -65,11 +65,17 @@
         </div>
 
         <div class="mb-3">
-            <label for="system_volume" class="form-label fw-bold">System Volume: <span id="volume-display">60</span>%</label>
-            <div style="width: 33%;">
-                <input type="range" class="form-range" min="0" max="100" step="5" id="system_volume">
+            <label class="form-label fw-bold">Volume</label>
+            <!-- Set All row -->
+            <div class="d-flex align-items-center gap-3 mb-2 p-2 bg-light rounded">
+                <span class="text-nowrap fw-semibold" style="min-width:110px;">Set All:</span>
+                <input type="range" class="form-range flex-grow-1" min="0" max="100" step="5" id="volume_all" style="max-width:220px;">
+                <span class="text-nowrap" style="min-width:40px;" id="volume_all_display">—</span>
+                <button class="btn btn-sm btn-primary" id="btn_volume_all">Apply to All</button>
             </div>
-            <small class="form-text text-muted"><i class="bi bi-info-circle"></i> Volume slider affects Device 0 (Start) only. Remote devices use their local volume settings.</small>
+            <!-- Per-device rows — populated by JS -->
+            <div id="volume-device-rows"></div>
+            <small class="form-text text-muted mt-1 d-block"><i class="bi bi-info-circle"></i> Volume is saved on each device and persists across restarts.</small>
         </div>
 
         <div class="mb-3">

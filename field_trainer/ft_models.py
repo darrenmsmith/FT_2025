@@ -54,5 +54,8 @@ class NodeInfo:
     ir_sensor_type: Optional[str] = None
     ir_role: Optional[str] = None
 
+    # Audio volume (0-100) last reported by device in heartbeat
+    volume: Optional[int] = None
+
     # Transient socket writer; not included in snapshots
     _writer: Any = field(default=None, repr=False, compare=False)

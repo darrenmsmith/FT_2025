@@ -107,6 +107,7 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                         ir_data=msg.get("ir"),
                         ir_sensor_type=msg.get("ir_sensor_type"),
                         ir_role=msg.get("ir_role"),
+                        volume=msg.get("volume"),
                     )                    
                     # Handle touch events (Phase 1)
                     print(f"📨 Heartbeat from {node_id}: touch_detected={msg.get('touch_detected')}, timestamp={msg.get('touch_timestamp')}")

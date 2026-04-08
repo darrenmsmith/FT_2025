@@ -1,5 +1,5 @@
 {
   "audio_dir": "/opt/field_trainer/audio",
   "voice_gender": "male",
-  "volume_percent": 60
+  "volume_percent": 25
 }

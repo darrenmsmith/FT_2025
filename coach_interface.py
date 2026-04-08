@@ -1747,26 +1747,37 @@ def get_devices():
         devices = []
 
         # Always include Device 0 (controller) as online
+        d0_vol = REGISTRY._audio.settings.volume_percent if REGISTRY._audio else int(settings_mgr.load_settings().get('system_volume', 60))
         devices.append({
             'device_id': '192.168.99.100',
-            'name': 'Start',
-            'status': 'online'
+            'name': 'Start (D0)',
+            'status': 'online',
+            'volume': d0_vol,
         })
 
         # Check status of Cones 1-5
         for i in range(1, 6):
             device_id = f'192.168.99.{100 + i}'
             status = 'offline'
+            vol = None
 
             with REGISTRY.nodes_lock:
                 node = REGISTRY.nodes.get(device_id)
                 if node and node.status not in ('Offline', 'Unknown'):
                     status = 'online'
+                if node:
+                    vol = node.volume
+
+            # Fall back to last-saved value if device hasn't reported yet
+            if vol is None:
+                saved = settings_mgr.load_settings().get(f'volume_{100 + i}')
+                vol = int(saved) if saved else 60
 
             devices.append({
                 'device_id': device_id,
-                'name': f'Cone {i}',
-                'status': status
+                'name': f'Cone {i} (D{i})',
+                'status': status,
+                'volume': vol,
             })
 
         return jsonify({'success': True, 'devices': devices})
@@ -2031,47 +2042,49 @@ def test_led():
 
 @app.route('/api/settings/apply-volume', methods=['POST'])
 def apply_volume():
-    """Apply volume setting to system (MAX98357A I2S amplifier)"""
+    """Apply volume to one device or all devices.
+
+    Body:
+        volume    : 0-100
+        device_id : IP of target device, or "all" (default "all")
+    """
     try:
         data = request.get_json()
-        volume = int(data.get('volume', 60))
+        volume = max(0, min(100, int(data.get('volume', 60))))
+        device_id = data.get('device_id', 'all')
 
-        # Clamp volume to 0-100
-        volume = max(0, min(100, volume))
+        _DEVICE_IPS = {
+            '192.168.99.100': 'D0',
+            '192.168.99.101': 'D1',
+            '192.168.99.102': 'D2',
+            '192.168.99.103': 'D3',
+            '192.168.99.104': 'D4',
+            '192.168.99.105': 'D5',
+        }
 
-        # Update AudioManager volume (controls mpg123 -f parameter)
-        # MAX98357A uses software volume control via mpg123, not ALSA mixer
-        volume_set = False
-        if REGISTRY._audio:
-            try:
-                REGISTRY._audio.set_volume(volume)
-                volume_set = True
-                print(f"✓ Volume set to {volume}% via AudioManager (mpg123 -f parameter)")
-            except Exception as audio_err:
-                print(f"⚠ AudioManager volume update failed: {audio_err}")
-        else:
-            print(f"⚠ No AudioManager available - volume not applied to hardware")
+        targets = list(_DEVICE_IPS.keys()) if device_id == 'all' else [device_id]
 
-        # Also save to settings database for persistence
-        settings_mgr.save_setting('system_volume', str(volume))
+        for ip in targets:
+            if ip == '192.168.99.100':
+                # D0 — set local AudioManager
+                if REGISTRY._audio:
+                    REGISTRY._audio.set_volume(volume)
+                settings_mgr.save_setting(
+                    'system_volume' if device_id == 'all' else f'volume_{ip.split(".")[-1]}',
+                    str(volume)
+                )
+            else:
+                # Field cone — push via TCP
+                REGISTRY.send_to_node(ip, {'cmd': 'set_volume', 'volume': volume})
+                settings_mgr.save_setting(f'volume_{ip.split(".")[-1]}', str(volume))
 
-        return jsonify({
-            'success': True,
-            'volume': volume,
-            'hardware_applied': volume_set
-        })
+        if device_id == 'all':
+            settings_mgr.save_setting('system_volume', str(volume))
+
+        return jsonify({'success': True, 'volume': volume, 'targets': targets})
 
     except Exception as e:
-        print(f"Error setting volume: {e}")
-        import traceback
-        traceback.print_exc()
-        # Return success anyway - don't block UI
-        return jsonify({
-            'success': True,
-            'volume': volume if 'volume' in locals() else 60,
-            'hardware_applied': False,
-            'note': 'Volume saved but hardware control unavailable'
-        })
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ============================================

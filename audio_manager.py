@@ -53,7 +53,8 @@ class AudioManager:
             if self.config_file.exists():
                 with open(self.config_file, 'r') as f:
                     config = json.load(f)
-                    self.current_volume = config.get('volume', self.default_volume)
+                    # Accept both 'volume' and legacy 'volume_percent' key names
+                    self.current_volume = config.get('volume', config.get('volume_percent', self.default_volume))
                     self.voice_gender = config.get('voice_gender', 'female')
                     logger.info(f"Loaded audio config: volume={self.current_volume}, voice={self.voice_gender}")
             else:
@@ -149,17 +150,29 @@ class AudioManager:
         else:
             return self._play_async(audio_path, callback)
     
+    def _apply_softvol(self):
+        """Set ALSA softvol control to current_volume so the slider is audibly effective."""
+        try:
+            subprocess.run(
+                ['amixer', 'set', 'SoftVolume', f'{self.current_volume}%'],
+                capture_output=True, timeout=2
+            )
+        except Exception:
+            pass  # softvol may not exist on this device; mpg123 -f is the fallback
+
     def _play_sync(self, audio_path):
         """Play audio file synchronously (blocking) with volume control"""
         try:
             # Stop any currently playing audio
             self.stop()
-            
-            # Calculate volume scaling for mpg123 -f parameter
-            # Range: -32768 to 32767, where 32767 is maximum volume
-            # We map 0-100% to 0-32767
-            volume_scale = int((self.current_volume / 100.0) * 32767)
-            
+
+            # Set ALSA softvol level (if present) so volume changes are immediate.
+            self._apply_softvol()
+
+            # Also apply mpg123 -f scaling as a second layer.
+            # 32768 = unity gain. Scale to 98304 (3x = +9.5 dB) at 100%.
+            volume_scale = int((self.current_volume / 100.0) * 98304)
+
             # Play using mpg123 with I2S device
             cmd = [
                 'mpg123',

@@ -427,6 +427,9 @@ def connect_to_device0(node_id):
                 heartbeat["ir_sensor_type"] = _ir_config.get('sensor_type', 'mh_flying_fish')
                 heartbeat["ir_role"] = _ir_config.get('role', 'receiver')
 
+                # Report current volume so D0 can display it in Settings
+                heartbeat["volume"] = audio_manager.current_volume
+
                 # Include IR live data when test mode active (for settings page)
                 if ir_sensor and ir_test_active[0]:
                     val = ir_sensor.get_current_value()
@@ -516,6 +519,15 @@ def connect_to_device0(node_id):
                                 led_state = state_map.get(pattern, LEDState.OFF)
                                 led_manager.set_state(led_state)
                                 print(f"✓ LED set to: {pattern} -> {led_state.value}")
+
+                            # Process volume command
+                            if "cmd" in data and data["cmd"] == "set_volume":
+                                new_vol = data.get("volume")
+                                if isinstance(new_vol, (int, float)):
+                                    new_vol = max(0, min(100, int(new_vol)))
+                                    audio_manager.set_volume(new_vol)
+                                    audio_manager._save_config()
+                                    print(f"🔊 Volume set to {new_vol}%")
 
                             # Process audio command if present
                             if "cmd" in data and data["cmd"] == "audio":

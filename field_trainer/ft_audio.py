@@ -57,11 +57,13 @@ class AudioManager:
 
     def _volume_to_mpg123_scale(self, percent: int) -> int:
         """
-        Convert 0-100% to mpg123 -f scale (roughly 0-32768).
-        The contributor used -f to attenuate; keep it simple/linear.
+        Convert 0-100% to mpg123 -f scale.
+        32768 = unity gain (0 dB). We scale up to 98304 (3x = +9.5 dB) at 100%
+        so the slider provides real amplification above the source file level.
+        The PCM5102A DAC has no ALSA hardware mixer, so this is the only volume knob.
         """
         percent = max(0, min(100, percent))
-        return int(32768 * (percent / 100.0))
+        return int(98304 * (percent / 100.0))
 
     def play(self, clip_name: str, volume_percent: Optional[int] = None) -> bool:
         """

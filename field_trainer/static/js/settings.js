@@ -73,10 +73,8 @@ function populateSettings(settings) {
     const voiceGender = settings.voice_gender || 'male';
     document.querySelector(`input[name="voice_gender"][value="${voiceGender}"]`).checked = true;
 
-    // System volume slider
-    const volume = settings.system_volume || '60';
-    document.getElementById('system_volume').value = volume;
-    document.getElementById('volume-display').textContent = volume;
+    // Per-device volume rows — loaded separately via loadDeviceVolumes()
+    loadDeviceVolumes();
 
     // Ready audio file dropdown - NOTE: value is set AFTER populateAudioFiles() in loadSettings()
 
@@ -203,13 +201,17 @@ function attachEventListeners() {
     document.getElementById('test-led-btn').addEventListener('click', testLED);
 
     // Volume slider - update display on input
-    document.getElementById('system_volume').addEventListener('input', function() {
-        document.getElementById('volume-display').textContent = this.value;
+    // "Set All" volume slider — live display
+    document.getElementById('volume_all').addEventListener('input', function() {
+        document.getElementById('volume_all_display').textContent = this.value + '%';
     });
 
-    // Volume slider - apply volume on change (mouse release)
-    document.getElementById('system_volume').addEventListener('change', async function() {
-        await applyVolume(this.value);
+    // "Apply to All" button
+    document.getElementById('btn_volume_all').addEventListener('click', async function() {
+        const vol = parseInt(document.getElementById('volume_all').value);
+        await applyVolume(vol, 'all');
+        // Refresh displayed per-device sliders
+        loadDeviceVolumes();
     });
 
     // Save test audio preferences when changed
@@ -724,30 +726,73 @@ async function testLED() {
 }
 
 /**
- * Apply volume to system
+ * Load per-device volume sliders from /api/settings/devices
  */
-async function applyVolume(volume) {
+async function loadDeviceVolumes() {
     try {
-        console.log(`[Volume] Setting volume to ${volume}%`);
+        const resp = await fetch('/api/settings/devices');
+        const data = await resp.json();
+        if (!data.success) return;
+
+        const container = document.getElementById('volume-device-rows');
+        container.innerHTML = '';
+
+        for (const dev of data.devices) {
+            const vol = dev.volume ?? 60;
+            const offline = dev.status !== 'online';
+            const row = document.createElement('div');
+            row.className = 'd-flex align-items-center gap-3 mb-1 py-1';
+            row.innerHTML = `
+                <span class="text-nowrap" style="min-width:110px;">
+                    ${dev.name}
+                    ${offline ? '<span class="badge bg-secondary ms-1">offline</span>' : ''}
+                </span>
+                <input type="range" class="form-range flex-grow-1" min="0" max="100" step="5"
+                       style="max-width:220px;"
+                       data-device="${dev.device_id}"
+                       value="${vol}"
+                       ${offline ? 'disabled' : ''}>
+                <span class="text-nowrap" style="min-width:40px;" id="vdisp_${dev.device_id.split('.').pop()}">${vol}%</span>
+                <button class="btn btn-sm btn-outline-secondary" data-device="${dev.device_id}" ${offline ? 'disabled' : ''}>Set</button>`;
+            container.appendChild(row);
+
+            const slider = row.querySelector('input[type=range]');
+            const display = row.querySelector(`#vdisp_${dev.device_id.split('.').pop()}`);
+            const btn = row.querySelector('button');
+
+            slider.addEventListener('input', () => { display.textContent = slider.value + '%'; });
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.textContent = '…';
+                await applyVolume(parseInt(slider.value), dev.device_id);
+                btn.textContent = '✓';
+                setTimeout(() => { btn.disabled = false; btn.textContent = 'Set'; }, 1200);
+            });
+        }
+
+        // Seed "Set All" slider with D0's current volume
+        const d0 = data.devices.find(d => d.device_id === '192.168.99.100');
+        if (d0) {
+            document.getElementById('volume_all').value = d0.volume ?? 60;
+            document.getElementById('volume_all_display').textContent = (d0.volume ?? 60) + '%';
+        }
+    } catch (e) {
+        console.error('[Volume] loadDeviceVolumes error:', e);
+    }
+}
+
+/**
+ * Apply volume to one device or all devices
+ */
+async function applyVolume(volume, deviceId = 'all') {
+    try {
         const response = await fetch('/api/settings/apply-volume', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ volume: parseInt(volume) })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ volume: parseInt(volume), device_id: deviceId })
         });
-
         const data = await response.json();
-
-        if (data.success) {
-            if (data.hardware_applied) {
-                console.log(`[Volume] ✓ Volume set to ${volume}% (hardware applied)`);
-            } else {
-                console.log(`[Volume] ⚠ Volume saved to ${volume}% (no audio hardware available)`);
-            }
-        } else {
-            console.error('[Volume] Failed to set volume:', data.error);
-        }
+        if (!data.success) console.error('[Volume] Failed:', data.error);
     } catch (error) {
         console.error('[Volume] Exception:', error);
     }
