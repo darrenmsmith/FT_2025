@@ -86,7 +86,13 @@ class IrSensor:
         try:
             from gpiozero import DigitalInputDevice
             self._sensor = DigitalInputDevice(self.gpio_pin, pull_up=True)
-            self._sensor.when_activated = self._on_beam_break
+            if self.sensor_type == TYPE_ADAFRUIT_BREAKBEAM:
+                # Adafruit break-beam: beam intact = pin LOW, beam broken = pin HIGH
+                # pin HIGH = gpiozero "deactivated" (inactive with pull_up=True)
+                self._sensor.when_deactivated = self._on_beam_break
+            else:
+                # MH Flying Fish: object detected = pin LOW = gpiozero "activated"
+                self._sensor.when_activated = self._on_beam_break
             logger.info(f"IR sensor ({self.sensor_type}) initialised on GPIO {self.gpio_pin}")
         except Exception as e:
             logger.warning(f"IR sensor not available on GPIO {self.gpio_pin}: {e}")
@@ -157,10 +163,20 @@ class IrSensor:
     # ------------------------------------------------------------------
 
     def get_current_value(self):
-        """Return 1 = beam broken (pin LOW/active), 0 = beam clear (pin HIGH). None if unavailable."""
-        if self._sensor:
-            return self._sensor.value
-        return None
+        """Return 1 = triggered (beam broken / object detected), 0 = clear. None if unavailable.
+
+        gpiozero with pull_up=True: value=1 when pin LOW (active), value=0 when pin HIGH.
+
+        MH Flying Fish:      pin LOW = object detected  → value=1 → return 1  (no inversion)
+        Adafruit break-beam: pin LOW = beam INTACT       → value=1 → return 0  (invert)
+                             pin HIGH = beam BROKEN      → value=0 → return 1  (invert)
+        """
+        if self._sensor is None:
+            return None
+        raw = self._sensor.value
+        if self.sensor_type == TYPE_ADAFRUIT_BREAKBEAM:
+            return 0 if raw else 1
+        return raw
 
     def get_config(self) -> dict:
         """Return sensor configuration for heartbeat / API responses."""

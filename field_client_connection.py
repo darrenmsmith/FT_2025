@@ -328,6 +328,8 @@ def connect_to_device0(node_id):
     ir_test_active = [False]     # True while IR test mode active (settings page)
     ir_trip_pending = [False]    # Set by IR callback to send immediate trip message
     ir_trip_event = __import__('threading').Event()  # Interrupts heartbeat sleep on trip
+    _ir_test_break_count = [0]       # Number of beam breaks detected during test mode
+    _ir_test_last_break_ts = [None]  # Epoch timestamp of most recent test-mode beam break
     _last_clock_sync = [0.0]     # epoch of last clock correction — rate-limit to once/minute
     _clock_sync_pending = [False]  # True = sync requested (e.g. at deploy); use next fresh master_time
     heartbeat_interval = [5]  # Default 5 seconds, can be changed by deployment
@@ -432,10 +434,9 @@ def connect_to_device0(node_id):
 
                 # Include IR live data when test mode active (for settings page)
                 if ir_sensor and ir_test_active[0]:
-                    val = ir_sensor.get_current_value()
                     heartbeat["ir"] = {
-                        "value": val,
-                        "status": "beam_broken" if val == 1 else "clear",
+                        "break_count": _ir_test_break_count[0],
+                        "last_break_ts": _ir_test_last_break_ts[0],
                     }
 
                 # Include sonar live data when active (for remote monitoring / test UI)
@@ -592,9 +593,19 @@ def connect_to_device0(node_id):
                                 enabled = data.get("enabled", False)
                                 if enabled:
                                     ir_test_active[0] = True
+                                    _ir_test_break_count[0] = 0
+                                    _ir_test_last_break_ts[0] = None
+                                    if ir_sensor:
+                                        def _ir_test_cb(event):
+                                            _ir_test_break_count[0] += 1
+                                            _ir_test_last_break_ts[0] = event.get('timestamp')
+                                            ir_trip_event.set()  # wake heartbeat immediately
+                                        ir_sensor.start_test_mode(_ir_test_cb)
                                     print("🚦 IR test mode started")
                                 else:
                                     ir_test_active[0] = False
+                                    if ir_sensor:
+                                        ir_sensor.stop_test_mode()
                                     print("🚦 IR test mode stopped")
 
                             # Process IR arm/disarm command (sprint finish line)

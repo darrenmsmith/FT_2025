@@ -578,6 +578,27 @@ def deploy_course(session_id):
             REGISTRY.set_led('192.168.99.100', pattern='solid_amber')
             print("   ✅ 192.168.99.100 (Gateway) → AMBER")
 
+            # Set finish-line cones to AMBER on deploy
+            _timing_mode = sprint_config.get('timing_mode', course.get('timing_mode', 'manual')) if sprint_config else course.get('timing_mode', 'manual')
+            _finish_cone_id = sprint_config.get('finish_cone_id') if sprint_config else course.get('finish_cone_id')
+            _finish_ips = set()
+            if _timing_mode == 'ir_breakbeam':
+                if _finish_cone_id:
+                    _finish_ips.add(_finish_cone_id)
+                with REGISTRY.nodes_lock:
+                    for _ip, _node in REGISTRY.nodes.items():
+                        if (getattr(_node, 'ir_role', None) == 'emitter' and
+                                getattr(_node, 'ir_sensor_type', None) == 'adafruit_breakbeam'):
+                            _finish_ips.add(_ip)
+            elif _timing_mode == 'ir_single' and _finish_cone_id:
+                _finish_ips.add(_finish_cone_id)
+            for _fip in _finish_ips:
+                try:
+                    REGISTRY.set_led(_fip, pattern='solid_amber')
+                    print(f"   ✅ {_fip} (finish cone) → AMBER")
+                except Exception as _e:
+                    print(f"   ⚠️  Failed to set {_fip} to amber: {_e}")
+
         elif course.get('course_type') == 'reaction_sprint':
             # Reaction Sprint: Set cones to GREEN (ready)
             print("\n🟢 Reaction Sprint - setting cones to GREEN...")

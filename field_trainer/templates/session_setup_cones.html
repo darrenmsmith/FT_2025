@@ -243,7 +243,42 @@
             {% endif %}
         </div>
     </div>
-    
+
+{% if course.course_type == 'sprint' and course.timing_mode == 'ir_breakbeam' %}
+    <!-- Break-Beam Test -->
+    <div class="card mb-4" id="breakBeamTestPanel">
+        <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-reception-4 text-info"></i> Break-Beam Test</h5>
+            <div>
+                <button class="btn btn-info btn-sm me-2" id="bbTestBtn" onclick="startBreakBeamTest()">
+                    <i class="bi bi-play-fill"></i> Test Beam
+                </button>
+                <button class="btn btn-secondary btn-sm" id="bbStopBtn" onclick="stopBreakBeamTest()" disabled>
+                    <i class="bi bi-stop-fill"></i> Stop
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row text-center mb-3">
+                <div class="col-6">
+                    <div class="small text-muted mb-1">Emitter</div>
+                    <div id="bbEmitterStatus"><span class="text-muted">—</span></div>
+                </div>
+                <div class="col-6">
+                    <div class="small text-muted mb-1">Receiver</div>
+                    <div id="bbReceiverStatus"><span class="text-muted">—</span></div>
+                </div>
+            </div>
+            <div class="text-center">
+                <div class="small text-muted mb-1">Detection</div>
+                <div id="bbBeamStatus" style="font-size:1.4rem;"><span class="text-muted">—</span></div>
+                <div id="bbBreakCount" class="small text-muted mt-1" style="display:none;"></div>
+            </div>
+            <p class="text-muted small text-center mt-2 mb-0">Start test then walk through the beam to verify detection</p>
+        </div>
+    </div>
+{% endif %}
+
     <!-- Diagram -->
     <div class="card mb-4">
         <div class="card-header">
@@ -596,6 +631,140 @@ document.getElementById('deployBtn').addEventListener('click', async function() 
     }
 });
 
+// ── Break-Beam Test ───────────────────────────────────────────────────────
+const bbFinishConeId = '{{ course.finish_cone_id or "" }}';
+
+function bbIpToDeviceNum(ip) {
+    return parseInt(ip.split('.').pop()) - 100;
+}
+
+let bbTestActive     = false;
+let bbPollInterval   = null;
+let bbStatusInterval = null;
+let bbLastBreakTs    = null;   // epoch of most recent beam break from server
+let bbBreakCount     = 0;      // total breaks seen in this test session
+
+async function bbPollOnline() {
+    if (bbTestActive) return;
+    try {
+        const r = await fetch('/api/ir/devices/status');
+        const d = await r.json();
+        bbUpdateDeviceStatus(d.devices || []);
+    } catch(e) {}
+}
+
+function bbUpdateDeviceStatus(devices) {
+    const emitter  = devices.find(dv => dv.sensor_type === 'adafruit_breakbeam' && dv.role === 'emitter' && dv.device_num !== 0);
+    const receiver = devices.find(dv => dv.ip === bbFinishConeId);
+    const emEl = document.getElementById('bbEmitterStatus');
+    const rxEl = document.getElementById('bbReceiverStatus');
+    if (!emEl || !rxEl) return;
+    emEl.innerHTML = emitter
+        ? `<span class="badge ${emitter.online ? 'bg-success' : 'bg-danger'}">${emitter.online ? 'Online' : 'Offline'}</span><div class="small text-muted">D${emitter.device_num}</div>`
+        : '<span class="badge bg-secondary">Not found</span>';
+    rxEl.innerHTML = receiver
+        ? `<span class="badge ${receiver.online ? 'bg-success' : 'bg-danger'}">${receiver.online ? 'Online' : 'Offline'}</span><div class="small text-muted">D${bbIpToDeviceNum(bbFinishConeId)}</div>`
+        : '<span class="badge bg-secondary">Not found</span>';
+}
+
+async function startBreakBeamTest() {
+    const receiverNum = bbIpToDeviceNum(bbFinishConeId);
+    const testBtn = document.getElementById('bbTestBtn');
+    const stopBtn = document.getElementById('bbStopBtn');
+    if (testBtn) testBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = false;
+    document.getElementById('bbBeamStatus').innerHTML = '<span class="text-muted">Starting…</span>';
+    try {
+        const r = await fetch(`/api/ir/device/${receiverNum}/test`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ active: true })
+        });
+        const d = await r.json();
+        if (!d.success) {
+            alert('Failed to start IR test: ' + (d.error || 'unknown error'));
+            if (testBtn) testBtn.disabled = false;
+            if (stopBtn) stopBtn.disabled = true;
+            return;
+        }
+    } catch(e) {
+        alert('Network error starting IR test');
+        if (testBtn) testBtn.disabled = false;
+        if (stopBtn) stopBtn.disabled = true;
+        return;
+    }
+    bbTestActive  = true;
+    bbLastBreakTs = null;
+    bbBreakCount  = 0;
+    document.getElementById('bbBeamStatus').innerHTML = '<span class="badge bg-secondary px-4 py-2 fs-6">WAITING — walk through beam</span>';
+    document.getElementById('bbBreakCount').style.display = 'none';
+    bbPollInterval = setInterval(bbPollBeamStatus, 400);
+}
+
+async function stopBreakBeamTest() {
+    if (bbPollInterval) { clearInterval(bbPollInterval); bbPollInterval = null; }
+    bbTestActive  = false;
+    bbLastBreakTs = null;
+    bbBreakCount  = 0;
+    const receiverNum = bbIpToDeviceNum(bbFinishConeId);
+    try {
+        await fetch(`/api/ir/device/${receiverNum}/test`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ active: false })
+        });
+    } catch(e) {}
+    const testBtn = document.getElementById('bbTestBtn');
+    const stopBtn = document.getElementById('bbStopBtn');
+    if (testBtn) testBtn.disabled = false;
+    if (stopBtn) stopBtn.disabled = true;
+    const statusEl = document.getElementById('bbBeamStatus');
+    if (statusEl) statusEl.innerHTML = '<span class="text-muted">—</span>';
+}
+
+async function bbPollBeamStatus() {
+    if (!bbTestActive) return;
+    try {
+        const r = await fetch('/api/ir/devices/status');
+        const d = await r.json();
+        const devices = d.devices || [];
+        bbUpdateDeviceStatus(devices);
+        const receiver = devices.find(dv => dv.ip === bbFinishConeId);
+        const statusEl = document.getElementById('bbBeamStatus');
+        if (!statusEl) return;
+        if (receiver && receiver.ir_data) {
+            const serverBreakCount = receiver.ir_data.break_count || 0;
+            const serverLastTs     = receiver.ir_data.last_break_ts || null;
+            if (serverBreakCount > bbBreakCount && serverLastTs) {
+                // New break detected
+                bbBreakCount  = serverBreakCount;
+                bbLastBreakTs = serverLastTs;
+            }
+            const countEl = document.getElementById('bbBreakCount');
+            if (bbLastBreakTs) {
+                const ago = Math.round(Date.now() / 1000 - bbLastBreakTs);
+                statusEl.innerHTML = '<span class="badge bg-success px-4 py-2 fs-6"><i class="bi bi-check-circle-fill me-1"></i>DETECTED</span>';
+                if (countEl) {
+                    countEl.style.display = '';
+                    countEl.textContent = `${bbBreakCount} detection${bbBreakCount !== 1 ? 's' : ''} — last ${ago < 2 ? 'just now' : ago + 's ago'}`;
+                }
+            } else {
+                statusEl.innerHTML = '<span class="badge bg-secondary px-4 py-2 fs-6">WAITING — walk through beam</span>';
+                if (countEl) countEl.style.display = 'none';
+            }
+        } else {
+            statusEl.innerHTML = '<span class="text-muted">Waiting for data…</span>';
+        }
+    } catch(e) {}
+}
+
+// Auto-poll online status on load if break-beam course
+if (bbFinishConeId) {
+    bbPollOnline();
+    bbStatusInterval = setInterval(bbPollOnline, 3000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
 // Initialise UI state from saved course values on page load
 const _savedTimingMode = document.querySelector('input[name="sprintTiming"]:checked')?.value || 'manual';
 onTimingModeChange();   // shows/hides finish cone row + sets correct SVG

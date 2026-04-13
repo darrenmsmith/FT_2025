@@ -27,6 +27,25 @@ class SprintService:
         self._arm_fn   = arm_fn
         self._disarm_fn = disarm_fn
 
+    def _get_finish_cone_ips(self, timing_mode: str, finish_cone_id: str) -> list:
+        """Return list of IPs for finish-line cones (receiver + emitter) for LED commands."""
+        ips = set()
+        if timing_mode == 'ir_breakbeam':
+            if finish_cone_id:
+                ips.add(finish_cone_id)
+            # Also include the emitter cone
+            try:
+                with self.registry.nodes_lock:
+                    for ip, node in self.registry.nodes.items():
+                        if (getattr(node, 'ir_role', None) == 'emitter' and
+                                getattr(node, 'ir_sensor_type', None) == 'adafruit_breakbeam'):
+                            ips.add(ip)
+            except Exception:
+                pass
+        elif timing_mode == 'ir_single' and finish_cone_id:
+            ips.add(finish_cone_id)
+        return list(ips)
+
     # ------------------------------------------------------------------ #
     # Session lifecycle                                                    #
     # ------------------------------------------------------------------ #
@@ -50,8 +69,15 @@ class SprintService:
         # Mark session active in DB
         self.db.start_session(session_id)
 
-        # Set start cone to amber (ready/waiting)
-        self.registry.set_led(start_cone_id, 'solid_amber')
+        # Set start cone to green — session is active
+        self.registry.set_led(start_cone_id, 'solid_green')
+
+        # Set finish-line cones to green if break-beam timing is configured
+        timing_mode = course.get('timing_mode', 'manual')
+        finish_cone_id = course.get('finish_cone_id')
+        finish_cone_ips = self._get_finish_cone_ips(timing_mode, finish_cone_id)
+        for ip in finish_cone_ips:
+            self.registry.set_led(ip, 'solid_green')
 
         # Get first queued run
         next_run = self.db.get_next_queued_run(session_id)
@@ -60,8 +86,9 @@ class SprintService:
             self.session_state = {
                 'session_id': session_id,
                 'start_cone_id': start_cone_id,
-                'finish_cone_id': course.get('finish_cone_id'),   # None = manual timing
-                'timing_mode': course.get('timing_mode', 'manual'),
+                'finish_cone_id': finish_cone_id,
+                'finish_cone_ips': finish_cone_ips,
+                'timing_mode': timing_mode,
                 'countdown_interval': course.get('countdown_interval') or 5,
                 'distance': course.get('distance'),
                 'distance_unit': course.get('distance_unit', 'yards'),
@@ -82,6 +109,7 @@ class SprintService:
         """End session — mark DB, turn off cone."""
         with self.state_lock:
             start_cone_id = self.session_state.get('start_cone_id')
+            finish_cone_ips = self.session_state.get('finish_cone_ips', [])
             if self.session_state.get('session_id') != session_id:
                 return {'success': False, 'error': 'Session not active'}
 
@@ -91,7 +119,14 @@ class SprintService:
             self.db.mark_session_incomplete(session_id, reason)
 
         if start_cone_id:
-            self.registry.set_led(start_cone_id, 'off')
+            self.registry.set_led(start_cone_id, 'solid_amber')
+
+        # Set finish-line cones to amber
+        for ip in finish_cone_ips:
+            try:
+                self.registry.set_led(ip, 'solid_amber')
+            except Exception:
+                pass
 
         self.registry.log(f"[SPRINT] Session ended ({reason})", source='sprint')
 
@@ -190,6 +225,7 @@ class SprintService:
                 return {'success': False, 'error': 'Session not active'}
             run_id = self.session_state.get('current_run_id')
             start_cone_id = self.session_state.get('start_cone_id')
+            finish_cone_ips = self.session_state.get('finish_cone_ips', [])
             distance = self.session_state.get('distance')
             distance_unit = self.session_state.get('distance_unit', 'yards')
             if not run_id:
@@ -213,8 +249,8 @@ class SprintService:
             except Exception as e:
                 self.registry.log(f"[SPRINT] IR disarm failed: {e}", source='sprint')
 
-        # Cone back to amber
-        self.registry.set_led(start_cone_id, 'solid_amber')
+        # Cone stays green — session still active, waiting for next athlete
+        self.registry.set_led(start_cone_id, 'solid_green')
 
         # Check personal best
         run = self.db.get_run(run_id)
@@ -241,7 +277,12 @@ class SprintService:
         if not next_run:
             self.registry.log("[SPRINT] All athletes done — completing session", source='sprint')
             self.db.complete_session(session_id)
-            self.registry.set_led(start_cone_id, 'off')
+            self.registry.set_led(start_cone_id, 'solid_amber')
+            for ip in finish_cone_ips:
+                try:
+                    self.registry.set_led(ip, 'solid_amber')
+                except Exception:
+                    pass
             with self.state_lock:
                 self.session_state['status'] = 'completed'
 
@@ -348,7 +389,7 @@ class SprintService:
                 return {'success': False, 'error': 'Session not active'}
             start_cone_id = self.session_state.get('start_cone_id')
 
-        self.registry.set_led(start_cone_id, 'solid_amber')
+        self.registry.set_led(start_cone_id, 'solid_green')
 
         next_run = self.db.get_next_queued_run(session_id)
 
