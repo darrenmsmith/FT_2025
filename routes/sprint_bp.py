@@ -139,9 +139,10 @@ def monitor(session_id):
 # ===========================================================================
 
 def _timer_event_generator(session_id):
-    """Generator for SSE stream — yields beep_fired and ir_stopped events."""
+    """Generator for SSE stream — yields beep_fired, ir_stopped, and ir_beam_status events."""
     last_beep_ts    = None
     last_ir_result  = None
+    last_beam_ok    = None
     deadline = time.time() + 3600  # 1-hour max connection
 
     while time.time() < deadline:
@@ -157,6 +158,16 @@ def _timer_event_generator(session_id):
         if ir_result and ir_result != last_ir_result:
             last_ir_result = ir_result
             yield f"event: ir_stopped\ndata: {json.dumps(ir_result)}\n\n"
+
+        # Check finish cone beam health
+        finish_cone_id = state.get('finish_cone_id')
+        if finish_cone_id:
+            with REGISTRY.nodes_lock:
+                node = REGISTRY.nodes.get(finish_cone_id)
+                beam_ok = node.ir_beam_ok if node else None
+            if beam_ok is not None and beam_ok != last_beam_ok:
+                last_beam_ok = beam_ok
+                yield f"event: ir_beam_status\ndata: {json.dumps({'ok': beam_ok})}\n\n"
 
         yield ": keepalive\n\n"
         time.sleep(0.1)

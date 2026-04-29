@@ -19,6 +19,7 @@ import json
 import os
 import time
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class IrSensor:
         self._last_trigger  = 0.0
         self._test_mode     = False
         self._test_callback = None
+        self._beam_broken   = False  # event-driven beam state for health monitoring
         self._init_sensor()
 
     # ------------------------------------------------------------------
@@ -90,6 +92,8 @@ class IrSensor:
                 # Adafruit break-beam: beam intact = pin LOW, beam broken = pin HIGH
                 # pin HIGH = gpiozero "deactivated" (inactive with pull_up=True)
                 self._sensor.when_deactivated = self._on_beam_break
+                # Initialise beam state from current pin reading
+                self._beam_broken = not self._sensor.is_active
             else:
                 # MH Flying Fish: object detected = pin LOW = gpiozero "activated"
                 self._sensor.when_activated = self._on_beam_break
@@ -103,6 +107,7 @@ class IrSensor:
     # ------------------------------------------------------------------
 
     def _on_beam_break(self):
+        self._beam_broken = True  # set immediately; cleared by polling in is_beam_intact()
         now = time.time()
         if now - self._last_trigger < self._debounce_s:
             return
@@ -123,6 +128,10 @@ class IrSensor:
     # ------------------------------------------------------------------
     # Public API — course lifecycle
     # ------------------------------------------------------------------
+
+    def reset_beam_state(self):
+        """Reset beam health tracking — call before a new run or after test mode."""
+        self._beam_broken = False
 
     def arm(self):
         """Enable detection — call when a sprint run goes live (beep fires)."""
@@ -161,6 +170,17 @@ class IrSensor:
     # ------------------------------------------------------------------
     # Public API — status
     # ------------------------------------------------------------------
+
+    def is_beam_intact(self) -> Optional[bool]:
+        """True if beam is intact, False if broken, None if unavailable.
+        Simple direct GPIO poll — caller uses consecutive-miss counting to
+        filter transient noise. Only meaningful for adafruit_breakbeam receiver.
+        """
+        if self._sensor is None or self.role == ROLE_EMITTER:
+            return None
+        if self.sensor_type == TYPE_ADAFRUIT_BREAKBEAM:
+            return bool(self._sensor.is_active)  # pull_up=True: active=LOW=beam intact
+        return None
 
     def get_current_value(self):
         """Return 1 = triggered (beam broken / object detected), 0 = clear. None if unavailable.

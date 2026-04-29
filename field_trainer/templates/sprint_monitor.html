@@ -107,6 +107,12 @@
                 <i class="fas fa-stop"></i> Manual Override
             </button>
         </div>
+        {% if course.timing_mode == 'ir_breakbeam' %}
+        <div id="irBeamLostBanner" class="alert alert-danger text-center py-2 mb-1" style="display:none;">
+            <i class="bi bi-exclamation-triangle-fill"></i> <strong>IR Beam Signal Lost</strong>
+            <div class="small">Check cone alignment and spacing</div>
+        </div>
+        {% endif %}
         <div id="lastResultBanner" class="alert alert-info mt-2 text-center" style="display:none;"></div>
     </div>
 </div>
@@ -268,6 +274,12 @@ function connectSSE() {
     });
     es.addEventListener('ir_stopped', (e) => {
         try { onIrStop(JSON.parse(e.data)); } catch(_) {}
+    });
+    es.addEventListener('ir_beam_status', (e) => {
+        try {
+            const banner = document.getElementById('irBeamLostBanner');
+            if (banner) banner.style.display = JSON.parse(e.data).ok ? 'none' : 'block';
+        } catch(_) {}
     });
 }
 

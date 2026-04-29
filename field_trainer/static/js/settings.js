@@ -2539,3 +2539,143 @@ async function confirmIrRange() {
     }
     countEl.textContent = '';
 }
+
+// ── Break-Beam Test (Adafruit 5mm) on Settings page ──────────────────────────
+let bbSettingsTestActive  = false;
+let bbSettingsPollInterval = null;
+let bbSettingsBreakCount  = 0;
+let bbSettingsLastBreakTs = null;
+let bbSettingsReceiverNum = null;  // populated from device list
+
+// Load device status on page load to populate emitter/receiver status
+refreshBbSettingsDevices();
+
+async function refreshBbSettingsDevices() {
+    try {
+        const r = await fetch('/api/ir/devices/status');
+        const d = await r.json();
+        bbSettingsUpdateDeviceStatus(d.devices || []);
+    } catch(e) {}
+}
+
+function bbSettingsUpdateDeviceStatus(devices) {
+    const emitter  = devices.find(dv => dv.sensor_type === 'adafruit_breakbeam' && dv.role === 'emitter');
+    const receiver = devices.find(dv => dv.sensor_type === 'adafruit_breakbeam' && dv.role === 'receiver');
+    bbSettingsReceiverNum = receiver ? receiver.device_num : null;
+
+    // Hide the whole card if no break-beam devices are configured
+    const card = document.getElementById('bbTestCard');
+    if (card) card.style.display = (emitter || receiver) ? '' : 'none';
+
+    const emEl = document.getElementById('bbSettingsEmitterStatus');
+    const rxEl = document.getElementById('bbSettingsReceiverStatus');
+    const testBtn = document.getElementById('bbSettingsTestBtn');
+    if (!emEl || !rxEl) return;
+
+    emEl.innerHTML = emitter
+        ? `<span class="badge ${emitter.online ? 'bg-success' : 'bg-danger'}">${emitter.online ? 'Online' : 'Offline'}</span><div class="small text-muted">D${emitter.device_num}</div>`
+        : '<span class="badge bg-secondary">Not found</span>';
+    rxEl.innerHTML = receiver
+        ? `<span class="badge ${receiver.online ? 'bg-success' : 'bg-danger'}">${receiver.online ? 'Online' : 'Offline'}</span><div class="small text-muted">D${receiver.device_num}</div>`
+        : '<span class="badge bg-secondary">Not found</span>';
+
+    if (testBtn) testBtn.disabled = !(receiver && receiver.online);
+}
+
+async function startBbSettingsTest() {
+    if (!bbSettingsReceiverNum) {
+        await refreshBbSettingsDevices();
+        if (!bbSettingsReceiverNum) { alert('No break-beam receiver found online.'); return; }
+    }
+    const testBtn = document.getElementById('bbSettingsTestBtn');
+    const stopBtn = document.getElementById('bbSettingsStopBtn');
+    if (testBtn) testBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = false;
+    document.getElementById('bbSettingsBeamStatus').innerHTML = '<span class="text-muted">Starting…</span>';
+
+    try {
+        const r = await fetch(`/api/ir/device/${bbSettingsReceiverNum}/test`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ active: true })
+        });
+        const d = await r.json();
+        if (!d.success) {
+            alert('Failed to start break-beam test: ' + (d.error || 'unknown error'));
+            if (testBtn) testBtn.disabled = false;
+            if (stopBtn) stopBtn.disabled = true;
+            return;
+        }
+    } catch(e) {
+        alert('Network error starting break-beam test');
+        if (testBtn) testBtn.disabled = false;
+        if (stopBtn) stopBtn.disabled = true;
+        return;
+    }
+
+    bbSettingsTestActive  = true;
+    bbSettingsBreakCount  = 0;
+    bbSettingsLastBreakTs = null;
+    document.getElementById('bbSettingsBeamStatus').innerHTML = '<span class="badge bg-secondary px-4 py-2 fs-6">WAITING — walk through beam</span>';
+    document.getElementById('bbSettingsBreakCount').style.display = 'none';
+    bbSettingsPollInterval = setInterval(bbSettingsPollStatus, 400);
+}
+
+async function stopBbSettingsTest() {
+    if (bbSettingsPollInterval) { clearInterval(bbSettingsPollInterval); bbSettingsPollInterval = null; }
+    bbSettingsTestActive  = false;
+    bbSettingsBreakCount  = 0;
+    bbSettingsLastBreakTs = null;
+
+    const testBtn = document.getElementById('bbSettingsTestBtn');
+    const stopBtn = document.getElementById('bbSettingsStopBtn');
+    if (stopBtn) stopBtn.disabled = true;
+
+    if (bbSettingsReceiverNum !== null) {
+        try {
+            await fetch(`/api/ir/device/${bbSettingsReceiverNum}/test`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ active: false })
+            });
+        } catch(e) {}
+    }
+
+    document.getElementById('bbSettingsBeamStatus').innerHTML = '<span class="text-muted">—</span>';
+    document.getElementById('bbSettingsBreakCount').style.display = 'none';
+    await refreshBbSettingsDevices();
+    if (testBtn) testBtn.disabled = !(bbSettingsReceiverNum !== null);
+}
+
+async function bbSettingsPollStatus() {
+    if (!bbSettingsTestActive) return;
+    try {
+        const r = await fetch('/api/ir/devices/status');
+        const d = await r.json();
+        const devices = d.devices || [];
+        bbSettingsUpdateDeviceStatus(devices);
+
+        const receiver = devices.find(dv => dv.device_num === bbSettingsReceiverNum);
+        const statusEl = document.getElementById('bbSettingsBeamStatus');
+        const countEl  = document.getElementById('bbSettingsBreakCount');
+        if (!statusEl || !receiver || !receiver.ir_data) return;
+
+        const serverCount = receiver.ir_data.break_count || 0;
+        const serverTs    = receiver.ir_data.last_break_ts || null;
+
+        if (serverCount > bbSettingsBreakCount && serverTs) {
+            bbSettingsBreakCount  = serverCount;
+            bbSettingsLastBreakTs = serverTs;
+        }
+
+        if (bbSettingsLastBreakTs) {
+            const ago = Math.round(Date.now() / 1000 - bbSettingsLastBreakTs);
+            statusEl.innerHTML = '<span class="badge bg-success px-4 py-2 fs-6"><i class="bi bi-check-circle-fill me-1"></i>DETECTED</span>';
+            countEl.style.display = '';
+            countEl.textContent = `${bbSettingsBreakCount} detection${bbSettingsBreakCount !== 1 ? 's' : ''} — last ${ago < 2 ? 'just now' : ago + 's ago'}`;
+        } else {
+            statusEl.innerHTML = '<span class="badge bg-secondary px-4 py-2 fs-6">WAITING — walk through beam</span>';
+            countEl.style.display = 'none';
+        }
+    } catch(e) {}
+}

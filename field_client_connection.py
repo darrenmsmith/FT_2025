@@ -330,6 +330,12 @@ def connect_to_device0(node_id):
     ir_trip_event = __import__('threading').Event()  # Interrupts heartbeat sleep on trip
     _ir_test_break_count = [0]       # Number of beam breaks detected during test mode
     _ir_test_last_break_ts = [None]  # Epoch timestamp of most recent test-mode beam break
+    _beam_ok_misses = [0]     # consecutive heartbeats where beam appears broken
+    _beam_ok_streak = [0]    # consecutive heartbeats where beam appears intact (used to clear lost state)
+    _beam_lost      = [False] # latched True once BEAM_LOST_MISSES reached; clears only after BEAM_RESTORE_STREAK
+    _post_test_suppress = [False]  # True after IR test stops; suppresses beam errors until first athlete completes
+    BEAM_LOST_MISSES    = 3  # consecutive broken reads to declare lost  (~15s at 5s heartbeat)
+    BEAM_RESTORE_STREAK = 3  # consecutive intact reads to declare restored (~15s at 5s heartbeat)
     _last_clock_sync = [0.0]     # epoch of last clock correction — rate-limit to once/minute
     _clock_sync_pending = [False]  # True = sync requested (e.g. at deploy); use next fresh master_time
     heartbeat_interval = [5]  # Default 5 seconds, can be changed by deployment
@@ -428,6 +434,32 @@ def connect_to_device0(node_id):
                 # Always report IR sensor config so D0 knows type/role
                 heartbeat["ir_sensor_type"] = _ir_config.get('sensor_type', 'mh_flying_fish')
                 heartbeat["ir_role"] = _ir_config.get('role', 'receiver')
+
+                # Report beam health for adafruit break-beam receiver
+                # Skip only during test mode (deliberate breaks); run even while armed so
+                # sustained loss (emitter moved) is detected across countdown and run.
+                # A real athlete trip lasts <1s, adding at most 1 miss — below 3-miss threshold.
+                if (ir_sensor and ir_sensor.available and
+                        not ir_test_active[0] and
+                        _ir_config.get('sensor_type') == 'adafruit_breakbeam' and
+                        _ir_config.get('role') == 'receiver'):
+                    if _post_test_suppress[0]:
+                        # IR test confirmed alignment — trust it until first athlete completes
+                        heartbeat['ir_beam_ok'] = True
+                    else:
+                        _beam_intact = ir_sensor.is_beam_intact()
+                        if _beam_intact:
+                            _beam_ok_misses[0] = 0
+                            _beam_ok_streak[0] += 1
+                            if _beam_lost[0] and _beam_ok_streak[0] >= BEAM_RESTORE_STREAK:
+                                _beam_lost[0] = False
+                                _beam_ok_streak[0] = 0
+                        else:
+                            _beam_ok_streak[0] = 0
+                            _beam_ok_misses[0] += 1
+                            if _beam_ok_misses[0] >= BEAM_LOST_MISSES:
+                                _beam_lost[0] = True
+                        heartbeat['ir_beam_ok'] = not _beam_lost[0]
 
                 # Report current volume so D0 can display it in Settings
                 heartbeat["volume"] = audio_manager.current_volume
@@ -606,13 +638,26 @@ def connect_to_device0(node_id):
                                     ir_test_active[0] = False
                                     if ir_sensor:
                                         ir_sensor.stop_test_mode()
-                                    print("🚦 IR test mode stopped")
+                                        ir_sensor.reset_beam_state()
+                                    _beam_ok_misses[0] = 0
+                                    _beam_ok_streak[0] = 0
+                                    _beam_lost[0] = False
+                                    _post_test_suppress[0] = True
+                                    print("🚦 IR test mode stopped — beam errors suppressed until first athlete completes")
 
                             # Process IR arm/disarm command (sprint finish line)
+                            if "cmd" in data and data["cmd"] == "beam_reset":
+                                # Do NOT reset miss counter — carry-over misses from a moved
+                                # emitter should persist so the alert fires on the next athlete.
+                                # D0 already clears the stale registry value to suppress the
+                                # immediate false alarm. Miss counter only resets on a good read.
+                                print("🚦 Beam health state reset (miss counter preserved)")
+
                             if "cmd" in data and data["cmd"] == "ir_arm":
                                 if ir_sensor and ir_sensor.available:
                                     ir_armed[0] = True
                                     ir_sensor.arm()
+                                    # Do NOT reset miss counter — see beam_reset comment above
                                     print("🚦 IR sensor armed (sprint finish)")
                                 else:
                                     print("🚦 IR arm command received but sensor unavailable")
@@ -622,7 +667,11 @@ def connect_to_device0(node_id):
                                 if ir_sensor:
                                     ir_sensor.disarm()
                                 ir_trip_pending[0] = False
-                                print("🚦 IR sensor disarmed")
+                                if _post_test_suppress[0]:
+                                    _post_test_suppress[0] = False
+                                    print("🚦 IR sensor disarmed — post-test suppression lifted, beam monitoring active")
+                                else:
+                                    print("🚦 IR sensor disarmed")
 
                             # Clock sync — uses fresh master_time from each heartbeat ACK.
                             # clock_sync command sets a pending flag; actual correction runs on

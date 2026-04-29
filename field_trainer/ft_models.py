@@ -54,6 +54,9 @@ class NodeInfo:
     ir_sensor_type: Optional[str] = None
     ir_role: Optional[str] = None
 
+    # Beam health — True=intact, False=signal lost >2s, None=not applicable
+    ir_beam_ok: Optional[bool] = None
+
     # Audio volume (0-100) last reported by device in heartbeat
     volume: Optional[int] = None
 

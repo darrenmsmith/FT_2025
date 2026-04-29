@@ -768,6 +768,39 @@
     </div>
 </div>
 
+<!-- Break-Beam Test Card -->
+<div class="card mb-4" id="bbTestCard">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <h5 class="mb-0"><i class="bi bi-reception-4 text-info"></i> Break-Beam Test — Cone 4 & 5</h5>
+        <div>
+            <button class="btn btn-info btn-sm me-2" id="bbSettingsTestBtn" onclick="startBbSettingsTest()">
+                <i class="bi bi-play-fill"></i> Test Beam
+            </button>
+            <button class="btn btn-secondary btn-sm" id="bbSettingsStopBtn" onclick="stopBbSettingsTest()" disabled>
+                <i class="bi bi-stop-fill"></i> Stop
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row text-center mb-3">
+            <div class="col-6">
+                <div class="small text-muted mb-1">Emitter</div>
+                <div id="bbSettingsEmitterStatus"><span class="text-muted">—</span></div>
+            </div>
+            <div class="col-6">
+                <div class="small text-muted mb-1">Receiver</div>
+                <div id="bbSettingsReceiverStatus"><span class="text-muted">—</span></div>
+            </div>
+        </div>
+        <div class="text-center">
+            <div class="small text-muted mb-1">Detection</div>
+            <div id="bbSettingsBeamStatus" style="font-size:1.4rem;"><span class="text-muted">—</span></div>
+            <div id="bbSettingsBreakCount" class="small text-muted mt-1" style="display:none;"></div>
+        </div>
+        <p class="text-muted small text-center mt-2 mb-0">Start test then walk through the beam to verify detection</p>
+    </div>
+</div>
+
 <!-- Status Messages -->
 <div id="status-message" class="alert" style="display: none;"></div>
 

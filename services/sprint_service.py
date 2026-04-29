@@ -163,6 +163,17 @@ class SprintService:
 
         self.db.start_run(run_id)
 
+        # Reset beam health state on finish cone at start of each run
+        finish_cone_id = self.session_state.get('finish_cone_id')
+        if finish_cone_id:
+            self.registry.send_to_node(finish_cone_id, {'cmd': 'beam_reset'})
+            # Clear stale ir_beam_ok in registry immediately so SSE doesn't
+            # emit a false alarm before D5's next heartbeat arrives
+            with self.registry.nodes_lock:
+                node = self.registry.nodes.get(finish_cone_id)
+                if node:
+                    node.ir_beam_ok = None
+
         self.registry.log(
             f"[SPRINT] GO — {next_run['athlete_name']}, {interval}s countdown",
             source='sprint'

@@ -107,6 +107,7 @@ class HeartbeatHandler(socketserver.StreamRequestHandler):
                         ir_data=msg.get("ir"),
                         ir_sensor_type=msg.get("ir_sensor_type"),
                         ir_role=msg.get("ir_role"),
+                        ir_beam_ok=msg.get("ir_beam_ok"),
                         volume=msg.get("volume"),
                     )                    
                     # Handle touch events (Phase 1)

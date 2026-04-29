@@ -229,6 +229,9 @@ class Registry:
                     "accelerometer_working": n.accelerometer_working,
                     "audio_working": n.audio_working,
                     "battery_level": n.battery_level,
+                    "ir_beam_ok": n.ir_beam_ok,
+                    "ir_role": n.ir_role,
+                    "ir_sensor_type": n.ir_sensor_type,
                 })
 
         nodes_list.sort(key=lambda x: x.get("node_id", ""))
