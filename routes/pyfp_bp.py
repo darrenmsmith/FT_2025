@@ -474,3 +474,33 @@ def event_record_submit(battery_id, course_type):
         return jsonify({'ok': True, 'event_result_id': result_id, 'pct_body_fat': pct_bf})
 
     return jsonify({'error': 'Unhandled engine'}), 500
+
+
+# ==================== PHASE 4 — PACER BRIDGE ====================
+
+@pyfp_bp.route('/api/pyfp/battery/<battery_id>/pacer/start', methods=['POST'])
+def pacer_start(battery_id):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return jsonify({'error': 'Battery not found'}), 404
+    if battery['completed_at']:
+        return jsonify({'error': 'Battery already completed'}), 409
+    try:
+        from field_trainer.pyfp.pacer_bridge import start_pacer
+        result = start_pacer(battery_id)
+        return jsonify(result), 200 if not result['created'] else 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@pyfp_bp.route('/api/pyfp/battery/<battery_id>/pacer/import', methods=['POST'])
+def pacer_import(battery_id):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return jsonify({'error': 'Battery not found'}), 404
+    try:
+        from field_trainer.pyfp.pacer_bridge import import_pacer_result
+        result = import_pacer_result(battery_id)
+        return jsonify({'ok': True, **result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
