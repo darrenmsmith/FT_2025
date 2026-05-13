@@ -52,6 +52,10 @@ app.register_blueprint(reaction_bp)
 from routes.sprint_bp import sprint_bp
 app.register_blueprint(sprint_bp)
 
+# Register PYFP blueprint
+from routes.pyfp_bp import pyfp_bp
+app.register_blueprint(pyfp_bp)
+
 app.config['SECRET_KEY'] = 'field-trainer-coach-2025'
 
 # Configure logging
