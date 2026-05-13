@@ -208,7 +208,16 @@ def inject_version():
 # Helper function to find which athlete should receive a touch
 @app.route("/")
 def index():
-    """Redirect to dashboard"""
+    """Redirect to dashboard — or PYFP if default_landing setting is 'pyfp' (D24)."""
+    try:
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT setting_value FROM settings WHERE setting_key='default_landing'"
+            ).fetchone()
+        if row and row['setting_value'] == 'pyfp':
+            return redirect('/pyfp/')
+    except Exception:
+        pass
     return redirect(url_for('dashboard'))
 
 @app.route("/health")
@@ -271,7 +280,10 @@ def dashboard():
         # Get filter options
         teams = db.get_all_teams()
         with db.get_connection() as conn:
-            categories = conn.execute('SELECT DISTINCT category FROM courses WHERE category IS NOT NULL ORDER BY category').fetchall()
+            categories = conn.execute(
+                "SELECT DISTINCT category FROM courses "
+                "WHERE category IS NOT NULL AND category != 'PYFP' ORDER BY category"
+            ).fetchall()
         categories = [row['category'] for row in categories]
 
         return render_template('dashboard/index.html',

@@ -1,0 +1,16 @@
+{
+  "name": "PFT 85th Percentile 2010",
+  "rubric": "pft_2026",
+  "source": "President's Challenge / PCSFN 2010",
+  "effective_from": "2010-01-01",
+  "_note": "Stub — full percentile table populated in Phase 7 (scoring.py)",
+  "events": {
+    "pyfp_pacer": {
+      "unit": "laps",
+      "by_age_gender": {
+        "male":   {"10": {"p85": 42}},
+        "female": {"10": {"p85": 28}}
+      }
+    }
+  }
+}

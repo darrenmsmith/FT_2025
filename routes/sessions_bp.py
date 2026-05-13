@@ -33,7 +33,7 @@ session_service = SessionService(db, REGISTRY, active_session_state)
 def session_setup():
     """Session setup page - select team, course, order athletes"""
     teams = db.get_all_teams()
-    courses = db.get_all_courses()
+    courses = [c for c in db.get_all_courses() if not c['course_type'].startswith('pyfp_')]
     return render_template('session_setup.html', teams=teams, courses=courses)
 
 

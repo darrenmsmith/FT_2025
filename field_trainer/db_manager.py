@@ -896,7 +896,15 @@ class DatabaseManager:
         with self.get_connection() as conn:
             rows = conn.execute('SELECT * FROM courses ORDER BY course_name').fetchall()
             return [dict(row) for row in rows]
-    
+
+    def get_pyfp_courses(self) -> List[Dict[str, Any]]:
+        """Get PYFP event courses only (course_type LIKE 'pyfp_%')."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM courses WHERE course_type LIKE 'pyfp_%' ORDER BY course_name"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def update_course(self, course_id: int, **kwargs):
         """Update course fields"""
         allowed_fields = {'course_name', 'description', 'course_type', 'mode', 'category',

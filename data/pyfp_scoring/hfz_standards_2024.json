@@ -1,0 +1,23 @@
+{
+  "name": "FitnessGram HFZ 2024",
+  "rubric": "fitnessgram_hfz",
+  "source": "Cooper Institute",
+  "effective_from": "2024-08-01",
+  "_note": "Stub — full age/gender/event table populated in Phase 7 (scoring.py)",
+  "events": {
+    "pyfp_pacer": {
+      "unit": "laps",
+      "by_age_gender": {
+        "male":   {"10": {"hfz_min": 23, "hfz_max": 61}},
+        "female": {"10": {"hfz_min": 15, "hfz_max": 41}}
+      }
+    },
+    "pyfp_curl_up": {
+      "unit": "count",
+      "by_age_gender": {
+        "male":   {"10": {"hfz_min": 12, "hfz_max": 24}},
+        "female": {"10": {"hfz_min": 12, "hfz_max": 24}}
+      }
+    }
+  }
+}
