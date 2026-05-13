@@ -135,8 +135,67 @@
   <div class="card-body">
     <form id="recordForm">
 
+      {# -------- cadence -------- #}
+      {% if engine == 'cadence' %}
+      <div id="cadencePanel">
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <button type="button" class="btn btn-success btn-lg" id="cadenceStartBtn" onclick="startCadence()">
+            <i class="bi bi-play-fill"></i> Start Cadence
+          </button>
+          <button type="button" class="btn btn-danger btn-lg" id="cadenceStopBtn" onclick="stopCadence()" disabled>
+            <i class="bi bi-stop-fill"></i> Stop
+          </button>
+          <div class="display-6 fw-bold text-primary" id="cadenceTick" style="min-width:2.5rem; text-align:center;">—</div>
+          <span class="text-muted">beeps</span>
+        </div>
+        <div class="alert alert-light small mb-3">
+          <i class="bi bi-info-circle"></i>
+          A beep sounds every <strong>3 seconds</strong>. Each beep = one rep.
+          Click Stop when the athlete cannot keep pace, then enter the rep count.
+        </div>
+        <div id="countEntry" class="d-none">
+          <label class="form-label fw-semibold">Rep count <span class="text-danger">*</span></label>
+          <input type="number" class="form-control" id="countInput"
+                 min="0" max="200" step="1" required style="max-width:160px;">
+          <div class="form-text">Enter the number of completed reps.</div>
+        </div>
+      </div>
+
+      {# -------- timer -------- #}
+      {% elif engine == 'timer' %}
+      <div id="timerPanel">
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <button type="button" class="btn btn-success btn-lg" id="timerStartBtn" onclick="startTimer()">
+            <i class="bi bi-play-fill"></i> Start Timer
+          </button>
+          <button type="button" class="btn btn-danger btn-lg" id="timerStopBtn"
+                  onclick="stopTimer()" disabled>
+            <i class="bi bi-stop-fill"></i>
+            {% if course_type == 'pyfp_plank' %}Fail / Drop{% else %}Fail / Drop{% endif %}
+          </button>
+          <div class="display-4 fw-bold font-monospace text-primary" id="timerDisplay">0:00</div>
+        </div>
+        {% if course_type == 'pyfp_plank' %}
+        <div class="alert alert-light small mb-3">
+          <i class="bi bi-info-circle"></i>
+          Timer counts up. A beep sounds every <strong>30 seconds</strong> as a cue.
+          Click "Fail / Drop" when the athlete breaks position.
+        </div>
+        {% else %}
+        <div class="alert alert-light small mb-3">
+          <i class="bi bi-info-circle"></i>
+          Timer counts up from 0. Click "Fail / Drop" when the athlete drops.
+        </div>
+        {% endif %}
+        <div id="durationEntry" class="d-none">
+          <label class="form-label fw-semibold">Duration (seconds)</label>
+          <input type="number" class="form-control" id="durationInput"
+                 min="0" step="0.1" readonly style="max-width:160px;">
+        </div>
+      </div>
+
       {# -------- manual_count -------- #}
-      {% if engine == 'manual_count' %}
+      {% elif engine == 'manual_count' %}
       <div class="mb-3">
         <label class="form-label fw-semibold">Rep count <span class="text-danger">*</span></label>
         <input type="number" class="form-control" id="countInput"
@@ -285,6 +344,88 @@ const SCHOOL_YEAR  = "{{ battery.school_year }}";
 const TEST_WINDOW  = "{{ battery.test_window }}";
 const BACK_URL     = `/pyfp/athlete/${ATHLETE_ID}?school_year=${SCHOOL_YEAR}&test_window=${TEST_WINDOW}`;
 
+// ==================== CADENCE ENGINE ====================
+const cadenceBeep = new Audio('/static/audio/cadence_beep.mp3');
+let cadenceInterval = null;
+let cadenceTicks = 0;
+
+function startCadence() {
+  cadenceTicks = 0;
+  document.getElementById('cadenceStartBtn').disabled = true;
+  document.getElementById('cadenceStopBtn').disabled = false;
+  document.getElementById('countEntry').classList.add('d-none');
+  // Fire start beep on server (D0 speakers) if available
+  fetch('/api/pyfp/audio/play', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({clip:'cadence_3sec'})}).catch(()=>{});
+  // Browser metronome loop: beep every 3 seconds
+  beepOnce();
+  cadenceInterval = setInterval(beepOnce, 3000);
+}
+
+function beepOnce() {
+  cadenceTicks++;
+  document.getElementById('cadenceTick').textContent = cadenceTicks;
+  cadenceBeep.currentTime = 0;
+  cadenceBeep.play().catch(() => {});
+}
+
+function stopCadence() {
+  clearInterval(cadenceInterval);
+  cadenceInterval = null;
+  document.getElementById('cadenceStartBtn').disabled = false;
+  document.getElementById('cadenceStopBtn').disabled = true;
+  document.getElementById('countEntry').classList.remove('d-none');
+  document.getElementById('countInput').focus();
+}
+
+// ==================== TIMER ENGINE ====================
+const timerBeep = new Audio('/static/audio/cadence_beep.mp3');
+let timerStart = null;
+let timerInterval = null;
+let timerElapsed = 0;
+const IS_PLANK = COURSE_TYPE === 'pyfp_plank';
+
+function startTimer() {
+  timerStart = Date.now();
+  timerElapsed = 0;
+  document.getElementById('timerStartBtn').disabled = true;
+  document.getElementById('timerStopBtn').disabled = false;
+  fetch('/api/pyfp/audio/play', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({clip:'default_beep'})}).catch(()=>{});
+  timerInterval = setInterval(tickTimer, 100);
+}
+
+function tickTimer() {
+  timerElapsed = (Date.now() - timerStart) / 1000;
+  const secs = Math.floor(timerElapsed);
+  const mm = Math.floor(secs / 60).toString();
+  const ss = (secs % 60).toString().padStart(2, '0');
+  document.getElementById('timerDisplay').textContent = `${mm}:${ss}`;
+  // Plank: beep every 30 s
+  if (IS_PLANK && secs > 0 && secs % 30 === 0 && (Date.now() - timerStart) % 30000 < 120) {
+    timerBeep.currentTime = 0;
+    timerBeep.play().catch(() => {});
+    fetch('/api/pyfp/audio/play', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({clip:'default_beep'})}).catch(()=>{});
+  }
+}
+
+function stopTimer() {
+  clearInterval(timerInterval);
+  timerElapsed = (Date.now() - timerStart) / 1000;
+  document.getElementById('timerStartBtn').disabled = false;
+  document.getElementById('timerStopBtn').disabled = true;
+  const durationDisplay = document.getElementById('durationEntry');
+  const durationInput   = document.getElementById('durationInput');
+  if (durationDisplay && durationInput) {
+    durationInput.value = timerElapsed.toFixed(1);
+    durationDisplay.classList.remove('d-none');
+  }
+}
+
 async function runPacer() {
   const resp = await fetch(`/api/pyfp/battery/${BATTERY_ID}/pacer/start`, {method: 'POST'});
   const data = await resp.json();
@@ -333,7 +474,15 @@ document.getElementById('recordForm')?.addEventListener('submit', async function
 
   let payload = {};
 
-  if (ENGINE === 'manual_count') {
+  if (ENGINE === 'cadence') {
+    const v = document.getElementById('countInput')?.value;
+    if (!v) { err.textContent='Stop cadence and enter a rep count first.'; err.classList.remove('d-none'); return; }
+    payload.count = parseInt(v);
+  } else if (ENGINE === 'timer') {
+    const v = document.getElementById('durationInput')?.value;
+    if (!v) { err.textContent='Start and stop the timer first.'; err.classList.remove('d-none'); return; }
+    payload.duration_seconds = parseFloat(v);
+  } else if (ENGINE === 'manual_count') {
     payload.count = parseInt(document.getElementById('countInput').value);
   } else if (ENGINE === 'manual_passfail') {
     payload.right_pass = document.querySelector('input[name="right"]:checked')?.value === 'pass';

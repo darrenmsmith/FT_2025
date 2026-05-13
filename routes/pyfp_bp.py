@@ -252,19 +252,26 @@ def battery_complete(battery_id):
 
 # ==================== PHASE 3 — MANUAL EVENT RECORDING ====================
 
-# Events handled in Phase 3 (manual engines only)
-_PHASE3_ENGINES = {'manual_count', 'manual_measure', 'manual_passfail'}
+# Engines available for recording (expanded each phase)
+_RECORDABLE_ENGINES = {'manual_count', 'manual_measure', 'manual_passfail',  # Phase 3
+                       'cadence', 'timer'}                                    # Phase 5
 
 # metric_name suffix and unit per course_type for performance_history
 _METRIC = {
-    'pyfp_pull_up':          ('pyfp_pull_up_reps',          'reps',      True),
-    'pyfp_modified_pull_up': ('pyfp_modified_pull_up_reps', 'reps',      True),
-    'pyfp_trunk_lift':       ('pyfp_trunk_lift_inches',      'inches',    True),
-    'pyfp_sit_and_reach':    ('pyfp_sit_and_reach_inches',   'inches',    True),
-    'pyfp_v_sit_reach':      ('pyfp_v_sit_reach_inches',     'inches',    True),
-    'pyfp_shoulder_stretch': ('pyfp_shoulder_stretch_score', 'pass_fail', True),
-    'pyfp_bmi':              ('pyfp_bmi_index',              'bmi',       False),
-    'pyfp_skinfold':         ('pyfp_skinfold_pct',           'percent',   False),
+    # Phase 3 — manual engines
+    'pyfp_pull_up':          ('pyfp_pull_up_reps',             'reps',      True),
+    'pyfp_modified_pull_up': ('pyfp_modified_pull_up_reps',    'reps',      True),
+    'pyfp_trunk_lift':       ('pyfp_trunk_lift_inches',         'inches',    True),
+    'pyfp_sit_and_reach':    ('pyfp_sit_and_reach_inches',      'inches',    True),
+    'pyfp_v_sit_reach':      ('pyfp_v_sit_reach_inches',        'inches',    True),
+    'pyfp_shoulder_stretch': ('pyfp_shoulder_stretch_score',    'pass_fail', True),
+    'pyfp_bmi':              ('pyfp_bmi_index',                 'bmi',       False),
+    'pyfp_skinfold':         ('pyfp_skinfold_pct',              'percent',   False),
+    # Phase 5 — cadence + timer engines
+    'pyfp_curl_up':          ('pyfp_curl_up_reps',              'reps',      True),
+    'pyfp_push_up':          ('pyfp_push_up_reps',              'reps',      True),
+    'pyfp_flexed_arm_hang':  ('pyfp_flexed_arm_hang_seconds',   'seconds',   True),
+    'pyfp_plank':            ('pyfp_plank_seconds',             'seconds',   True),
 }
 
 
@@ -311,7 +318,7 @@ def event_record_form(battery_id, course_type):
         engine=engine,
         display_name=display_name,
         event_results=event_results,
-        phase3_available=(engine in _PHASE3_ENGINES),
+        phase3_available=(engine in _RECORDABLE_ENGINES),
     )
 
 
@@ -326,8 +333,8 @@ def event_record_submit(battery_id, course_type):
         return jsonify({'error': 'Unknown event'}), 404
 
     engine = EVENTS[course_type]['engine']
-    if engine not in _PHASE3_ENGINES:
-        return jsonify({'error': f'Engine {engine!r} not available in Phase 3'}), 422
+    if engine not in _RECORDABLE_ENGINES:
+        return jsonify({'error': f'Engine {engine!r} not yet available'}), 422
 
     data = request.get_json(force=True)
     metric_name, metric_unit, is_better_higher = _METRIC.get(
@@ -473,7 +480,56 @@ def event_record_submit(battery_id, course_type):
         )
         return jsonify({'ok': True, 'event_result_id': result_id, 'pct_body_fat': pct_bf})
 
+    # ---- cadence engine: curl_up, push_up ----
+    if engine == 'cadence':
+        count = data.get('count')
+        if count is None:
+            return jsonify({'error': 'count required'}), 400
+        count = int(count)
+        result_id = db.create_pyfp_event_result(
+            battery_id, course_type, float(count), 'reps',
+            attempt_number=1, is_best=1,
+        )
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, float(count), metric_unit,
+            course_id=course_id, notes=perf_notes, is_better_higher=True,
+        )
+        return jsonify({'ok': True, 'event_result_id': result_id})
+
+    # ---- timer engine: flexed_arm_hang, plank ----
+    if engine == 'timer':
+        duration = data.get('duration_seconds')
+        if duration is None:
+            return jsonify({'error': 'duration_seconds required'}), 400
+        duration = round(float(duration), 1)
+        result_id = db.create_pyfp_event_result(
+            battery_id, course_type, duration, 'seconds',
+            attempt_number=1, is_best=1,
+        )
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, duration, metric_unit,
+            course_id=course_id, notes=perf_notes, is_better_higher=True,
+        )
+        return jsonify({'ok': True, 'event_result_id': result_id, 'duration_seconds': duration})
+
     return jsonify({'error': 'Unhandled engine'}), 500
+
+
+# ==================== PHASE 5 — SERVER AUDIO ====================
+
+@pyfp_bp.route('/api/pyfp/audio/play', methods=['POST'])
+def audio_play():
+    """Fire a single audio clip on D0 via REGISTRY._audio (non-blocking)."""
+    try:
+        from field_trainer.ft_registry import REGISTRY
+        data = request.get_json(force=True) or {}
+        clip = data.get('clip', 'default_beep')
+        if REGISTRY._audio:
+            ok = REGISTRY._audio.play(clip)
+            return jsonify({'ok': ok, 'clip': clip})
+        return jsonify({'ok': False, 'reason': 'AudioManager not available'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 # ==================== PHASE 4 — PACER BRIDGE ====================
