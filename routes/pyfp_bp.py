@@ -1,3 +1,5 @@
+import json
+import math
 import sys
 from datetime import date, datetime
 from flask import Blueprint, jsonify, redirect, render_template, request, url_for
@@ -246,3 +248,229 @@ def battery_complete(battery_id):
         return jsonify({'ok': True, 'already_complete': True})
     db.complete_pyfp_battery(battery_id)
     return jsonify({'ok': True, 'already_complete': False})
+
+
+# ==================== PHASE 3 — MANUAL EVENT RECORDING ====================
+
+# Events handled in Phase 3 (manual engines only)
+_PHASE3_ENGINES = {'manual_count', 'manual_measure', 'manual_passfail'}
+
+# metric_name suffix and unit per course_type for performance_history
+_METRIC = {
+    'pyfp_pull_up':          ('pyfp_pull_up_reps',          'reps',      True),
+    'pyfp_modified_pull_up': ('pyfp_modified_pull_up_reps', 'reps',      True),
+    'pyfp_trunk_lift':       ('pyfp_trunk_lift_inches',      'inches',    True),
+    'pyfp_sit_and_reach':    ('pyfp_sit_and_reach_inches',   'inches',    True),
+    'pyfp_v_sit_reach':      ('pyfp_v_sit_reach_inches',     'inches',    True),
+    'pyfp_shoulder_stretch': ('pyfp_shoulder_stretch_score', 'pass_fail', True),
+    'pyfp_bmi':              ('pyfp_bmi_index',              'bmi',       False),
+    'pyfp_skinfold':         ('pyfp_skinfold_pct',           'percent',   False),
+}
+
+
+def _get_course_id(course_type: str) -> int | None:
+    courses = db.get_pyfp_courses()
+    for c in courses:
+        if c['course_type'] == course_type:
+            return c['course_id']
+    return None
+
+
+def _slaughter_pct_body_fat(triceps_mm: float, calf_mm: float, gender: str) -> float:
+    total = triceps_mm + calf_mm
+    if gender == 'male':
+        return round(0.735 * total + 1.0, 1)
+    return round(0.610 * total + 5.1, 1)
+
+
+@pyfp_bp.route('/pyfp/battery/<battery_id>/event/<course_type>/record')
+def event_record_form(battery_id, course_type):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return "Battery not found", 404
+    athlete = db.get_athlete(battery['athlete_id'])
+    if not athlete:
+        return "Athlete not found", 404
+
+    if course_type not in EVENTS:
+        return "Unknown event", 404
+
+    engine = EVENTS[course_type]['engine']
+    pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
+    course = pyfp_courses.get(course_type, {})
+    display_name = course.get('course_name', course_type).replace('PYFP - ', '')
+
+    existing_results = db.get_pyfp_event_results_for_battery(battery['battery_id'])
+    event_results = [r for r in existing_results if r['course_type'] == course_type]
+
+    return render_template(
+        'pyfp_event_record.html',
+        battery=battery,
+        athlete=athlete,
+        course_type=course_type,
+        engine=engine,
+        display_name=display_name,
+        event_results=event_results,
+        phase3_available=(engine in _PHASE3_ENGINES),
+    )
+
+
+@pyfp_bp.route('/api/pyfp/battery/<battery_id>/event/<course_type>/record', methods=['POST'])
+def event_record_submit(battery_id, course_type):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return jsonify({'error': 'Battery not found'}), 404
+    if battery['completed_at']:
+        return jsonify({'error': 'Battery is already completed'}), 409
+    if course_type not in EVENTS:
+        return jsonify({'error': 'Unknown event'}), 404
+
+    engine = EVENTS[course_type]['engine']
+    if engine not in _PHASE3_ENGINES:
+        return jsonify({'error': f'Engine {engine!r} not available in Phase 3'}), 422
+
+    data = request.get_json(force=True)
+    metric_name, metric_unit, is_better_higher = _METRIC.get(
+        course_type, (course_type, 'units', True)
+    )
+    course_id = _get_course_id(course_type)
+    athlete_id = battery['athlete_id']
+    perf_notes = f"PYFP battery {battery_id}"
+
+    # ---- manual_count: pull_up, modified_pull_up ----
+    if engine == 'manual_count':
+        count = data.get('count')
+        if count is None:
+            return jsonify({'error': 'count required'}), 400
+        count = int(count)
+        result_id = db.create_pyfp_event_result(
+            battery_id, course_type, float(count), 'reps',
+            attempt_number=1, is_best=1,
+        )
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, float(count), metric_unit,
+            course_id=course_id, notes=perf_notes, is_better_higher=True,
+        )
+        return jsonify({'ok': True, 'event_result_id': result_id})
+
+    # ---- manual_passfail: shoulder_stretch ----
+    if engine == 'manual_passfail':
+        right = 1 if data.get('right_pass') else 0
+        left  = 1 if data.get('left_pass')  else 0
+        score = float(right + left)  # 0, 1, or 2
+        result_id = db.create_pyfp_event_result(
+            battery_id, course_type, score, 'pass_fail',
+            attempt_number=1, is_best=1, secondary_value=float(left),
+            notes=json.dumps({'right': right, 'left': left}),
+        )
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, score, metric_unit,
+            course_id=course_id, notes=perf_notes, is_better_higher=True,
+        )
+        return jsonify({'ok': True, 'event_result_id': result_id})
+
+    # ---- manual_measure: trunk_lift ----
+    if course_type == 'pyfp_trunk_lift':
+        inches = data.get('inches')
+        if inches is None:
+            return jsonify({'error': 'inches required'}), 400
+        inches = min(float(inches), 12.0)
+        result_id = db.create_pyfp_event_result(
+            battery_id, course_type, inches, 'inches',
+            attempt_number=1, is_best=1,
+        )
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, inches, metric_unit,
+            course_id=course_id, notes=perf_notes,
+        )
+        return jsonify({'ok': True, 'event_result_id': result_id})
+
+    # ---- manual_measure: sit_and_reach (best per side — right + left) ----
+    if course_type == 'pyfp_sit_and_reach':
+        right = data.get('right_inches')
+        left  = data.get('left_inches')
+        if right is None:
+            return jsonify({'error': 'right_inches required'}), 400
+        right = float(right)
+        left  = float(left) if left is not None else None
+        result_id = db.create_pyfp_event_result(
+            battery_id, course_type, right, 'inches',
+            attempt_number=1, is_best=1,
+            secondary_value=left,
+            notes=json.dumps({'right_inches': right, 'left_inches': left}),
+        )
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, right, metric_unit,
+            course_id=course_id, notes=perf_notes,
+        )
+        return jsonify({'ok': True, 'event_result_id': result_id})
+
+    # ---- manual_measure: v_sit_reach (up to 3 attempts, best marked) ----
+    if course_type == 'pyfp_v_sit_reach':
+        raw_attempts = data.get('attempts', [])
+        if not raw_attempts:
+            return jsonify({'error': 'attempts list required'}), 400
+        attempts = [float(v) for v in raw_attempts if v != '' and v is not None]
+        if not attempts:
+            return jsonify({'error': 'At least one attempt value required'}), 400
+        result_ids = []
+        for i, val in enumerate(attempts[:3], start=1):
+            result_ids.append(db.create_pyfp_event_result(
+                battery_id, course_type, val, 'inches',
+                attempt_number=i, is_best=0,
+            ))
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=True)
+        best_val = max(attempts)
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, best_val, metric_unit,
+            course_id=course_id, notes=perf_notes,
+        )
+        return jsonify({'ok': True, 'event_result_ids': result_ids})
+
+    # ---- manual_measure: bmi ----
+    if course_type == 'pyfp_bmi':
+        height_ft  = data.get('height_ft', 0)
+        height_in  = data.get('height_in', 0)
+        weight_lbs = data.get('weight_lbs')
+        if weight_lbs is None:
+            return jsonify({'error': 'weight_lbs required'}), 400
+        total_in = float(height_ft) * 12 + float(height_in)
+        if total_in <= 0:
+            return jsonify({'error': 'height must be > 0'}), 400
+        bmi = round((float(weight_lbs) * 703) / (total_in ** 2), 1)
+        bmi_notes = json.dumps({
+            'height_ft': height_ft, 'height_in': height_in,
+            'weight_lbs': weight_lbs, 'total_height_in': total_in,
+        })
+        result_id = db.create_pyfp_event_result(
+            battery_id, course_type, bmi, 'bmi',
+            attempt_number=1, is_best=1,
+            secondary_value=float(weight_lbs), notes=bmi_notes,
+        )
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, bmi, metric_unit,
+            course_id=course_id, notes=perf_notes, is_better_higher=False,
+        )
+        return jsonify({'ok': True, 'event_result_id': result_id, 'bmi': bmi})
+
+    # ---- manual_measure: skinfold ----
+    if course_type == 'pyfp_skinfold':
+        triceps = data.get('triceps_mm')
+        calf    = data.get('calf_mm')
+        if triceps is None or calf is None:
+            return jsonify({'error': 'triceps_mm and calf_mm required'}), 400
+        gender = battery['gender']
+        pct_bf = _slaughter_pct_body_fat(float(triceps), float(calf), gender)
+        skinfold_notes = json.dumps({'triceps_mm': triceps, 'calf_mm': calf, 'gender': gender})
+        result_id = db.create_pyfp_event_result(
+            battery_id, course_type, pct_bf, 'percent',
+            attempt_number=1, is_best=1,
+            secondary_value=float(triceps) + float(calf), notes=skinfold_notes,
+        )
+        db.write_pyfp_performance_history(
+            athlete_id, metric_name, pct_bf, metric_unit,
+            course_id=course_id, notes=perf_notes, is_better_higher=False,
+        )
+        return jsonify({'ok': True, 'event_result_id': result_id, 'pct_body_fat': pct_bf})
+
+    return jsonify({'error': 'Unhandled engine'}), 500

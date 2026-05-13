@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% block title %}Record — {{ display_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.pyfp-header { border-left: 4px solid #0d6efd; padding-left: 1rem; }
+.attempt-row { background: #f8f9fa; border-radius: .375rem; padding: .75rem 1rem; margin-bottom: .5rem; }
+.attempt-row.best { border-left: 3px solid #198754; background: #f0faf3; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/pyfp/">PYFP</a></li>
+    <li class="breadcrumb-item">
+      <a href="/pyfp/athlete/{{ athlete.athlete_id }}?school_year={{ battery.school_year }}&test_window={{ battery.test_window }}">
+        {{ athlete.name }}
+      </a>
+    </li>
+    <li class="breadcrumb-item active">{{ display_name }}</li>
+  </ol>
+</nav>
+
+<div class="row mb-4">
+  <div class="col">
+    <h2 class="pyfp-header">
+      <i class="bi bi-pencil-square text-primary"></i> {{ display_name }}
+    </h2>
+    <p class="text-muted">
+      {{ athlete.name }} &nbsp;·&nbsp;
+      {{ battery.school_year }} {{ battery.test_window|title }} &nbsp;·&nbsp;
+      {{ battery.rubric|replace('_',' ')|title }}
+    </p>
+  </div>
+</div>
+
+{% if not phase3_available %}
+<!-- Placeholder for future phases -->
+<div class="alert alert-info">
+  <h5><i class="bi bi-hourglass-split"></i> Not yet available</h5>
+  <p class="mb-0">
+    The <strong>{{ engine }}</strong> engine for <strong>{{ display_name }}</strong>
+    will be implemented in a future phase. Only manual-entry events are available now.
+  </p>
+</div>
+{% else %}
+
+{% if battery.completed_at %}
+<div class="alert alert-success mb-4">
+  <i class="bi bi-check-circle-fill"></i> This battery is already marked complete.
+  Results below are read-only.
+</div>
+{% endif %}
+
+<!-- Previous attempts (for multi-attempt events) -->
+{% if event_results %}
+<div class="card mb-4">
+  <div class="card-header bg-white fw-semibold">Previous Attempts</div>
+  <div class="card-body">
+    {% for r in event_results | sort(attribute='attempt_number') %}
+    <div class="attempt-row {{ 'best' if r.is_best else '' }}">
+      <span class="fw-semibold">Attempt {{ r.attempt_number }}</span>:
+      {{ r.raw_value }}
+      {% if r.raw_unit != 'pass_fail' %}{{ r.raw_unit }}{% endif %}
+      {% if r.secondary_value is not none and r.raw_unit == 'pass_fail' %}
+        &nbsp;(R: {{ 'Pass' if r.raw_value >= 1 else 'Fail' }},
+               L: {{ 'Pass' if r.secondary_value >= 1 else 'Fail' }})
+      {% elif r.secondary_value is not none %}
+        &nbsp;/ secondary: {{ r.secondary_value }}
+      {% endif %}
+      {% if r.is_best %}<span class="badge bg-success ms-2">Best</span>{% endif %}
+      <span class="text-muted small ms-2">{{ r.recorded_at }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if not battery.completed_at %}
+<!-- Recording form -->
+<div class="card shadow-sm">
+  <div class="card-header bg-white fw-semibold">
+    {% if event_results %}Add Another Attempt{% else %}Record Result{% endif %}
+  </div>
+  <div class="card-body">
+    <form id="recordForm">
+
+      {# -------- manual_count -------- #}
+      {% if engine == 'manual_count' %}
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Rep count <span class="text-danger">*</span></label>
+        <input type="number" class="form-control" id="countInput"
+               min="0" max="200" step="1" required style="max-width:160px;">
+        <div class="form-text">Enter the total number of completed reps.</div>
+      </div>
+
+      {# -------- manual_passfail -------- #}
+      {% elif engine == 'manual_passfail' %}
+      <div class="row g-3 mb-3">
+        <div class="col-auto">
+          <label class="form-label fw-semibold">Right side</label>
+          <div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="right" id="rightPass" value="pass" required>
+              <label class="form-check-label text-success" for="rightPass">Pass</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="right" id="rightFail" value="fail">
+              <label class="form-check-label text-danger" for="rightFail">Fail</label>
+            </div>
+          </div>
+        </div>
+        <div class="col-auto">
+          <label class="form-label fw-semibold">Left side</label>
+          <div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="left" id="leftPass" value="pass" required>
+              <label class="form-check-label text-success" for="leftPass">Pass</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="left" id="leftFail" value="fail">
+              <label class="form-check-label text-danger" for="leftFail">Fail</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# -------- trunk_lift -------- #}
+      {% elif course_type == 'pyfp_trunk_lift' %}
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Height lifted (inches, max 12) <span class="text-danger">*</span></label>
+        <input type="number" class="form-control" id="inchesInput"
+               min="0" max="12" step="0.25" required style="max-width:160px;">
+        <div class="form-text">Measure trunk height from floor. Cap at 12 inches.</div>
+      </div>
+
+      {# -------- sit_and_reach -------- #}
+      {% elif course_type == 'pyfp_sit_and_reach' %}
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Right leg best (inches) <span class="text-danger">*</span></label>
+          <input type="number" class="form-control" id="rightIn"
+                 min="-4" max="16" step="0.25" required>
+          <div class="form-text">Best of 3 right-leg attempts.</div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Left leg best (inches)</label>
+          <input type="number" class="form-control" id="leftIn"
+                 min="-4" max="16" step="0.25">
+          <div class="form-text">Best of 3 left-leg attempts (optional).</div>
+        </div>
+      </div>
+
+      {# -------- v_sit_reach -------- #}
+      {% elif course_type == 'pyfp_v_sit_reach' %}
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Attempts (signed inches — up to 3)</label>
+        <div class="row g-2">
+          {% for n in range(1, 4) %}
+          <div class="col-auto">
+            <label class="form-label small">Attempt {{ n }}</label>
+            <input type="number" class="form-control attempt-val" id="att{{ n }}"
+                   min="-12" max="16" step="0.25" style="width:110px;"
+                   {% if n == 1 %}required{% endif %}>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="form-text">Negative values are valid. System marks the best attempt.</div>
+      </div>
+
+      {# -------- bmi -------- #}
+      {% elif course_type == 'pyfp_bmi' %}
+      <div class="row g-3 mb-3">
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Height (feet) <span class="text-danger">*</span></label>
+          <input type="number" class="form-control" id="heightFt"
+                 min="2" max="7" step="1" required style="max-width:120px;">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Height (extra inches)</label>
+          <input type="number" class="form-control" id="heightIn"
+                 min="0" max="11" step="1" value="0" style="max-width:120px;">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Weight (lbs) <span class="text-danger">*</span></label>
+          <input type="number" class="form-control" id="weightLbs"
+                 min="20" max="400" step="0.1" required style="max-width:140px;">
+        </div>
+      </div>
+      <div id="bmiPreview" class="alert alert-light d-none">
+        Computed BMI: <strong id="bmiVal"></strong>
+      </div>
+
+      {# -------- skinfold -------- #}
+      {% elif course_type == 'pyfp_skinfold' %}
+      <div class="row g-3 mb-3">
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Triceps skinfold (mm) <span class="text-danger">*</span></label>
+          <input type="number" class="form-control" id="tricepsMm"
+                 min="1" max="80" step="0.5" required style="max-width:140px;">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Calf skinfold (mm) <span class="text-danger">*</span></label>
+          <input type="number" class="form-control" id="calfMm"
+                 min="1" max="80" step="0.5" required style="max-width:140px;">
+        </div>
+      </div>
+      <div class="form-text mb-3">
+        Slaughter equation applied automatically using battery gender ({{ battery.gender }}).
+      </div>
+
+      {% endif %}
+
+      <div id="formError" class="alert alert-danger d-none"></div>
+
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-save"></i> Save Result
+      </button>
+      <a href="/pyfp/athlete/{{ athlete.athlete_id }}?school_year={{ battery.school_year }}&test_window={{ battery.test_window }}"
+         class="btn btn-outline-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endif %} {# not completed #}
+{% endif %} {# phase3_available #}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const BATTERY_ID   = "{{ battery.battery_id }}";
+const COURSE_TYPE  = "{{ course_type }}";
+const ENGINE       = "{{ engine }}";
+const ATHLETE_ID   = "{{ athlete.athlete_id }}";
+const SCHOOL_YEAR  = "{{ battery.school_year }}";
+const TEST_WINDOW  = "{{ battery.test_window }}";
+const BACK_URL     = `/pyfp/athlete/${ATHLETE_ID}?school_year=${SCHOOL_YEAR}&test_window=${TEST_WINDOW}`;
+
+{% if course_type == 'pyfp_bmi' %}
+function calcBmi() {
+  const ft  = parseFloat(document.getElementById('heightFt')?.value) || 0;
+  const ine = parseFloat(document.getElementById('heightIn')?.value) || 0;
+  const lbs = parseFloat(document.getElementById('weightLbs')?.value) || 0;
+  const totalIn = ft * 12 + ine;
+  if (totalIn > 0 && lbs > 0) {
+    const bmi = (lbs * 703 / (totalIn ** 2)).toFixed(1);
+    document.getElementById('bmiVal').textContent = bmi;
+    document.getElementById('bmiPreview').classList.remove('d-none');
+  }
+}
+['heightFt','heightIn','weightLbs'].forEach(id =>
+  document.getElementById(id)?.addEventListener('input', calcBmi));
+{% endif %}
+
+document.getElementById('recordForm')?.addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const err = document.getElementById('formError');
+  err.classList.add('d-none');
+
+  let payload = {};
+
+  if (ENGINE === 'manual_count') {
+    payload.count = parseInt(document.getElementById('countInput').value);
+  } else if (ENGINE === 'manual_passfail') {
+    payload.right_pass = document.querySelector('input[name="right"]:checked')?.value === 'pass';
+    payload.left_pass  = document.querySelector('input[name="left"]:checked')?.value === 'pass';
+  } else if (COURSE_TYPE === 'pyfp_trunk_lift') {
+    payload.inches = parseFloat(document.getElementById('inchesInput').value);
+  } else if (COURSE_TYPE === 'pyfp_sit_and_reach') {
+    payload.right_inches = parseFloat(document.getElementById('rightIn').value);
+    const leftVal = document.getElementById('leftIn').value;
+    if (leftVal !== '') payload.left_inches = parseFloat(leftVal);
+  } else if (COURSE_TYPE === 'pyfp_v_sit_reach') {
+    payload.attempts = [...document.querySelectorAll('.attempt-val')]
+      .map(el => el.value).filter(v => v !== '');
+  } else if (COURSE_TYPE === 'pyfp_bmi') {
+    payload.height_ft  = parseFloat(document.getElementById('heightFt').value);
+    payload.height_in  = parseFloat(document.getElementById('heightIn').value || '0');
+    payload.weight_lbs = parseFloat(document.getElementById('weightLbs').value);
+  } else if (COURSE_TYPE === 'pyfp_skinfold') {
+    payload.triceps_mm = parseFloat(document.getElementById('tricepsMm').value);
+    payload.calf_mm    = parseFloat(document.getElementById('calfMm').value);
+  }
+
+  try {
+    const resp = await fetch(
+      `/api/pyfp/battery/${BATTERY_ID}/event/${COURSE_TYPE}/record`,
+      { method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload) }
+    );
+    const data = await resp.json();
+    if (!resp.ok) {
+      err.textContent = data.error || 'Failed to save result.';
+      err.classList.remove('d-none');
+      return;
+    }
+    window.location.href = BACK_URL;
+  } catch (ex) {
+    err.textContent = 'Network error — please retry.';
+    err.classList.remove('d-none');
+  }
+});
+</script>
+{% endblock %}

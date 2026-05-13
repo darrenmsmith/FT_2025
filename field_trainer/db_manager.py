@@ -978,6 +978,85 @@ class DatabaseManager:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    # ==================== PYFP EVENT RECORDING ====================
+
+    def create_pyfp_event_result(self, battery_id: str, course_type: str,
+                                 raw_value: float, raw_unit: str,
+                                 attempt_number: int = 1, is_best: int = 1,
+                                 secondary_value: Optional[float] = None,
+                                 notes: Optional[str] = None) -> str:
+        event_result_id = str(uuid.uuid4())
+        now = datetime.now().isoformat(timespec='seconds')
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO pyfp_event_result
+                       (event_result_id, battery_id, course_type, raw_value, raw_unit,
+                        secondary_value, attempt_number, recorded_at, is_best, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (event_result_id, battery_id, course_type, raw_value, raw_unit,
+                 secondary_value, attempt_number, now, is_best, notes)
+            )
+        return event_result_id
+
+    def recompute_pyfp_best(self, battery_id: str, course_type: str,
+                            is_better_higher: bool = True) -> None:
+        """Set is_best=1 on the best attempt for this event, 0 on all others."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT event_result_id, raw_value FROM pyfp_event_result
+                   WHERE battery_id = ? AND course_type = ? ORDER BY attempt_number""",
+                (battery_id, course_type)
+            ).fetchall()
+            if not rows:
+                return
+            best_id = max(rows, key=lambda r: r['raw_value'] if is_better_higher
+                          else -r['raw_value'])['event_result_id']
+            for row in rows:
+                conn.execute(
+                    "UPDATE pyfp_event_result SET is_best=? WHERE event_result_id=?",
+                    (1 if row['event_result_id'] == best_id else 0, row['event_result_id'])
+                )
+
+    def write_pyfp_performance_history(self, athlete_id: str, metric_name: str,
+                                       metric_value: float, metric_unit: str,
+                                       course_id: Optional[int] = None,
+                                       notes: Optional[str] = None,
+                                       is_better_higher: bool = True) -> tuple:
+        """Write to performance_history and update personal_records if it's a PR."""
+        record_id = str(uuid.uuid4())
+        now = datetime.now().isoformat(timespec='seconds')
+        with self.get_connection() as conn:
+            prev = conn.execute(
+                """SELECT metric_value FROM performance_history
+                   WHERE athlete_id = ? AND metric_name = ?
+                   ORDER BY metric_value {} LIMIT 1""".format('DESC' if is_better_higher else 'ASC'),
+                (athlete_id, metric_name)
+            ).fetchone()
+            prev_best = prev['metric_value'] if prev else None
+            is_pr = (prev_best is None or
+                     (is_better_higher and metric_value > prev_best) or
+                     (not is_better_higher and metric_value < prev_best))
+
+            conn.execute(
+                """INSERT INTO performance_history
+                       (record_id, athlete_id, metric_name, metric_value, metric_unit,
+                        is_personal_record, course_id, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (record_id, athlete_id, metric_name, metric_value, metric_unit,
+                 1 if is_pr else 0, course_id, notes)
+            )
+            if is_pr:
+                improvement = abs(metric_value - prev_best) if prev_best is not None else None
+                conn.execute(
+                    """INSERT OR REPLACE INTO personal_records
+                           (pr_id, athlete_id, metric_name, current_best, metric_unit,
+                            achieved_at, previous_best, improvement)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (str(uuid.uuid4()), athlete_id, metric_name, metric_value, metric_unit,
+                     now, prev_best, improvement)
+                )
+        return record_id, is_pr
+
     def update_course(self, course_id: int, **kwargs):
         """Update course fields"""
         allowed_fields = {'course_name', 'description', 'course_type', 'mode', 'category',
