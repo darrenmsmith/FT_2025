@@ -905,6 +905,79 @@ class DatabaseManager:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    # ==================== PYFP BATTERY LIFECYCLE ====================
+
+    def create_pyfp_battery(self, athlete_id: str, school_year: str, test_window: str,
+                            rubric: str, age_at_test: int, gender: str,
+                            notes: Optional[str] = None) -> str:
+        battery_id = str(uuid.uuid4())
+        now = datetime.now().isoformat(timespec='seconds')
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO pyfp_assessment_battery
+                       (battery_id, athlete_id, school_year, test_window,
+                        started_at, age_at_test, gender, rubric, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (battery_id, athlete_id, school_year, test_window,
+                 now, age_at_test, gender, rubric, notes)
+            )
+        return battery_id
+
+    def get_pyfp_battery(self, battery_id: str) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                'SELECT * FROM pyfp_assessment_battery WHERE battery_id = ?', (battery_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_pyfp_battery_for_athlete_window(self, athlete_id: str, school_year: str,
+                                            test_window: str) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT * FROM pyfp_assessment_battery
+                   WHERE athlete_id = ? AND school_year = ? AND test_window = ?""",
+                (athlete_id, school_year, test_window)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_pyfp_batteries_for_athlete(self, athlete_id: str) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM pyfp_assessment_battery
+                   WHERE athlete_id = ? ORDER BY started_at DESC""",
+                (athlete_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_pyfp_event_results_for_battery(self, battery_id: str) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                'SELECT * FROM pyfp_event_result WHERE battery_id = ? ORDER BY recorded_at',
+                (battery_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def complete_pyfp_battery(self, battery_id: str) -> None:
+        now = datetime.now().isoformat(timespec='seconds')
+        with self.get_connection() as conn:
+            conn.execute(
+                'UPDATE pyfp_assessment_battery SET completed_at = ? WHERE battery_id = ?',
+                (now, battery_id)
+            )
+
+    def get_pyfp_team_batteries(self, team_id: str, school_year: str,
+                                test_window: str) -> List[Dict[str, Any]]:
+        """All batteries for athletes on a team in the given window, keyed by athlete_id."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT b.*
+                   FROM pyfp_assessment_battery b
+                   JOIN athletes a ON a.athlete_id = b.athlete_id
+                   WHERE a.team_id = ? AND b.school_year = ? AND b.test_window = ?""",
+                (team_id, school_year, test_window)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def update_course(self, course_id: int, **kwargs):
         """Update course fields"""
         allowed_fields = {'course_name', 'description', 'course_type', 'mode', 'category',

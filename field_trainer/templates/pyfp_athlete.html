@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}PYFP — {{ athlete.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.event-card { border-left: 3px solid #dee2e6; transition: border-color .15s; }
+.event-card.done { border-left-color: #198754; background: #f0faf3; }
+.event-card.not-done { border-left-color: #dee2e6; }
+.pyfp-header { border-left: 4px solid #0d6efd; padding-left: 1rem; }
+.category-section h6 { letter-spacing: .05em; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/pyfp/">PYFP</a></li>
+    <li class="breadcrumb-item active">{{ athlete.name }}</li>
+  </ol>
+</nav>
+
+<!-- Athlete header -->
+<div class="row mb-4">
+  <div class="col">
+    <h2 class="pyfp-header">
+      <i class="bi bi-person-fill text-primary"></i> {{ athlete.name }}
+      {% if athlete.jersey_number %}
+        <span class="text-muted fs-5 fw-normal">#{{ athlete.jersey_number }}</span>
+      {% endif %}
+    </h2>
+    <div class="text-muted">
+      {% if athlete.age %}Age {{ athlete.age }}{% endif %}
+      {% if athlete.gender %} · {{ athlete.gender|title }}{% endif %}
+      {% if athlete.birthdate %} · DOB {{ athlete.birthdate }}{% endif %}
+    </div>
+  </div>
+  <div class="col-auto">
+    <!-- Window picker -->
+    <form method="get" action="/pyfp/athlete/{{ athlete.athlete_id }}" class="d-flex gap-2">
+      <select name="school_year" class="form-select form-select-sm" onchange="this.form.submit()">
+        {% for yr in school_year_options %}
+        <option value="{{ yr }}" {% if yr == school_year %}selected{% endif %}>{{ yr }}</option>
+        {% endfor %}
+      </select>
+      <select name="test_window" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="fall"   {% if test_window == 'fall' %}selected{% endif %}>Fall</option>
+        <option value="spring" {% if test_window == 'spring' %}selected{% endif %}>Spring</option>
+      </select>
+    </form>
+  </div>
+</div>
+
+{% if battery %}
+<!-- Battery info bar -->
+<div class="card mb-4 border-0 bg-light">
+  <div class="card-body py-2 d-flex flex-wrap align-items-center gap-3">
+    <span><strong>Rubric:</strong>
+      <span class="badge bg-info text-dark ms-1">{{ rubric_labels.get(battery.rubric, battery.rubric) }}</span>
+    </span>
+    <span><strong>Window:</strong> {{ battery.school_year }} {{ battery.test_window|title }}</span>
+    <span><strong>Started:</strong> {{ battery.started_at }}</span>
+    {% if battery.completed_at %}
+      <span class="badge bg-success ms-auto">
+        <i class="bi bi-check-circle-fill"></i> Completed {{ battery.completed_at }}
+      </span>
+    {% else %}
+      <span class="badge bg-primary ms-auto">In Progress</span>
+      <button class="btn btn-sm btn-outline-success"
+              onclick="completeBattery('{{ battery.battery_id }}')">
+        <i class="bi bi-check2-all"></i> Mark Complete
+      </button>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Progress summary -->
+{% set events_done = results | selectattr('is_best', 'equalto', 1) | list | length %}
+{% set events_total = event_grid | sum(attribute='events') | list | length %}
+<div class="mb-4">
+  <div class="d-flex justify-content-between small text-muted mb-1">
+    <span>Events completed</span>
+    <span>{{ results | map(attribute='course_type') | unique | list | length }} /
+          {{ event_grid | map(attribute='events') | map('length') | sum }}</span>
+  </div>
+  {% set done_count = results | map(attribute='course_type') | unique | list | length %}
+  {% set total_count = event_grid | map(attribute='events') | map('length') | sum %}
+  {% set pct = (100 * done_count // total_count) if total_count else 0 %}
+  <div class="progress" style="height:10px;">
+    <div class="progress-bar bg-success" style="width:{{ pct }}%"></div>
+  </div>
+</div>
+
+<!-- Event grid by category -->
+{% for cat in event_grid %}
+<div class="category-section mb-4">
+  <h6 class="text-uppercase text-muted fw-bold small mb-2">
+    {{ cat.label }}
+    <span class="text-secondary fw-normal">({{ cat.events | selectattr('done') | list | length }}/{{ cat.events|length }})</span>
+  </h6>
+  <div class="row g-2">
+    {% for ev in cat.events %}
+    <div class="col-md-4 col-lg-3">
+      <div class="card event-card h-100 {{ 'done' if ev.done else 'not-done' }}">
+        <div class="card-body py-2 px-3">
+          <div class="d-flex justify-content-between align-items-start">
+            <span class="fw-semibold small">{{ ev.name }}</span>
+            {% if ev.done %}
+              <i class="bi bi-check-circle-fill text-success ms-1"></i>
+            {% else %}
+              <i class="bi bi-circle text-secondary ms-1"></i>
+            {% endif %}
+          </div>
+          <div class="text-muted" style="font-size:.72rem;">{{ ev.engine | replace('_',' ') }}</div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+
+{% else %}
+<!-- No battery — Start Battery form -->
+<div class="card shadow-sm">
+  <div class="card-header bg-white fw-semibold">
+    <i class="bi bi-plus-circle text-primary"></i>
+    Start PYFP Battery — {{ school_year }} {{ test_window|title }}
+  </div>
+  <div class="card-body">
+    <form id="startForm">
+      <input type="hidden" id="athleteId" value="{{ athlete.athlete_id }}">
+      <input type="hidden" id="schoolYear" value="{{ school_year }}">
+      <input type="hidden" id="testWindow" value="{{ test_window }}">
+
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Rubric <span class="text-danger">*</span></label>
+          <select class="form-select" id="rubric" required>
+            <option value="">— Choose rubric —</option>
+            {% for val, label in rubric_labels.items() %}
+            <option value="{{ val }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label fw-semibold">Age at test <span class="text-danger">*</span></label>
+          <input type="number" class="form-control" id="ageAtTest" min="6" max="17"
+                 value="{{ age_hint if age_hint else '' }}" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Gender <span class="text-danger">*</span></label>
+          <select class="form-select" id="gender" required>
+            <option value="">— Choose —</option>
+            <option value="male"   {% if athlete.gender == 'male' %}selected{% endif %}>Male</option>
+            <option value="female" {% if athlete.gender == 'female' %}selected{% endif %}>Female</option>
+          </select>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-play-fill"></i> Start Battery
+          </button>
+        </div>
+      </div>
+
+      <div id="formError" class="alert alert-danger mt-3 d-none"></div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<!-- Past batteries (other windows) -->
+{% if all_batteries|length > 1 or (all_batteries|length == 1 and not battery) %}
+<div class="mt-5">
+  <h6 class="text-muted fw-bold small text-uppercase">Other Assessment Windows</h6>
+  <table class="table table-sm table-hover">
+    <thead class="table-light">
+      <tr><th>School Year</th><th>Window</th><th>Rubric</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for b in all_batteries %}
+      {% if b.battery_id != (battery.battery_id if battery else '') %}
+      <tr>
+        <td>{{ b.school_year }}</td>
+        <td>{{ b.test_window|title }}</td>
+        <td>{{ rubric_labels.get(b.rubric, b.rubric) }}</td>
+        <td>
+          {% if b.completed_at %}<span class="badge bg-success">Complete</span>
+          {% else %}<span class="badge bg-primary">In Progress</span>{% endif %}
+        </td>
+        <td>
+          <a href="/pyfp/athlete/{{ athlete.athlete_id }}?school_year={{ b.school_year }}&test_window={{ b.test_window }}"
+             class="btn btn-sm btn-outline-secondary">View</a>
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('startForm')?.addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const err = document.getElementById('formError');
+  err.classList.add('d-none');
+
+  const payload = {
+    athlete_id:  document.getElementById('athleteId').value,
+    school_year: document.getElementById('schoolYear').value,
+    test_window: document.getElementById('testWindow').value,
+    rubric:      document.getElementById('rubric').value,
+    age_at_test: parseInt(document.getElementById('ageAtTest').value),
+    gender:      document.getElementById('gender').value,
+  };
+
+  if (!payload.rubric || !payload.age_at_test || !payload.gender) {
+    err.textContent = 'Please fill in all required fields.';
+    err.classList.remove('d-none');
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/pyfp/battery/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      err.textContent = data.error || 'Failed to start battery.';
+      err.classList.remove('d-none');
+      return;
+    }
+    window.location.href = `/pyfp/athlete/${payload.athlete_id}?school_year=${payload.school_year}&test_window=${payload.test_window}`;
+  } catch (ex) {
+    err.textContent = 'Network error — please retry.';
+    err.classList.remove('d-none');
+  }
+});
+
+async function completeBattery(batteryId) {
+  if (!confirm('Mark this battery as complete?')) return;
+  const resp = await fetch(`/api/pyfp/battery/${batteryId}/complete`, {method: 'POST'});
+  if (resp.ok) window.location.reload();
+}
+</script>
+{% endblock %}

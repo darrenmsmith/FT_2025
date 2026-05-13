@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}PYFP Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+.pyfp-header { border-left: 4px solid #0d6efd; padding-left: 1rem; }
+.progress { height: 6px; }
+.badge-rubric { font-size: .75rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+  <div class="col">
+    <h2 class="pyfp-header">
+      <i class="bi bi-award text-primary"></i> PYFP Assessment Dashboard
+    </h2>
+    <p class="text-muted mb-0">Presidential Youth Fitness Program — battery management by class</p>
+  </div>
+</div>
+
+<!-- Filters -->
+<form method="get" action="/pyfp/" class="row g-2 mb-4 align-items-end">
+  <div class="col-md-4">
+    <label class="form-label fw-semibold">Class / Team</label>
+    <select name="team_id" class="form-select" onchange="this.form.submit()">
+      <option value="">— Select a class —</option>
+      {% for team in teams %}
+      <option value="{{ team.team_id }}"
+        {% if selected_team and selected_team.team_id == team.team_id %}selected{% endif %}>
+        {{ team.name }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label fw-semibold">School Year</label>
+    <select name="school_year" class="form-select" onchange="this.form.submit()">
+      {% for yr in school_year_options %}
+      <option value="{{ yr }}" {% if yr == school_year %}selected{% endif %}>{{ yr }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label fw-semibold">Window</label>
+    <select name="test_window" class="form-select" onchange="this.form.submit()">
+      <option value="fall"   {% if test_window == 'fall' %}selected{% endif %}>Fall</option>
+      <option value="spring" {% if test_window == 'spring' %}selected{% endif %}>Spring</option>
+    </select>
+  </div>
+</form>
+
+{% if selected_team %}
+<!-- Completion grid -->
+<div class="card shadow-sm">
+  <div class="card-header d-flex justify-content-between align-items-center bg-white">
+    <h5 class="mb-0">{{ selected_team.name }}
+      <span class="text-muted fw-normal small">— {{ school_year }} {{ test_window|title }}</span>
+    </h5>
+    <span class="badge bg-secondary">{{ athlete_rows|length }} athletes</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Athlete</th>
+          <th>Rubric</th>
+          <th style="min-width:160px">Progress</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in athlete_rows %}
+        <tr>
+          <td>
+            <a href="/pyfp/athlete/{{ row.athlete.athlete_id }}" class="text-decoration-none fw-semibold">
+              {{ row.athlete.name }}
+            </a>
+            {% if row.athlete.jersey_number %}
+              <span class="text-muted small ms-1">#{{ row.athlete.jersey_number }}</span>
+            {% endif %}
+            {% if row.athlete.age %}
+              <span class="text-muted small"> · age {{ row.athlete.age }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.battery %}
+              <span class="badge bg-info text-dark badge-rubric">
+                {{ rubric_labels.get(row.battery.rubric, row.battery.rubric) }}
+              </span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.battery %}
+              <div class="d-flex align-items-center gap-2">
+                <div class="progress flex-grow-1">
+                  <div class="progress-bar bg-success" style="width:{{ row.pct }}%"></div>
+                </div>
+                <small class="text-muted text-nowrap">{{ row.events_done }}/{{ row.events_total }}</small>
+              </div>
+            {% else %}
+              <span class="text-muted small">Not started</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if not row.battery %}
+              <span class="badge bg-secondary">Not Started</span>
+            {% elif row.battery.completed_at %}
+              <span class="badge bg-success">Complete</span>
+            {% else %}
+              <span class="badge bg-primary">In Progress</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="/pyfp/athlete/{{ row.athlete.athlete_id }}?school_year={{ school_year }}&test_window={{ test_window }}"
+               class="btn btn-sm btn-outline-primary">
+              {% if row.battery %}View{% else %}Start{% endif %}
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not athlete_rows %}
+        <tr><td colspan="5" class="text-center text-muted py-4">No athletes in this class.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% else %}
+<div class="alert alert-info d-flex align-items-center gap-2">
+  <i class="bi bi-info-circle-fill"></i>
+  Select a class above to view athlete battery status and start assessments.
+</div>
+{% endif %}
+{% endblock %}
