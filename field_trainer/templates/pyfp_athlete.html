@@ -76,7 +76,7 @@
 
 <!-- Progress summary -->
 {% set events_done = results | selectattr('is_best', 'equalto', 1) | list | length %}
-{% set events_total = event_grid | sum(attribute='events') | list | length %}
+{% set events_total = event_grid | map(attribute='events') | map('length') | sum %}
 <div class="mb-4">
   <div class="d-flex justify-content-between small text-muted mb-1">
     <span>Events completed</span>
