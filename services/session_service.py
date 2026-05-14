@@ -650,6 +650,25 @@ class SessionService:
         import requests
         import time
 
+        # PYFP dispatch — check before session_id so mile/shuttle runs work standalone
+        try:
+            from services.pyfp_mile_service import get_pyfp_mile_service
+            mile_svc = get_pyfp_mile_service()
+            if mile_svc.is_active():
+                mile_svc.handle_touch(device_id, timestamp)
+                return
+        except Exception as _pyfp_mile_err:
+            print(f"[PYFP MILE] touch dispatch error: {_pyfp_mile_err}")
+
+        try:
+            from services.pyfp_shuttle_service import get_pyfp_shuttle_service
+            shuttle_svc = get_pyfp_shuttle_service()
+            if shuttle_svc.is_active():
+                shuttle_svc.handle_touch(device_id, timestamp)
+                return
+        except Exception as _pyfp_shuttle_err:
+            print(f"[PYFP SHUTTLE] touch dispatch error: {_pyfp_shuttle_err}")
+
         session_id = self.session_state.get('session_id')
 
         if not session_id:

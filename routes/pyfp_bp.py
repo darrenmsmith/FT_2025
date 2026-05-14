@@ -303,6 +303,12 @@ def event_record_form(battery_id, course_type):
         return "Unknown event", 404
 
     engine = EVENTS[course_type]['engine']
+
+    # Cone-based events redirect to the cone picker flow
+    if engine in ('mile_service', 'shuttle_service'):
+        return redirect(url_for('pyfp.cone_picker',
+                                battery_id=battery_id, course_type=course_type))
+
     pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
     course = pyfp_courses.get(course_type, {})
     display_name = course.get('course_name', course_type).replace('PYFP - ', '')
@@ -530,6 +536,228 @@ def audio_play():
         return jsonify({'ok': False, 'reason': 'AudioManager not available'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# ==================== PHASE 6 — CONE-BASED MILE + SHUTTLE ====================
+
+_CONE_EVENTS = {'pyfp_mile_run', 'pyfp_mile_walk', 'pyfp_shuttle_run'}
+
+def _online_cones() -> list[dict]:
+    """Return field cones (101-105) visible in REGISTRY snapshot."""
+    try:
+        from field_trainer.ft_registry import REGISTRY
+        snap = REGISTRY.snapshot()
+        return [n for n in snap.get('nodes', [])
+                if n.get('ip', '').startswith('192.168.99.1')
+                and n['ip'] != '192.168.99.100']
+    except Exception:
+        return []
+
+
+@pyfp_bp.route('/pyfp/battery/<battery_id>/event/<course_type>/cones')
+def cone_picker(battery_id, course_type):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return "Battery not found", 404
+    athlete = db.get_athlete(battery['athlete_id'])
+    if course_type not in _CONE_EVENTS:
+        return "Not a cone-based event", 400
+
+    pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
+    course = pyfp_courses.get(course_type, {})
+    display_name = course.get('course_name', course_type).replace('PYFP - ', '')
+
+    # Existing cone assignment for this battery + course_type (if any)
+    existing_results = [r for r in db.get_pyfp_event_results_for_battery(battery_id)
+                        if r['course_type'] == course_type]
+    existing_cones = []
+    if existing_results:
+        with db.get_connection() as conn:
+            existing_cones = [dict(r) for r in conn.execute(
+                "SELECT * FROM pyfp_cone_assignment WHERE event_result_id=?",
+                (existing_results[0]['event_result_id'],)
+            ).fetchall()]
+
+    return render_template(
+        'pyfp_cone_picker.html',
+        battery=battery,
+        athlete=athlete,
+        course_type=course_type,
+        display_name=display_name,
+        online_cones=_online_cones(),
+        existing_cones={c['role']: c for c in existing_cones},
+    )
+
+
+@pyfp_bp.route('/api/pyfp/battery/<battery_id>/event/<course_type>/cones', methods=['POST'])
+def cone_assignment_save(battery_id, course_type):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return jsonify({'error': 'Battery not found'}), 404
+    if battery['completed_at']:
+        return jsonify({'error': 'Battery already completed'}), 409
+    if course_type not in _CONE_EVENTS:
+        return jsonify({'error': 'Not a cone-based event'}), 400
+
+    data = request.get_json(force=True)
+
+    if course_type in ('pyfp_mile_run', 'pyfp_mile_walk'):
+        start_finish = data.get('start_finish', '').strip()
+        if not start_finish:
+            return jsonify({'error': 'start_finish cone is required'}), 400
+        roles = {'start_finish': start_finish}
+        lm = data.get('lap_marker', '').strip()
+        if lm:
+            roles['lap_marker'] = lm
+    elif course_type == 'pyfp_shuttle_run':
+        ep_a = data.get('endpoint_a', '').strip()
+        ep_b = data.get('endpoint_b', '').strip()
+        if not ep_a or not ep_b:
+            return jsonify({'error': 'Both endpoint_a and endpoint_b are required'}), 400
+        if ep_a == ep_b:
+            return jsonify({'error': 'endpoint_a and endpoint_b must be different'}), 400
+        roles = {'endpoint_a': ep_a, 'endpoint_b': ep_b}
+    else:
+        return jsonify({'error': 'Unsupported event'}), 400
+
+    # Persist to pyfp_cone_assignment (linked to a placeholder event_result)
+    existing = [r for r in db.get_pyfp_event_results_for_battery(battery_id)
+                if r['course_type'] == course_type]
+    if not existing:
+        event_result_id = db.create_pyfp_event_result(
+            battery_id=battery_id, course_type=course_type,
+            raw_value=0.0, raw_unit='seconds',
+            attempt_number=1, is_best=0, notes='cone_assignment_pending',
+        )
+    else:
+        event_result_id = existing[0]['event_result_id']
+
+    with db.get_connection() as conn:
+        conn.execute("DELETE FROM pyfp_cone_assignment WHERE event_result_id=?", (event_result_id,))
+        for role, device_id in roles.items():
+            conn.execute(
+                "INSERT INTO pyfp_cone_assignment (event_result_id, role, device_id) VALUES (?,?,?)",
+                (event_result_id, role, device_id),
+            )
+
+    return jsonify({'ok': True, 'event_result_id': event_result_id, 'roles': roles})
+
+
+@pyfp_bp.route('/api/pyfp/battery/<battery_id>/event/<course_type>/run/start', methods=['POST'])
+def run_start(battery_id, course_type):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return jsonify({'error': 'Battery not found'}), 404
+    if battery['completed_at']:
+        return jsonify({'error': 'Battery already completed'}), 409
+
+    # Load cone assignment
+    existing = [r for r in db.get_pyfp_event_results_for_battery(battery_id)
+                if r['course_type'] == course_type]
+    if not existing:
+        return jsonify({'error': 'No cone assignment found — pick cones first'}), 400
+
+    event_result_id = existing[0]['event_result_id']
+    with db.get_connection() as conn:
+        cones = {r['role']: r['device_id'] for r in conn.execute(
+            "SELECT role, device_id FROM pyfp_cone_assignment WHERE event_result_id=?",
+            (event_result_id,)
+        ).fetchall()}
+
+    data = request.get_json(force=True) or {}
+
+    if course_type in ('pyfp_mile_run', 'pyfp_mile_walk'):
+        sf = cones.get('start_finish')
+        if not sf:
+            return jsonify({'error': 'start_finish cone not assigned'}), 400
+        lm = cones.get('lap_marker')
+        target_laps = int(data.get('target_laps', 4))
+        from services.pyfp_mile_service import get_pyfp_mile_service
+        result = get_pyfp_mile_service().start(
+            battery_id=battery_id, course_type=course_type,
+            start_finish_cone_id=sf, target_laps=target_laps,
+            lap_marker_cone_id=lm,
+        )
+    elif course_type == 'pyfp_shuttle_run':
+        ep_a = cones.get('endpoint_a')
+        ep_b = cones.get('endpoint_b')
+        if not ep_a or not ep_b:
+            return jsonify({'error': 'Both endpoint cones must be assigned'}), 400
+        from services.pyfp_shuttle_service import get_pyfp_shuttle_service
+        result = get_pyfp_shuttle_service().start(
+            battery_id=battery_id, endpoint_a=ep_a, endpoint_b=ep_b,
+        )
+    else:
+        return jsonify({'error': 'Not a cone-based event'}), 400
+
+    if not result.get('ok'):
+        return jsonify(result), 409
+    return jsonify(result), 201
+
+
+@pyfp_bp.route('/api/pyfp/battery/<battery_id>/event/<course_type>/run/status')
+def run_status(battery_id, course_type):
+    if course_type in ('pyfp_mile_run', 'pyfp_mile_walk'):
+        from services.pyfp_mile_service import get_pyfp_mile_service
+        status = get_pyfp_mile_service().get_status()
+        active_for = status.get('battery_id') == battery_id
+    elif course_type == 'pyfp_shuttle_run':
+        from services.pyfp_shuttle_service import get_pyfp_shuttle_service
+        status = get_pyfp_shuttle_service().get_status()
+        active_for = status.get('battery_id') == battery_id
+    else:
+        return jsonify({'error': 'Not a cone-based event'}), 400
+
+    if not active_for:
+        # Check completed event result
+        results = [r for r in db.get_pyfp_event_results_for_battery(battery_id)
+                   if r['course_type'] == course_type]
+        if results and results[0]['raw_value'] > 0:
+            return jsonify({'status': 'done', 'result': results[0]})
+        return jsonify({'status': 'idle'})
+
+    return jsonify({'status': status.get('status', 'unknown'), 'state': status})
+
+
+@pyfp_bp.route('/api/pyfp/battery/<battery_id>/event/<course_type>/run/abort', methods=['POST'])
+def run_abort(battery_id, course_type):
+    if course_type in ('pyfp_mile_run', 'pyfp_mile_walk'):
+        from services.pyfp_mile_service import get_pyfp_mile_service
+        get_pyfp_mile_service().abort()
+    elif course_type == 'pyfp_shuttle_run':
+        from services.pyfp_shuttle_service import get_pyfp_shuttle_service
+        get_pyfp_shuttle_service().abort()
+    return jsonify({'ok': True})
+
+
+@pyfp_bp.route('/pyfp/battery/<battery_id>/event/<course_type>/monitor')
+def run_monitor(battery_id, course_type):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return "Battery not found", 404
+    athlete = db.get_athlete(battery['athlete_id'])
+    pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
+    course = pyfp_courses.get(course_type, {})
+    display_name = course.get('course_name', course_type).replace('PYFP - ', '')
+    return render_template(
+        'pyfp_run_monitor.html',
+        battery=battery, athlete=athlete,
+        course_type=course_type, display_name=display_name,
+    )
+
+
+# Debug: simulate a touch event via REGISTRY (for testing without hardware)
+@pyfp_bp.route('/api/pyfp/debug/touch', methods=['POST'])
+def debug_touch():
+    data = request.get_json(force=True) or {}
+    device_id = data.get('device_id', '192.168.99.101')
+    from datetime import datetime as dt
+    from field_trainer.ft_registry import REGISTRY
+    # REGISTRY._touch_handler is session_service.handle_touch_event (set at startup)
+    if REGISTRY._touch_handler:
+        REGISTRY._touch_handler(device_id, dt.utcnow())
+        return jsonify({'ok': True, 'device_id': device_id})
+    return jsonify({'ok': False, 'error': 'No touch handler registered'}), 503
 
 
 # ==================== PHASE 4 — PACER BRIDGE ====================

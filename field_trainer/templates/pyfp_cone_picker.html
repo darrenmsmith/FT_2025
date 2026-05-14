@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Cone Setup — {{ display_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.pyfp-header { border-left: 4px solid #0d6efd; padding-left: 1rem; }
+.cone-badge { font-family: monospace; font-size:.85rem; }
+.cone-card { border: 2px solid #dee2e6; border-radius: .5rem; padding: 1rem; cursor: pointer; transition: border-color .15s; }
+.cone-card.selected { border-color: #0d6efd; background: #f0f5ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/pyfp/">PYFP</a></li>
+    <li class="breadcrumb-item">
+      <a href="/pyfp/athlete/{{ athlete.athlete_id }}?school_year={{ battery.school_year }}&test_window={{ battery.test_window }}">
+        {{ athlete.name }}</a>
+    </li>
+    <li class="breadcrumb-item active">Cone Setup</li>
+  </ol>
+</nav>
+
+<h2 class="pyfp-header mb-3">
+  <i class="bi bi-broadcast-pin text-primary"></i> Cone Setup — {{ display_name }}
+</h2>
+<p class="text-muted">{{ athlete.name }} · {{ battery.school_year }} {{ battery.test_window|title }}</p>
+
+<!-- Online cones -->
+<div class="card mb-4">
+  <div class="card-header bg-white fw-semibold d-flex justify-content-between">
+    <span>Online Field Cones</span>
+    <span class="badge bg-{% if online_cones %}success{% else %}warning{% endif %}">
+      {{ online_cones|length }} online
+    </span>
+  </div>
+  <div class="card-body">
+    {% if online_cones %}
+    <div class="row g-2">
+      {% for cone in online_cones %}
+      <div class="col-auto">
+        <div class="cone-card">
+          <div class="fw-bold">{{ cone.node_id }}</div>
+          <div class="text-muted small">{{ cone.status }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-warning mb-0">
+      <i class="bi bi-exclamation-triangle"></i>
+      No field cones are currently online. You can still enter a cone IP manually below.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Assignment form -->
+<div class="card shadow-sm">
+  <div class="card-header bg-white fw-semibold">Assign Cone Roles</div>
+  <div class="card-body">
+    <form id="coneForm">
+
+    {% if course_type in ('pyfp_mile_run', 'pyfp_mile_walk') %}
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Start / Finish cone (required) <span class="text-danger">*</span></label>
+        <select class="form-select" id="startFinish" required style="max-width:280px;">
+          <option value="">— Select cone —</option>
+          {% for cone in online_cones %}
+          <option value="{{ cone.node_id }}"
+            {% if existing_cones.get('start_finish', {}).get('device_id') == cone.node_id %}selected{% endif %}>
+            {{ cone.node_id }}
+          </option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Or type any IP:
+          <input type="text" id="startFinishManual" placeholder="192.168.99.101"
+                 value="{{ existing_cones.get('start_finish', {}).get('device_id', '') }}"
+                 class="form-control form-control-sm d-inline-block" style="width:170px;">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Lap marker cone (optional — records split times)</label>
+        <select class="form-select" id="lapMarker" style="max-width:280px;">
+          <option value="">— None —</option>
+          {% for cone in online_cones %}
+          <option value="{{ cone.node_id }}"
+            {% if existing_cones.get('lap_marker', {}).get('device_id') == cone.node_id %}selected{% endif %}>
+            {{ cone.node_id }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Number of laps</label>
+        <input type="number" id="targetLaps" class="form-control" min="1" max="20" value="4"
+               style="max-width:100px;">
+      </div>
+
+    {% elif course_type == 'pyfp_shuttle_run' %}
+      <p class="text-muted small">
+        <i class="bi bi-info-circle"></i>
+        Touch sequence: <strong>B → A → B → A</strong> (4 legs × 30 ft).
+        Athlete starts at endpoint A, touches B first.
+      </p>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Endpoint A (start / finish side) <span class="text-danger">*</span></label>
+        <select class="form-select" id="endpointA" required style="max-width:280px;">
+          <option value="">— Select cone —</option>
+          {% for cone in online_cones %}
+          <option value="{{ cone.node_id }}"
+            {% if existing_cones.get('endpoint_a', {}).get('device_id') == cone.node_id %}selected{% endif %}>
+            {{ cone.node_id }}
+          </option>
+          {% endfor %}
+        </select>
+        <input type="text" id="endpointAManual" placeholder="192.168.99.101"
+               value="{{ existing_cones.get('endpoint_a', {}).get('device_id', '') }}"
+               class="form-control form-control-sm mt-1" style="max-width:170px;">
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Endpoint B (far side) <span class="text-danger">*</span></label>
+        <select class="form-select" id="endpointB" required style="max-width:280px;">
+          <option value="">— Select cone —</option>
+          {% for cone in online_cones %}
+          <option value="{{ cone.node_id }}"
+            {% if existing_cones.get('endpoint_b', {}).get('device_id') == cone.node_id %}selected{% endif %}>
+            {{ cone.node_id }}
+          </option>
+          {% endfor %}
+        </select>
+        <input type="text" id="endpointBManual" placeholder="192.168.99.102"
+               value="{{ existing_cones.get('endpoint_b', {}).get('device_id', '') }}"
+               class="form-control form-control-sm mt-1" style="max-width:170px;">
+      </div>
+    {% endif %}
+
+      <div id="formError" class="alert alert-danger d-none"></div>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-save"></i> Save & Go to Monitor
+      </button>
+      <a href="/pyfp/athlete/{{ athlete.athlete_id }}?school_year={{ battery.school_year }}&test_window={{ battery.test_window }}"
+         class="btn btn-outline-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const BATTERY_ID  = "{{ battery.battery_id }}";
+const COURSE_TYPE = "{{ course_type }}";
+
+function getVal(selectId, manualId) {
+  const manual = document.getElementById(manualId)?.value?.trim();
+  if (manual) return manual;
+  return document.getElementById(selectId)?.value || '';
+}
+
+document.getElementById('coneForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const err = document.getElementById('formError');
+  err.classList.add('d-none');
+
+  let payload = {};
+
+  if (COURSE_TYPE === 'pyfp_mile_run' || COURSE_TYPE === 'pyfp_mile_walk') {
+    const sf = getVal('startFinish', 'startFinishManual');
+    if (!sf) { err.textContent='Start/finish cone is required.'; err.classList.remove('d-none'); return; }
+    payload.start_finish = sf;
+    const lm = document.getElementById('lapMarker')?.value;
+    if (lm) payload.lap_marker = lm;
+    payload.target_laps = parseInt(document.getElementById('targetLaps').value);
+  } else if (COURSE_TYPE === 'pyfp_shuttle_run') {
+    const a = getVal('endpointA', 'endpointAManual');
+    const b = getVal('endpointB', 'endpointBManual');
+    if (!a || !b) { err.textContent='Both endpoints required.'; err.classList.remove('d-none'); return; }
+    if (a === b)  { err.textContent='Endpoints must be different cones.'; err.classList.remove('d-none'); return; }
+    payload.endpoint_a = a;
+    payload.endpoint_b = b;
+  }
+
+  const resp = await fetch(`/api/pyfp/battery/${BATTERY_ID}/event/${COURSE_TYPE}/cones`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const data = await resp.json();
+  if (!resp.ok) { err.textContent = data.error || 'Save failed.'; err.classList.remove('d-none'); return; }
+
+  window.location.href = `/pyfp/battery/${BATTERY_ID}/event/${COURSE_TYPE}/monitor`;
+});
+</script>
+{% endblock %}

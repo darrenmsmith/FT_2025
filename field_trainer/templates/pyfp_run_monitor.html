@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}{{ display_name }} Monitor{% endblock %}
+
+{% block extra_css %}
+<style>
+.pyfp-header { border-left: 4px solid #0d6efd; padding-left: 1rem; }
+#bigTimer { font-size: 4rem; font-family: monospace; font-weight: bold; }
+#lapGrid .lap-row { padding: .4rem .8rem; border-bottom: 1px solid #dee2e6; }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/pyfp/">PYFP</a></li>
+    <li class="breadcrumb-item">
+      <a href="/pyfp/athlete/{{ athlete.athlete_id }}?school_year={{ battery.school_year }}&test_window={{ battery.test_window }}">
+        {{ athlete.name }}</a>
+    </li>
+    <li class="breadcrumb-item active">{{ display_name }}</li>
+  </ol>
+</nav>
+
+<div class="row mb-4 align-items-center">
+  <div class="col">
+    <h2 class="pyfp-header">
+      <i class="bi bi-stopwatch text-primary"></i> {{ display_name }} — Live Monitor
+    </h2>
+    <p class="text-muted">{{ athlete.name }}</p>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-success" id="startBtn" onclick="startRun()">
+      <i class="bi bi-play-fill"></i> Start Run
+    </button>
+    <button class="btn btn-danger ms-2" id="abortBtn" onclick="abortRun()" style="display:none">
+      <i class="bi bi-x-circle"></i> Abort
+    </button>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-md-4">
+    <div class="card text-center shadow-sm">
+      <div class="card-body py-4">
+        <div class="text-muted small mb-1">Elapsed</div>
+        <div id="bigTimer">0:00.0</div>
+        <div id="statusBadge" class="badge bg-secondary mt-2">Idle</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header bg-white fw-semibold">Progress</div>
+      <div class="card-body" id="progressArea">
+        <p class="text-muted">Waiting for run to start…</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header bg-white fw-semibold">Split Times</div>
+      <div id="lapGrid" class="card-body p-0">
+        <p class="text-muted p-3">No data yet.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="resultCard" class="alert alert-success mt-4 d-none">
+  <h4><i class="bi bi-check-circle-fill"></i> Run Complete!</h4>
+  <p id="resultText" class="mb-2"></p>
+  <a id="backLink" href="/pyfp/athlete/{{ athlete.athlete_id }}?school_year={{ battery.school_year }}&test_window={{ battery.test_window }}"
+     class="btn btn-primary">Back to Athlete View</a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const BATTERY_ID  = "{{ battery.battery_id }}";
+const COURSE_TYPE = "{{ course_type }}";
+const BACK_URL    = "/pyfp/athlete/{{ athlete.athlete_id }}?school_year={{ battery.school_year }}&test_window={{ battery.test_window }}";
+const IS_MILE     = COURSE_TYPE.startsWith('pyfp_mile');
+
+let pollInterval = null;
+let timerInterval = null;
+let runStartedAt  = null;
+
+function fmt(secs) {
+  const m  = Math.floor(secs / 60);
+  const s  = Math.floor(secs % 60);
+  const ds = Math.floor((secs % 1) * 10);
+  return `${m}:${String(s).padStart(2,'0')}.${ds}`;
+}
+
+async function startRun() {
+  document.getElementById('startBtn').disabled = true;
+  const resp = await fetch(`/api/pyfp/battery/${BATTERY_ID}/event/${COURSE_TYPE}/run/start`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({}),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    alert('Error: ' + (data.error || 'Start failed'));
+    document.getElementById('startBtn').disabled = false;
+    return;
+  }
+  runStartedAt = Date.now();
+  document.getElementById('startBtn').style.display = 'none';
+  document.getElementById('abortBtn').style.display = '';
+  document.getElementById('statusBadge').textContent = 'Active';
+  document.getElementById('statusBadge').className = 'badge bg-success mt-2';
+  timerInterval = setInterval(tickTimer, 100);
+  pollInterval  = setInterval(pollStatus, 500);
+}
+
+function tickTimer() {
+  if (!runStartedAt) return;
+  document.getElementById('bigTimer').textContent = fmt((Date.now() - runStartedAt) / 1000);
+}
+
+async function pollStatus() {
+  const resp = await fetch(`/api/pyfp/battery/${BATTERY_ID}/event/${COURSE_TYPE}/run/status`);
+  const data = await resp.json();
+
+  if (data.status === 'done' || (data.state && data.state.status === 'done')) {
+    clearInterval(pollInterval);
+    clearInterval(timerInterval);
+    const result = data.result || data.state;
+    showResult(result);
+    return;
+  }
+
+  const state = data.state || {};
+  updateProgress(state);
+}
+
+function updateProgress(state) {
+  const prog = document.getElementById('progressArea');
+  if (!state.status) return;
+
+  if (IS_MILE) {
+    const laps   = state.lap_count || 0;
+    const target = state.target_laps || 4;
+    prog.innerHTML = `
+      <div class="display-6 text-center text-primary fw-bold">${laps} / ${target}</div>
+      <div class="text-center text-muted">laps completed</div>`;
+    const lapGrid = document.getElementById('lapGrid');
+    const times = state.lap_times || [];
+    lapGrid.innerHTML = times.map((t, i) => `
+      <div class="lap-row"><span class="fw-semibold">Lap ${i+1}</span>
+        <span class="text-muted float-end small">${t}</span></div>`).join('') || '<p class="text-muted p-3">No laps yet.</p>';
+  } else {
+    const touches = state.touch_count || 0;
+    prog.innerHTML = `
+      <div class="display-6 text-center text-primary fw-bold">${touches} / 4</div>
+      <div class="text-center text-muted">touches</div>`;
+    const lapGrid = document.getElementById('lapGrid');
+    const times = state.touch_times || [];
+    lapGrid.innerHTML = times.map((t, i) => `
+      <div class="lap-row"><span class="fw-semibold">Leg ${i+1}</span>
+        <span class="text-muted float-end small">${t}</span></div>`).join('') || '<p class="text-muted p-3">No touches yet.</p>';
+  }
+}
+
+function showResult(result) {
+  document.getElementById('startBtn').style.display   = '';
+  document.getElementById('startBtn').disabled        = false;
+  document.getElementById('abortBtn').style.display   = 'none';
+  document.getElementById('statusBadge').textContent  = 'Done';
+  document.getElementById('statusBadge').className    = 'badge bg-success mt-2';
+
+  const secs = result?.raw_value ?? result?.total_seconds ?? 0;
+  document.getElementById('resultText').textContent = `Time: ${fmt(secs)} (${secs}s)`;
+  document.getElementById('resultCard').classList.remove('d-none');
+}
+
+async function abortRun() {
+  if (!confirm('Abort this run? The result will not be saved.')) return;
+  clearInterval(pollInterval);
+  clearInterval(timerInterval);
+  await fetch(`/api/pyfp/battery/${BATTERY_ID}/event/${COURSE_TYPE}/run/abort`, {method:'POST'});
+  document.getElementById('startBtn').style.display   = '';
+  document.getElementById('startBtn').disabled        = false;
+  document.getElementById('abortBtn').style.display   = 'none';
+  document.getElementById('statusBadge').textContent  = 'Aborted';
+  document.getElementById('statusBadge').className    = 'badge bg-warning mt-2';
+  runStartedAt = null;
+}
+
+// Check on load if there's an existing result
+(async function() {
+  const resp = await fetch(`/api/pyfp/battery/${BATTERY_ID}/event/${COURSE_TYPE}/run/status`);
+  const data = await resp.json();
+  if (data.status === 'done') showResult(data.result);
+  else if (data.status === 'active') {
+    runStartedAt = Date.now();  // approximate
+    timerInterval = setInterval(tickTimer, 100);
+    pollInterval  = setInterval(pollStatus, 500);
+    document.getElementById('startBtn').style.display = 'none';
+    document.getElementById('abortBtn').style.display = '';
+  }
+})();
+</script>
+{% endblock %}

@@ -1342,6 +1342,18 @@ class DatabaseManager:
 
             print(f"   ✓ Created {len(pattern_device_ids)} pattern segments for run {run_id[:8]}")
     
+    def create_pyfp_segments(self, run_id: str, to_device_sequence: list) -> None:
+        """Create segments from an explicit to_device list (mile laps / shuttle legs)."""
+        with self.get_connection() as conn:
+            for i, to_device in enumerate(to_device_sequence):
+                conn.execute(
+                    """INSERT INTO segments
+                           (run_id, from_device, to_device, sequence,
+                            expected_min_time, expected_max_time)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (run_id, '192.168.99.100', to_device, i, 0.0, 9999.0)
+                )
+
     def record_touch(self, run_id: str, device_id: str, timestamp: datetime) -> Optional[int]:
         """Record a touch event and update segment timing"""
         with self.get_connection() as conn:
