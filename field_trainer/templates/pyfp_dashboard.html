@@ -59,7 +59,7 @@
   </div>
   <div class="card-body">
     <div class="row g-3 align-items-start">
-      <div class="col-md-6">
+      <div class="col-md-4">
         <label class="form-label fw-semibold mb-1">Assessment Battery</label>
         <select class="form-select" id="batchRubric" onchange="updateBatteryPreview()">
           <option value="">— Select a battery —</option>
@@ -67,10 +67,12 @@
           <option value="fitnessgram_hfz">FitnessGram HFZ</option>
           <option value="both">Both (FitnessGram HFZ + PFT 2026)</option>
         </select>
-        <div id="batteryPreview" class="mt-2 d-none">
-          <div class="text-muted small fw-semibold mb-1">Included events:</div>
-          <div id="batteryEventList" class="d-flex flex-wrap gap-1"></div>
-        </div>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold mb-1">Event</label>
+        <select class="form-select" id="batchEvent" disabled>
+          <option value="">— Select a battery first —</option>
+        </select>
       </div>
       <div class="col-md-auto" style="padding-top:2rem">
         <button class="btn btn-primary" id="batchStartBtn"
@@ -80,7 +82,8 @@
       </div>
     </div>
     <div class="form-text mt-2">
-      Creates batteries only for athletes who don't already have one for this window.
+      Select a battery and event, then click <strong>Start Battery for Class</strong> to create
+      batteries for all athletes in this window.
       Athletes with missing age or gender are skipped
       — look for <i class="bi bi-exclamation-triangle-fill text-warning"></i> in the table below.
     </div>
@@ -199,24 +202,29 @@ const TEST_WINDOW = "{{ test_window }}";
 const EVENT_LISTS = {{ event_lists | tojson }};
 
 function updateBatteryPreview() {
-  const rubric  = document.getElementById('batchRubric').value;
-  const preview = document.getElementById('batteryPreview');
-  const list    = document.getElementById('batteryEventList');
-  const btn     = document.getElementById('batchStartBtn');
+  const rubric     = document.getElementById('batchRubric').value;
+  const eventSel   = document.getElementById('batchEvent');
+  const btn        = document.getElementById('batchStartBtn');
 
-  if (!rubric) {
-    preview.classList.add('d-none');
-    btn.disabled = true;
-    return;
-  }
+  eventSel.innerHTML = '<option value="">— Select an event —</option>';
+  eventSel.disabled  = true;
+  btn.disabled       = true;
+
+  if (!rubric) return;
 
   const events = EVENT_LISTS[rubric] || [];
-  list.innerHTML = events.map(e =>
-    `<span class="badge bg-light text-dark border">${e}</span>`
-  ).join('');
-  preview.classList.remove('d-none');
-  btn.disabled = false;
+  events.forEach(e => {
+    const opt = document.createElement('option');
+    opt.value       = e;
+    opt.textContent = e;
+    eventSel.appendChild(opt);
+  });
+  eventSel.disabled = false;
 }
+
+document.getElementById('batchEvent')?.addEventListener('change', function() {
+  document.getElementById('batchStartBtn').disabled = !this.value;
+});
 
 async function startBatteryForClass() {
   const rubric = document.getElementById('batchRubric').value;
