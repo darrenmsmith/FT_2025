@@ -557,16 +557,41 @@ def audio_play():
 
 _CONE_EVENTS = {'pyfp_mile_run', 'pyfp_mile_walk', 'pyfp_shuttle_run'}
 
-def _online_cones() -> list[dict]:
-    """Return field cones (101-105) visible in REGISTRY snapshot."""
+_IP_TO_LABEL = {
+    '192.168.99.100': 'Cone 0 — 192.168.99.100',
+    '192.168.99.101': 'Cone 1',
+    '192.168.99.102': 'Cone 2',
+    '192.168.99.103': 'Cone 3',
+    '192.168.99.104': 'Cone 4',
+    '192.168.99.105': 'Cone 5',
+}
+
+
+def _online_cones(include_d0: bool = False) -> list[dict]:
+    """Return online field cones with human-readable labels.
+
+    D0 (192.168.99.100) does not self-register in the REGISTRY snapshot, so
+    when include_d0=True it is prepended explicitly as a static entry.
+    """
     try:
         from field_trainer.ft_registry import REGISTRY
         snap = REGISTRY.snapshot()
-        return [n for n in snap.get('nodes', [])
-                if n.get('ip', '').startswith('192.168.99.1')
-                and n['ip'] != '192.168.99.100']
+        results = []
+        for n in snap.get('nodes', []):
+            ip = n.get('ip', '')
+            if not ip.startswith('192.168.99.1') or ip == '192.168.99.100':
+                continue
+            results.append({**n, 'label': _IP_TO_LABEL.get(ip, ip)})
+        results.sort(key=lambda x: x.get('ip', ''))
     except Exception:
-        return []
+        results = []
+
+    if include_d0:
+        d0 = {'ip': '192.168.99.100', 'node_id': '192.168.99.100',
+               'status': 'online', 'label': _IP_TO_LABEL['192.168.99.100']}
+        results = [d0] + results
+
+    return results
 
 
 @pyfp_bp.route('/pyfp/battery/<battery_id>/event/<course_type>/cones')
@@ -599,7 +624,7 @@ def cone_picker(battery_id, course_type):
         athlete=athlete,
         course_type=course_type,
         display_name=display_name,
-        online_cones=_online_cones(),
+        online_cones=_online_cones(include_d0=course_type in ('pyfp_mile_run', 'pyfp_mile_walk')),
         existing_cones={c['role']: c for c in existing_cones},
     )
 

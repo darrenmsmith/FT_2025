@@ -41,8 +41,8 @@
       {% for cone in online_cones %}
       <div class="col-auto">
         <div class="cone-card">
-          <div class="fw-bold">{{ cone.node_id }}</div>
-          <div class="text-muted small">{{ cone.status }}</div>
+          <div class="fw-bold">{{ cone.label }}</div>
+          <div class="text-muted small">{{ cone.node_id }}</div>
         </div>
       </div>
       {% endfor %}
@@ -70,7 +70,7 @@
           {% for cone in online_cones %}
           <option value="{{ cone.node_id }}"
             {% if existing_cones.get('start_finish', {}).get('device_id') == cone.node_id %}selected{% endif %}>
-            {{ cone.node_id }}
+            {{ cone.label }}
           </option>
           {% endfor %}
         </select>
@@ -87,7 +87,7 @@
           {% for cone in online_cones %}
           <option value="{{ cone.node_id }}"
             {% if existing_cones.get('lap_marker', {}).get('device_id') == cone.node_id %}selected{% endif %}>
-            {{ cone.node_id }}
+            {{ cone.label }}
           </option>
           {% endfor %}
         </select>
@@ -111,7 +111,7 @@
           {% for cone in online_cones %}
           <option value="{{ cone.node_id }}"
             {% if existing_cones.get('endpoint_a', {}).get('device_id') == cone.node_id %}selected{% endif %}>
-            {{ cone.node_id }}
+            {{ cone.label }}
           </option>
           {% endfor %}
         </select>
@@ -126,7 +126,7 @@
           {% for cone in online_cones %}
           <option value="{{ cone.node_id }}"
             {% if existing_cones.get('endpoint_b', {}).get('device_id') == cone.node_id %}selected{% endif %}>
-            {{ cone.node_id }}
+            {{ cone.label }}
           </option>
           {% endfor %}
         </select>
