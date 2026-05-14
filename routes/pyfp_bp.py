@@ -131,6 +131,17 @@ def dashboard():
                 })
 
     complete_count = sum(1 for r in athlete_rows if r.get('battery') and r['battery']['completed_at'])
+
+    # Event name lists per rubric for the battery-picker UI
+    pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
+    event_lists = {
+        rubric: [
+            pyfp_courses.get(k, {}).get('course_name', k).replace('PYFP - ', '')
+            for k in events_for_rubric(rubric)
+        ]
+        for rubric in ('pft_2026', 'fitnessgram_hfz', 'both')
+    }
+
     return render_template(
         'pyfp_dashboard.html',
         teams=teams,
@@ -141,6 +152,7 @@ def dashboard():
         school_year_options=_school_year_options(),
         rubric_labels=RUBRIC_LABELS,
         complete_count=complete_count,
+        event_lists=event_lists,
     )
 
 
