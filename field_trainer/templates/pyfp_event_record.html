@@ -67,6 +67,22 @@
   <div class="card-header bg-white fw-semibold">PACER Actions</div>
   <div class="card-body d-flex gap-3 flex-wrap">
     {% if not has_session %}
+    <div class="mb-3">
+      <label class="form-label fw-semibold mb-1">Start Level</label>
+      <select class="form-select form-select-sm" id="pacerStartLevel" style="max-width:180px;">
+        <option value="1" selected>Level 1 (default)</option>
+        <option value="2">Level 2</option>
+        <option value="3">Level 3</option>
+        <option value="4">Level 4</option>
+        <option value="5">Level 5</option>
+        <option value="6">Level 6</option>
+        <option value="7">Level 7</option>
+        <option value="8">Level 8</option>
+        <option value="9">Level 9</option>
+        <option value="10">Level 10</option>
+      </select>
+      <div class="form-text">Most athletes begin at Level 1. Raise only to skip early levels for fitter athletes.</div>
+    </div>
     <button class="btn btn-primary" onclick="runPacer()">
       <i class="bi bi-play-circle-fill"></i> Run PACER (whole class)
     </button>
@@ -446,7 +462,12 @@ function stopTimer() {
 }
 
 async function runPacer() {
-  const resp = await fetch(`/api/pyfp/battery/${BATTERY_ID}/pacer/start`, {method: 'POST'});
+  const startLevel = parseInt(document.getElementById('pacerStartLevel')?.value || '1');
+  const resp = await fetch(`/api/pyfp/battery/${BATTERY_ID}/pacer/start`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({start_level: startLevel}),
+  });
   const data = await resp.json();
   if (resp.ok && data.redirect_url) {
     window.location.href = data.redirect_url;

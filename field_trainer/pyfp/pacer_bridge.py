@@ -27,15 +27,17 @@ _SHUTTLES_20M = {
 }
 
 
-def compute_total_laps(level_completed: int, shuttle_failed_on: int | None) -> int:
-    """Sum shuttles for fully completed levels + partial shuttles in the failed level."""
-    total = sum(_SHUTTLES_20M.get(lv, 0) for lv in range(1, (level_completed or 0) + 1))
+def compute_total_laps(level_completed: int, shuttle_failed_on: int | None,
+                       start_level: int = 1) -> int:
+    """Sum shuttles from start_level through level_completed + partial shuttles on failure."""
+    first = max(1, start_level)
+    total = sum(_SHUTTLES_20M.get(lv, 0) for lv in range(first, (level_completed or 0) + 1))
     if shuttle_failed_on and shuttle_failed_on > 1:
         total += shuttle_failed_on - 1
     return total
 
 
-def start_pacer(battery_id: str) -> dict:
+def start_pacer(battery_id: str, start_level: int = 1) -> dict:
     """
     Create a beep_test session for the battery's team.
     If a session is already linked, return its info without creating a new one.
@@ -71,7 +73,7 @@ def start_pacer(battery_id: str) -> dict:
         beep_course_id = row['course_id']
 
     # Create session in sessions table (beep_test integrated approach)
-    beep_config = {'distance_meters': 20, 'device_count': 2, 'start_level': 1}
+    beep_config = {'distance_meters': 20, 'device_count': 2, 'start_level': start_level}
     session_id = db.create_session(
         team_id=team_id,
         course_id=beep_course_id,
@@ -134,9 +136,20 @@ def import_pacer_result(battery_id: str) -> dict:
     if not athlete_bt:
         raise ValueError(f"Athlete not found in beep_test session {session_id!r}")
 
-    level_completed  = athlete_bt.get('level_completed') or 0
-    shuttle_failed   = athlete_bt.get('shuttle_failed_on')
-    total_laps       = compute_total_laps(level_completed, shuttle_failed)
+    level_completed = athlete_bt.get('level_completed') or 0
+    shuttle_failed  = athlete_bt.get('shuttle_failed_on')
+
+    # Read start_level from the session's stored pattern_config
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT pattern_config FROM sessions WHERE session_id=?", (session_id,)
+        ).fetchone()
+    try:
+        start_level = json.loads(row['pattern_config']).get('start_level', 1) if row else 1
+    except Exception:
+        start_level = 1
+
+    total_laps = compute_total_laps(level_completed, shuttle_failed, start_level)
 
     # Update pyfp_event_result
     with db.get_connection() as conn:

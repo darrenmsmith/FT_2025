@@ -809,9 +809,11 @@ def pacer_start(battery_id):
         return jsonify({'error': 'Battery not found'}), 404
     if battery['completed_at']:
         return jsonify({'error': 'Battery already completed'}), 409
+    data = request.get_json(force=True) or {}
+    start_level = max(1, min(21, int(data.get('start_level', 1))))
     try:
         from field_trainer.pyfp.pacer_bridge import start_pacer
-        result = start_pacer(battery_id)
+        result = start_pacer(battery_id, start_level=start_level)
         return jsonify(result), 200 if not result['created'] else 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
