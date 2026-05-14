@@ -1,30 +1,30 @@
 {% extends "base.html" %}
-{% block title %}PYFP Dashboard{% endblock %}
+{% block title %}PYFP Reports{% endblock %}
 
 {% block extra_css %}
 <style>
 .pyfp-header { border-left: 4px solid #0d6efd; padding-left: 1rem; }
 .progress { height: 6px; }
-.badge-rubric { font-size: .75rem; }
+tr.row-complete { background-color: rgba(25, 135, 84, 0.06); }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="row mb-3">
+<div class="row mb-3 align-items-center">
   <div class="col">
     <h2 class="pyfp-header">
-      <i class="bi bi-award text-primary"></i> PYFP Assessment Dashboard
+      <i class="bi bi-bar-chart-line text-primary"></i> PYFP Reports
     </h2>
-    <p class="text-muted mb-0">Presidential Youth Fitness Program — battery management by class</p>
+    <p class="text-muted mb-0">CSV exports and class completion overview</p>
   </div>
 </div>
 
 <!-- Filters -->
-<form method="get" action="/pyfp/" class="row g-2 mb-4 align-items-end">
+<form method="get" action="/pyfp/reports" class="row g-2 mb-4 align-items-end">
   <div class="col-md-4">
     <label class="form-label fw-semibold">Class / Team</label>
     <select name="team_id" class="form-select" onchange="this.form.submit()">
-      <option value="">— Select a class —</option>
+      <option value="">— All classes —</option>
       {% for team in teams %}
       <option value="{{ team.team_id }}"
         {% if selected_team and selected_team.team_id == team.team_id %}selected{% endif %}>
@@ -50,22 +50,53 @@
   </div>
 </form>
 
-{% if selected_team %}
-<!-- Completion grid -->
+<!-- CSV export cards -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card h-100 shadow-sm">
+      <div class="card-header bg-white fw-semibold">
+        <i class="bi bi-file-earmark-spreadsheet text-success"></i> Wide Format (per battery)
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          One row per athlete battery. Columns for each event's raw value plus awards.
+          HR columns reserved (populated in a future phase).
+        </p>
+        <a href="/api/pyfp/reports/csv/batteries?{{ csv_qs }}" class="btn btn-success">
+          <i class="bi bi-download"></i> Download batteries.csv
+        </a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card h-100 shadow-sm">
+      <div class="card-header bg-white fw-semibold">
+        <i class="bi bi-file-earmark-spreadsheet text-primary"></i> Long Format (per event)
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          One row per event result. Includes all attempts (use <code>is_best=1</code> to filter).
+          Useful for detailed analysis by event type.
+        </p>
+        <a href="/api/pyfp/reports/csv/events?{{ csv_qs }}" class="btn btn-primary">
+          <i class="bi bi-download"></i> Download events.csv
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Class completion grid -->
+{% if athlete_rows %}
 <div class="card shadow-sm">
   <div class="card-header d-flex justify-content-between align-items-center bg-white">
-    <h5 class="mb-0">{{ selected_team.name }}
+    <h5 class="mb-0">
+      {{ selected_team.name if selected_team else 'All Classes' }}
       <span class="text-muted fw-normal small">— {{ school_year }} {{ test_window|title }}</span>
     </h5>
-    <div class="d-flex align-items-center gap-2">
-      <span class="badge bg-{{ 'success' if complete_count == athlete_rows|length and athlete_rows else 'secondary' }}">
-        {{ complete_count }}/{{ athlete_rows|length }} complete
-      </span>
-      <a href="/pyfp/reports?team_id={{ selected_team.team_id }}&school_year={{ school_year }}&test_window={{ test_window }}"
-         class="btn btn-sm btn-outline-primary">
-        <i class="bi bi-file-earmark-spreadsheet"></i> Reports / CSV
-      </a>
-    </div>
+    <span class="badge bg-{% if complete_count == athlete_rows|length and athlete_rows %}success{% else %}secondary{% endif %}">
+      {{ complete_count }}/{{ athlete_rows|length }} complete
+    </span>
   </div>
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
@@ -73,28 +104,19 @@
         <tr>
           <th>Athlete</th>
           <th>Rubric</th>
-          <th style="min-width:160px">Progress</th>
+          <th style="min-width:150px">Progress</th>
           <th>Status</th>
+          <th>Awards</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
         {% for row in athlete_rows %}
-        <tr{% if row.battery and row.battery.completed_at %} class="table-success"{% endif %}>
-          <td>
-            <a href="/pyfp/athlete/{{ row.athlete.athlete_id }}" class="text-decoration-none fw-semibold">
-              {{ row.athlete.name }}
-            </a>
-            {% if row.athlete.jersey_number %}
-              <span class="text-muted small ms-1">#{{ row.athlete.jersey_number }}</span>
-            {% endif %}
-            {% if row.athlete.age %}
-              <span class="text-muted small"> · age {{ row.athlete.age }}</span>
-            {% endif %}
-          </td>
+        <tr{% if row.battery and row.battery.completed_at %} class="row-complete"{% endif %}>
+          <td class="fw-semibold">{{ row.athlete.name }}</td>
           <td>
             {% if row.battery %}
-              <span class="badge bg-info text-dark badge-rubric">
+              <span class="badge bg-info text-dark" style="font-size:.72rem">
                 {{ rubric_labels.get(row.battery.rubric, row.battery.rubric) }}
               </span>
             {% else %}
@@ -123,25 +145,34 @@
             {% endif %}
           </td>
           <td>
-            <a href="/pyfp/athlete/{{ row.athlete.athlete_id }}?school_year={{ school_year }}&test_window={{ test_window }}"
-               class="btn btn-sm btn-outline-primary">
-              {% if row.battery %}View{% else %}Start{% endif %}
-            </a>
+            {% for aw in row.awards %}
+              <span class="badge bg-warning text-dark me-1" style="font-size:.7rem">
+                {% if aw.award_type == 'hfz_all_zones' %}HFZ All
+                {% elif aw.award_type == 'pft_3_of_6' %}PFT 3/6
+                {% elif aw.award_type == 'pft_full_6' %}PFT 6/6
+                {% else %}{{ aw.award_type }}{% endif %}
+              </span>
+            {% endfor %}
+          </td>
+          <td>
+            {% if row.battery %}
+              <a href="/pyfp/battery/{{ row.battery.battery_id }}/report"
+                 class="btn btn-sm btn-outline-primary">Report</a>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
         {% if not athlete_rows %}
-        <tr><td colspan="5" class="text-center text-muted py-4">No athletes in this class.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted py-4">No athletes found.</td></tr>
         {% endif %}
       </tbody>
     </table>
   </div>
 </div>
-
 {% else %}
 <div class="alert alert-info d-flex align-items-center gap-2">
   <i class="bi bi-info-circle-fill"></i>
-  Select a class above to view athlete battery status and start assessments.
+  Select a class or school year to view completion status and download reports.
 </div>
 {% endif %}
 {% endblock %}

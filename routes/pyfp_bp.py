@@ -122,6 +122,7 @@ def dashboard():
                     'pct': pct,
                 })
 
+    complete_count = sum(1 for r in athlete_rows if r.get('battery') and r['battery']['completed_at'])
     return render_template(
         'pyfp_dashboard.html',
         teams=teams,
@@ -131,6 +132,7 @@ def dashboard():
         test_window=test_window,
         school_year_options=_school_year_options(),
         rubric_labels=RUBRIC_LABELS,
+        complete_count=complete_count,
     )
 
 
@@ -245,9 +247,22 @@ def battery_complete(battery_id):
     if not battery:
         return jsonify({'error': 'Battery not found'}), 404
     if battery['completed_at']:
-        return jsonify({'ok': True, 'already_complete': True})
+        return jsonify({'ok': True, 'already_complete': True,
+                        'awards': [a['award_type'] for a in db.get_pyfp_awards(battery_id)]})
     db.complete_pyfp_battery(battery_id)
-    return jsonify({'ok': True, 'already_complete': False})
+    battery = db.get_pyfp_battery(battery_id)
+
+    try:
+        from field_trainer.pyfp.scoring import score_battery
+        from field_trainer.pyfp.awards import compute_and_write_awards
+        results = db.get_pyfp_event_results_for_battery(battery_id)
+        scores  = score_battery(battery, results, db)
+        awarded = compute_and_write_awards(battery, scores, db)
+    except Exception as e:
+        print(f"[PYFP] scoring/awards error: {e}")
+        awarded = []
+
+    return jsonify({'ok': True, 'already_complete': False, 'awards': awarded})
 
 
 # ==================== PHASE 3 — MANUAL EVENT RECORDING ====================
@@ -788,3 +803,151 @@ def pacer_import(battery_id):
         return jsonify({'ok': True, **result})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ==================== PHASE 7 — SCORING, AWARDS, REPORTS ====================
+
+def _get_filtered_batteries(team_id: str | None, school_year: str, test_window: str) -> list[dict]:
+    """Return batteries matching the filter across all teams or one team."""
+    if team_id:
+        return db.get_pyfp_team_batteries(team_id, school_year, test_window)
+    teams = db.get_all_teams()
+    batteries = []
+    for team in teams:
+        batteries.extend(db.get_pyfp_team_batteries(team['team_id'], school_year, test_window))
+    return batteries
+
+
+@pyfp_bp.route('/pyfp/battery/<battery_id>/report')
+def battery_report(battery_id):
+    battery = db.get_pyfp_battery(battery_id)
+    if not battery:
+        return "Battery not found", 404
+    athlete = db.get_athlete(battery['athlete_id'])
+    if not athlete:
+        return "Athlete not found", 404
+
+    pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
+    results      = db.get_pyfp_event_results_for_battery(battery_id)
+    awards       = db.get_pyfp_awards(battery_id)
+    event_grid   = _build_event_grid(battery, results, pyfp_courses)
+
+    # Best result per course_type for display
+    results_by_type: dict = {}
+    for r in results:
+        ct = r['course_type']
+        if ct not in results_by_type or r['is_best']:
+            results_by_type[ct] = r
+
+    from field_trainer.pyfp.scoring import score_battery
+    scores = score_battery(battery, results, db)
+
+    return render_template(
+        'pyfp_battery_summary.html',
+        battery=battery,
+        athlete=athlete,
+        event_grid=event_grid,
+        results_by_type=results_by_type,
+        awards=awards,
+        scores=scores,
+        rubric_labels=RUBRIC_LABELS,
+    )
+
+
+@pyfp_bp.route('/pyfp/reports')
+def reports_page():
+    teams       = db.get_all_teams()
+    team_id     = request.args.get('team_id', '').strip() or None
+    school_year = request.args.get('school_year', _current_school_year())
+    test_window = request.args.get('test_window', _current_test_window())
+
+    selected_team = db.get_team(team_id) if team_id else None
+    batteries     = _get_filtered_batteries(team_id, school_year, test_window)
+    batteries_by_athlete = {b['athlete_id']: b for b in batteries}
+
+    athlete_rows = []
+    complete_count = 0
+    pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
+
+    athletes_to_show = (
+        db.get_athletes_by_team(team_id)
+        if team_id else
+        [a for t in db.get_all_teams() for a in db.get_athletes_by_team(t['team_id'])]
+    )
+
+    for athlete in athletes_to_show:
+        battery = batteries_by_athlete.get(athlete['athlete_id'])
+        events_done = events_total = pct = 0
+        row_awards = []
+        if battery:
+            results     = db.get_pyfp_event_results_for_battery(battery['battery_id'])
+            event_keys  = events_for_rubric(battery['rubric'])
+            done_types  = {r['course_type'] for r in results}
+            events_done = len(done_types)
+            events_total = len(event_keys)
+            pct         = round(100 * events_done / events_total) if events_total else 0
+            row_awards  = db.get_pyfp_awards(battery['battery_id'])
+            if battery['completed_at']:
+                complete_count += 1
+        athlete_rows.append({
+            'athlete': athlete,
+            'battery': battery,
+            'events_done': events_done,
+            'events_total': events_total,
+            'pct': pct,
+            'awards': row_awards,
+        })
+
+    qs_parts = []
+    if team_id:     qs_parts.append(f'team_id={team_id}')
+    qs_parts += [f'school_year={school_year}', f'test_window={test_window}']
+    csv_qs = '&'.join(qs_parts)
+
+    return render_template(
+        'pyfp_reports.html',
+        teams=teams,
+        selected_team=selected_team,
+        athlete_rows=athlete_rows,
+        complete_count=complete_count,
+        school_year=school_year,
+        test_window=test_window,
+        school_year_options=_school_year_options(),
+        rubric_labels=RUBRIC_LABELS,
+        csv_qs=csv_qs,
+    )
+
+
+@pyfp_bp.route('/api/pyfp/reports/csv/batteries')
+def csv_batteries():
+    team_id     = request.args.get('team_id', '').strip() or None
+    school_year = request.args.get('school_year', _current_school_year())
+    test_window = request.args.get('test_window', _current_test_window())
+    batteries   = _get_filtered_batteries(team_id, school_year, test_window)
+
+    from field_trainer.pyfp.csv_export import batteries_csv
+    content  = batteries_csv(batteries, db)
+    filename = f"pyfp_batteries_{school_year}_{test_window}.csv"
+    from flask import Response
+    return Response(
+        content,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+@pyfp_bp.route('/api/pyfp/reports/csv/events')
+def csv_events():
+    team_id     = request.args.get('team_id', '').strip() or None
+    school_year = request.args.get('school_year', _current_school_year())
+    test_window = request.args.get('test_window', _current_test_window())
+    batteries   = _get_filtered_batteries(team_id, school_year, test_window)
+
+    from field_trainer.pyfp.csv_export import events_csv
+    content  = events_csv(batteries, db)
+    filename = f"pyfp_events_{school_year}_{test_window}.csv"
+    from flask import Response
+    return Response(
+        content,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )

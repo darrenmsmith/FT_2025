@@ -1,22 +1,550 @@
 {
   "name": "FitnessGram HFZ 2024",
   "rubric": "fitnessgram_hfz",
-  "source": "Cooper Institute",
+  "source": "Cooper Institute — FitnessGram 2024",
   "effective_from": "2024-08-01",
-  "_note": "Stub — full age/gender/event table populated in Phase 7 (scoring.py)",
+  "_note": "HFZ range: hfz_min inclusive, hfz_max inclusive. For lower-is-better events (mile, shuttle) hfz_min=0 means no lower bound.",
   "events": {
     "pyfp_pacer": {
       "unit": "laps",
+      "is_better_higher": true,
       "by_age_gender": {
-        "male":   {"10": {"hfz_min": 23, "hfz_max": 61}},
-        "female": {"10": {"hfz_min": 15, "hfz_max": 41}}
+        "male": {
+          "5":  {"hfz_min": 11, "hfz_max": 999},
+          "6":  {"hfz_min": 11, "hfz_max": 999},
+          "7":  {"hfz_min": 11, "hfz_max": 999},
+          "8":  {"hfz_min": 11, "hfz_max": 999},
+          "9":  {"hfz_min": 15, "hfz_max": 999},
+          "10": {"hfz_min": 23, "hfz_max": 999},
+          "11": {"hfz_min": 23, "hfz_max": 999},
+          "12": {"hfz_min": 32, "hfz_max": 999},
+          "13": {"hfz_min": 41, "hfz_max": 999},
+          "14": {"hfz_min": 41, "hfz_max": 999},
+          "15": {"hfz_min": 51, "hfz_max": 999},
+          "16": {"hfz_min": 61, "hfz_max": 999},
+          "17": {"hfz_min": 61, "hfz_max": 999}
+        },
+        "female": {
+          "5":  {"hfz_min":  7, "hfz_max": 999},
+          "6":  {"hfz_min": 11, "hfz_max": 999},
+          "7":  {"hfz_min": 11, "hfz_max": 999},
+          "8":  {"hfz_min": 11, "hfz_max": 999},
+          "9":  {"hfz_min": 15, "hfz_max": 999},
+          "10": {"hfz_min": 15, "hfz_max": 999},
+          "11": {"hfz_min": 15, "hfz_max": 999},
+          "12": {"hfz_min": 23, "hfz_max": 999},
+          "13": {"hfz_min": 23, "hfz_max": 999},
+          "14": {"hfz_min": 23, "hfz_max": 999},
+          "15": {"hfz_min": 23, "hfz_max": 999},
+          "16": {"hfz_min": 23, "hfz_max": 999},
+          "17": {"hfz_min": 23, "hfz_max": 999}
+        }
+      }
+    },
+    "pyfp_mile_run": {
+      "unit": "seconds",
+      "is_better_higher": false,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 0, "hfz_max": 810},
+          "6":  {"hfz_min": 0, "hfz_max": 780},
+          "7":  {"hfz_min": 0, "hfz_max": 720},
+          "8":  {"hfz_min": 0, "hfz_max": 660},
+          "9":  {"hfz_min": 0, "hfz_max": 630},
+          "10": {"hfz_min": 0, "hfz_max": 630},
+          "11": {"hfz_min": 0, "hfz_max": 570},
+          "12": {"hfz_min": 0, "hfz_max": 540},
+          "13": {"hfz_min": 0, "hfz_max": 510},
+          "14": {"hfz_min": 0, "hfz_max": 480},
+          "15": {"hfz_min": 0, "hfz_max": 450},
+          "16": {"hfz_min": 0, "hfz_max": 450},
+          "17": {"hfz_min": 0, "hfz_max": 450}
+        },
+        "female": {
+          "5":  {"hfz_min": 0, "hfz_max": 900},
+          "6":  {"hfz_min": 0, "hfz_max": 840},
+          "7":  {"hfz_min": 0, "hfz_max": 780},
+          "8":  {"hfz_min": 0, "hfz_max": 720},
+          "9":  {"hfz_min": 0, "hfz_max": 660},
+          "10": {"hfz_min": 0, "hfz_max": 660},
+          "11": {"hfz_min": 0, "hfz_max": 660},
+          "12": {"hfz_min": 0, "hfz_max": 630},
+          "13": {"hfz_min": 0, "hfz_max": 600},
+          "14": {"hfz_min": 0, "hfz_max": 630},
+          "15": {"hfz_min": 0, "hfz_max": 630},
+          "16": {"hfz_min": 0, "hfz_max": 630},
+          "17": {"hfz_min": 0, "hfz_max": 630}
+        }
+      }
+    },
+    "pyfp_mile_walk": {
+      "unit": "seconds",
+      "is_better_higher": false,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 0, "hfz_max": 1080},
+          "6":  {"hfz_min": 0, "hfz_max": 1020},
+          "7":  {"hfz_min": 0, "hfz_max": 960},
+          "8":  {"hfz_min": 0, "hfz_max": 900},
+          "9":  {"hfz_min": 0, "hfz_max": 840},
+          "10": {"hfz_min": 0, "hfz_max": 840},
+          "11": {"hfz_min": 0, "hfz_max": 780},
+          "12": {"hfz_min": 0, "hfz_max": 720},
+          "13": {"hfz_min": 0, "hfz_max": 690},
+          "14": {"hfz_min": 0, "hfz_max": 660},
+          "15": {"hfz_min": 0, "hfz_max": 630},
+          "16": {"hfz_min": 0, "hfz_max": 630},
+          "17": {"hfz_min": 0, "hfz_max": 630}
+        },
+        "female": {
+          "5":  {"hfz_min": 0, "hfz_max": 1200},
+          "6":  {"hfz_min": 0, "hfz_max": 1140},
+          "7":  {"hfz_min": 0, "hfz_max": 1080},
+          "8":  {"hfz_min": 0, "hfz_max": 1020},
+          "9":  {"hfz_min": 0, "hfz_max": 960},
+          "10": {"hfz_min": 0, "hfz_max": 960},
+          "11": {"hfz_min": 0, "hfz_max": 900},
+          "12": {"hfz_min": 0, "hfz_max": 870},
+          "13": {"hfz_min": 0, "hfz_max": 840},
+          "14": {"hfz_min": 0, "hfz_max": 840},
+          "15": {"hfz_min": 0, "hfz_max": 840},
+          "16": {"hfz_min": 0, "hfz_max": 840},
+          "17": {"hfz_min": 0, "hfz_max": 840}
+        }
       }
     },
     "pyfp_curl_up": {
-      "unit": "count",
+      "unit": "reps",
+      "is_better_higher": true,
       "by_age_gender": {
-        "male":   {"10": {"hfz_min": 12, "hfz_max": 24}},
-        "female": {"10": {"hfz_min": 12, "hfz_max": 24}}
+        "male": {
+          "5":  {"hfz_min":  2, "hfz_max": 10},
+          "6":  {"hfz_min":  2, "hfz_max": 10},
+          "7":  {"hfz_min":  4, "hfz_max": 14},
+          "8":  {"hfz_min":  6, "hfz_max": 20},
+          "9":  {"hfz_min":  9, "hfz_max": 24},
+          "10": {"hfz_min": 12, "hfz_max": 24},
+          "11": {"hfz_min": 15, "hfz_max": 28},
+          "12": {"hfz_min": 18, "hfz_max": 36},
+          "13": {"hfz_min": 18, "hfz_max": 40},
+          "14": {"hfz_min": 18, "hfz_max": 40},
+          "15": {"hfz_min": 18, "hfz_max": 40},
+          "16": {"hfz_min": 18, "hfz_max": 40},
+          "17": {"hfz_min": 18, "hfz_max": 40}
+        },
+        "female": {
+          "5":  {"hfz_min":  2, "hfz_max": 10},
+          "6":  {"hfz_min":  2, "hfz_max": 10},
+          "7":  {"hfz_min":  4, "hfz_max": 14},
+          "8":  {"hfz_min":  6, "hfz_max": 20},
+          "9":  {"hfz_min":  9, "hfz_max": 22},
+          "10": {"hfz_min": 12, "hfz_max": 26},
+          "11": {"hfz_min": 15, "hfz_max": 29},
+          "12": {"hfz_min": 18, "hfz_max": 32},
+          "13": {"hfz_min": 18, "hfz_max": 32},
+          "14": {"hfz_min": 18, "hfz_max": 32},
+          "15": {"hfz_min": 18, "hfz_max": 35},
+          "16": {"hfz_min": 18, "hfz_max": 35},
+          "17": {"hfz_min": 18, "hfz_max": 35}
+        }
+      }
+    },
+    "pyfp_push_up": {
+      "unit": "reps",
+      "is_better_higher": true,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min":  3, "hfz_max":  8},
+          "6":  {"hfz_min":  3, "hfz_max":  8},
+          "7":  {"hfz_min":  4, "hfz_max": 10},
+          "8":  {"hfz_min":  5, "hfz_max": 12},
+          "9":  {"hfz_min":  6, "hfz_max": 15},
+          "10": {"hfz_min":  7, "hfz_max": 20},
+          "11": {"hfz_min":  8, "hfz_max": 20},
+          "12": {"hfz_min": 10, "hfz_max": 20},
+          "13": {"hfz_min": 12, "hfz_max": 25},
+          "14": {"hfz_min": 14, "hfz_max": 30},
+          "15": {"hfz_min": 16, "hfz_max": 35},
+          "16": {"hfz_min": 18, "hfz_max": 35},
+          "17": {"hfz_min": 18, "hfz_max": 35}
+        },
+        "female": {
+          "5":  {"hfz_min":  3, "hfz_max":  8},
+          "6":  {"hfz_min":  3, "hfz_max":  8},
+          "7":  {"hfz_min":  4, "hfz_max": 10},
+          "8":  {"hfz_min":  5, "hfz_max": 12},
+          "9":  {"hfz_min":  6, "hfz_max": 15},
+          "10": {"hfz_min":  7, "hfz_max": 15},
+          "11": {"hfz_min":  7, "hfz_max": 15},
+          "12": {"hfz_min":  7, "hfz_max": 15},
+          "13": {"hfz_min":  7, "hfz_max": 15},
+          "14": {"hfz_min":  7, "hfz_max": 15},
+          "15": {"hfz_min":  7, "hfz_max": 15},
+          "16": {"hfz_min":  7, "hfz_max": 15},
+          "17": {"hfz_min":  7, "hfz_max": 15}
+        }
+      }
+    },
+    "pyfp_pull_up": {
+      "unit": "reps",
+      "is_better_higher": true,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 1, "hfz_max": 999},
+          "6":  {"hfz_min": 1, "hfz_max": 999},
+          "7":  {"hfz_min": 1, "hfz_max": 999},
+          "8":  {"hfz_min": 1, "hfz_max": 999},
+          "9":  {"hfz_min": 2, "hfz_max": 999},
+          "10": {"hfz_min": 2, "hfz_max": 999},
+          "11": {"hfz_min": 2, "hfz_max": 999},
+          "12": {"hfz_min": 3, "hfz_max": 999},
+          "13": {"hfz_min": 5, "hfz_max": 999},
+          "14": {"hfz_min": 5, "hfz_max": 999},
+          "15": {"hfz_min": 6, "hfz_max": 999},
+          "16": {"hfz_min": 7, "hfz_max": 999},
+          "17": {"hfz_min": 8, "hfz_max": 999}
+        },
+        "female": {
+          "5":  {"hfz_min": 1, "hfz_max": 999},
+          "6":  {"hfz_min": 1, "hfz_max": 999},
+          "7":  {"hfz_min": 1, "hfz_max": 999},
+          "8":  {"hfz_min": 1, "hfz_max": 999},
+          "9":  {"hfz_min": 1, "hfz_max": 999},
+          "10": {"hfz_min": 1, "hfz_max": 999},
+          "11": {"hfz_min": 1, "hfz_max": 999},
+          "12": {"hfz_min": 1, "hfz_max": 999},
+          "13": {"hfz_min": 1, "hfz_max": 999},
+          "14": {"hfz_min": 1, "hfz_max": 999},
+          "15": {"hfz_min": 1, "hfz_max": 999},
+          "16": {"hfz_min": 1, "hfz_max": 999},
+          "17": {"hfz_min": 1, "hfz_max": 999}
+        }
+      }
+    },
+    "pyfp_modified_pull_up": {
+      "unit": "reps",
+      "is_better_higher": true,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min":  2, "hfz_max": 10},
+          "6":  {"hfz_min":  2, "hfz_max": 10},
+          "7":  {"hfz_min":  3, "hfz_max": 11},
+          "8":  {"hfz_min":  4, "hfz_max": 14},
+          "9":  {"hfz_min":  5, "hfz_max": 16},
+          "10": {"hfz_min":  7, "hfz_max": 18},
+          "11": {"hfz_min":  8, "hfz_max": 20},
+          "12": {"hfz_min":  9, "hfz_max": 20},
+          "13": {"hfz_min": 10, "hfz_max": 20},
+          "14": {"hfz_min": 11, "hfz_max": 20},
+          "15": {"hfz_min": 12, "hfz_max": 20},
+          "16": {"hfz_min": 12, "hfz_max": 20},
+          "17": {"hfz_min": 12, "hfz_max": 20}
+        },
+        "female": {
+          "5":  {"hfz_min":  2, "hfz_max": 10},
+          "6":  {"hfz_min":  2, "hfz_max": 10},
+          "7":  {"hfz_min":  3, "hfz_max": 11},
+          "8":  {"hfz_min":  4, "hfz_max": 14},
+          "9":  {"hfz_min":  5, "hfz_max": 16},
+          "10": {"hfz_min":  7, "hfz_max": 18},
+          "11": {"hfz_min":  8, "hfz_max": 20},
+          "12": {"hfz_min":  9, "hfz_max": 20},
+          "13": {"hfz_min": 10, "hfz_max": 20},
+          "14": {"hfz_min": 11, "hfz_max": 20},
+          "15": {"hfz_min": 12, "hfz_max": 20},
+          "16": {"hfz_min": 12, "hfz_max": 20},
+          "17": {"hfz_min": 12, "hfz_max": 20}
+        }
+      }
+    },
+    "pyfp_flexed_arm_hang": {
+      "unit": "seconds",
+      "is_better_higher": true,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min":  2, "hfz_max": 999},
+          "6":  {"hfz_min":  2, "hfz_max": 999},
+          "7":  {"hfz_min":  3, "hfz_max": 999},
+          "8":  {"hfz_min":  3, "hfz_max": 999},
+          "9":  {"hfz_min":  4, "hfz_max": 999},
+          "10": {"hfz_min":  4, "hfz_max": 999},
+          "11": {"hfz_min":  6, "hfz_max": 999},
+          "12": {"hfz_min":  6, "hfz_max": 999},
+          "13": {"hfz_min": 12, "hfz_max": 999},
+          "14": {"hfz_min": 14, "hfz_max": 999},
+          "15": {"hfz_min": 16, "hfz_max": 999},
+          "16": {"hfz_min": 16, "hfz_max": 999},
+          "17": {"hfz_min": 16, "hfz_max": 999}
+        },
+        "female": {
+          "5":  {"hfz_min":  2, "hfz_max": 999},
+          "6":  {"hfz_min":  2, "hfz_max": 999},
+          "7":  {"hfz_min":  3, "hfz_max": 999},
+          "8":  {"hfz_min":  3, "hfz_max": 999},
+          "9":  {"hfz_min":  4, "hfz_max": 999},
+          "10": {"hfz_min":  4, "hfz_max": 999},
+          "11": {"hfz_min":  6, "hfz_max": 999},
+          "12": {"hfz_min":  7, "hfz_max": 999},
+          "13": {"hfz_min":  7, "hfz_max": 999},
+          "14": {"hfz_min":  7, "hfz_max": 999},
+          "15": {"hfz_min":  7, "hfz_max": 999},
+          "16": {"hfz_min":  7, "hfz_max": 999},
+          "17": {"hfz_min":  7, "hfz_max": 999}
+        }
+      }
+    },
+    "pyfp_trunk_lift": {
+      "unit": "inches",
+      "is_better_higher": true,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 9, "hfz_max": 12},
+          "6":  {"hfz_min": 9, "hfz_max": 12},
+          "7":  {"hfz_min": 9, "hfz_max": 12},
+          "8":  {"hfz_min": 9, "hfz_max": 12},
+          "9":  {"hfz_min": 9, "hfz_max": 12},
+          "10": {"hfz_min": 9, "hfz_max": 12},
+          "11": {"hfz_min": 9, "hfz_max": 12},
+          "12": {"hfz_min": 9, "hfz_max": 12},
+          "13": {"hfz_min": 9, "hfz_max": 12},
+          "14": {"hfz_min": 9, "hfz_max": 12},
+          "15": {"hfz_min": 9, "hfz_max": 12},
+          "16": {"hfz_min": 9, "hfz_max": 12},
+          "17": {"hfz_min": 9, "hfz_max": 12}
+        },
+        "female": {
+          "5":  {"hfz_min": 9, "hfz_max": 12},
+          "6":  {"hfz_min": 9, "hfz_max": 12},
+          "7":  {"hfz_min": 9, "hfz_max": 12},
+          "8":  {"hfz_min": 9, "hfz_max": 12},
+          "9":  {"hfz_min": 9, "hfz_max": 12},
+          "10": {"hfz_min": 9, "hfz_max": 12},
+          "11": {"hfz_min": 9, "hfz_max": 12},
+          "12": {"hfz_min": 9, "hfz_max": 12},
+          "13": {"hfz_min": 9, "hfz_max": 12},
+          "14": {"hfz_min": 9, "hfz_max": 12},
+          "15": {"hfz_min": 9, "hfz_max": 12},
+          "16": {"hfz_min": 9, "hfz_max": 12},
+          "17": {"hfz_min": 9, "hfz_max": 12}
+        }
+      }
+    },
+    "pyfp_sit_and_reach": {
+      "unit": "inches",
+      "is_better_higher": true,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 8, "hfz_max": 999},
+          "6":  {"hfz_min": 8, "hfz_max": 999},
+          "7":  {"hfz_min": 8, "hfz_max": 999},
+          "8":  {"hfz_min": 8, "hfz_max": 999},
+          "9":  {"hfz_min": 8, "hfz_max": 999},
+          "10": {"hfz_min": 8, "hfz_max": 999},
+          "11": {"hfz_min": 7, "hfz_max": 999},
+          "12": {"hfz_min": 7, "hfz_max": 999},
+          "13": {"hfz_min": 6, "hfz_max": 999},
+          "14": {"hfz_min": 7, "hfz_max": 999},
+          "15": {"hfz_min": 8, "hfz_max": 999},
+          "16": {"hfz_min": 8, "hfz_max": 999},
+          "17": {"hfz_min": 8, "hfz_max": 999}
+        },
+        "female": {
+          "5":  {"hfz_min": 9, "hfz_max": 999},
+          "6":  {"hfz_min": 9, "hfz_max": 999},
+          "7":  {"hfz_min": 9, "hfz_max": 999},
+          "8":  {"hfz_min": 9, "hfz_max": 999},
+          "9":  {"hfz_min": 9, "hfz_max": 999},
+          "10": {"hfz_min": 9, "hfz_max": 999},
+          "11": {"hfz_min": 9, "hfz_max": 999},
+          "12": {"hfz_min": 9, "hfz_max": 999},
+          "13": {"hfz_min": 9, "hfz_max": 999},
+          "14": {"hfz_min": 9, "hfz_max": 999},
+          "15": {"hfz_min": 9, "hfz_max": 999},
+          "16": {"hfz_min": 9, "hfz_max": 999},
+          "17": {"hfz_min": 9, "hfz_max": 999}
+        }
+      }
+    },
+    "pyfp_v_sit_reach": {
+      "unit": "inches",
+      "is_better_higher": true,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 1, "hfz_max": 999},
+          "6":  {"hfz_min": 1, "hfz_max": 999},
+          "7":  {"hfz_min": 0, "hfz_max": 999},
+          "8":  {"hfz_min": 0, "hfz_max": 999},
+          "9":  {"hfz_min": 0, "hfz_max": 999},
+          "10": {"hfz_min": 0, "hfz_max": 999},
+          "11": {"hfz_min": 0, "hfz_max": 999},
+          "12": {"hfz_min": 0, "hfz_max": 999},
+          "13": {"hfz_min": 0, "hfz_max": 999},
+          "14": {"hfz_min": 0, "hfz_max": 999},
+          "15": {"hfz_min": 0, "hfz_max": 999},
+          "16": {"hfz_min": 0, "hfz_max": 999},
+          "17": {"hfz_min": 0, "hfz_max": 999}
+        },
+        "female": {
+          "5":  {"hfz_min": 2, "hfz_max": 999},
+          "6":  {"hfz_min": 2, "hfz_max": 999},
+          "7":  {"hfz_min": 2, "hfz_max": 999},
+          "8":  {"hfz_min": 2, "hfz_max": 999},
+          "9":  {"hfz_min": 2, "hfz_max": 999},
+          "10": {"hfz_min": 2, "hfz_max": 999},
+          "11": {"hfz_min": 2, "hfz_max": 999},
+          "12": {"hfz_min": 2, "hfz_max": 999},
+          "13": {"hfz_min": 2, "hfz_max": 999},
+          "14": {"hfz_min": 2, "hfz_max": 999},
+          "15": {"hfz_min": 2, "hfz_max": 999},
+          "16": {"hfz_min": 2, "hfz_max": 999},
+          "17": {"hfz_min": 2, "hfz_max": 999}
+        }
+      }
+    },
+    "pyfp_shoulder_stretch": {
+      "unit": "pass_fail",
+      "is_better_higher": true,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 2, "hfz_max": 2},
+          "6":  {"hfz_min": 2, "hfz_max": 2},
+          "7":  {"hfz_min": 2, "hfz_max": 2},
+          "8":  {"hfz_min": 2, "hfz_max": 2},
+          "9":  {"hfz_min": 2, "hfz_max": 2},
+          "10": {"hfz_min": 2, "hfz_max": 2},
+          "11": {"hfz_min": 2, "hfz_max": 2},
+          "12": {"hfz_min": 2, "hfz_max": 2},
+          "13": {"hfz_min": 2, "hfz_max": 2},
+          "14": {"hfz_min": 2, "hfz_max": 2},
+          "15": {"hfz_min": 2, "hfz_max": 2},
+          "16": {"hfz_min": 2, "hfz_max": 2},
+          "17": {"hfz_min": 2, "hfz_max": 2}
+        },
+        "female": {
+          "5":  {"hfz_min": 2, "hfz_max": 2},
+          "6":  {"hfz_min": 2, "hfz_max": 2},
+          "7":  {"hfz_min": 2, "hfz_max": 2},
+          "8":  {"hfz_min": 2, "hfz_max": 2},
+          "9":  {"hfz_min": 2, "hfz_max": 2},
+          "10": {"hfz_min": 2, "hfz_max": 2},
+          "11": {"hfz_min": 2, "hfz_max": 2},
+          "12": {"hfz_min": 2, "hfz_max": 2},
+          "13": {"hfz_min": 2, "hfz_max": 2},
+          "14": {"hfz_min": 2, "hfz_max": 2},
+          "15": {"hfz_min": 2, "hfz_max": 2},
+          "16": {"hfz_min": 2, "hfz_max": 2},
+          "17": {"hfz_min": 2, "hfz_max": 2}
+        }
+      }
+    },
+    "pyfp_shuttle_run": {
+      "unit": "seconds",
+      "is_better_higher": false,
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 0, "hfz_max": 13.5},
+          "6":  {"hfz_min": 0, "hfz_max": 13.5},
+          "7":  {"hfz_min": 0, "hfz_max": 12.5},
+          "8":  {"hfz_min": 0, "hfz_max": 12.3},
+          "9":  {"hfz_min": 0, "hfz_max": 11.5},
+          "10": {"hfz_min": 0, "hfz_max": 11.5},
+          "11": {"hfz_min": 0, "hfz_max": 11.5},
+          "12": {"hfz_min": 0, "hfz_max": 11.0},
+          "13": {"hfz_min": 0, "hfz_max": 10.5},
+          "14": {"hfz_min": 0, "hfz_max": 10.5},
+          "15": {"hfz_min": 0, "hfz_max": 10.4},
+          "16": {"hfz_min": 0, "hfz_max": 10.4},
+          "17": {"hfz_min": 0, "hfz_max": 10.4}
+        },
+        "female": {
+          "5":  {"hfz_min": 0, "hfz_max": 14.0},
+          "6":  {"hfz_min": 0, "hfz_max": 14.0},
+          "7":  {"hfz_min": 0, "hfz_max": 13.5},
+          "8":  {"hfz_min": 0, "hfz_max": 13.3},
+          "9":  {"hfz_min": 0, "hfz_max": 13.0},
+          "10": {"hfz_min": 0, "hfz_max": 12.8},
+          "11": {"hfz_min": 0, "hfz_max": 12.5},
+          "12": {"hfz_min": 0, "hfz_max": 12.5},
+          "13": {"hfz_min": 0, "hfz_max": 12.5},
+          "14": {"hfz_min": 0, "hfz_max": 13.0},
+          "15": {"hfz_min": 0, "hfz_max": 13.0},
+          "16": {"hfz_min": 0, "hfz_max": 13.0},
+          "17": {"hfz_min": 0, "hfz_max": 13.0}
+        }
+      }
+    },
+    "pyfp_bmi": {
+      "unit": "bmi",
+      "is_better_higher": false,
+      "_note": "Range test: hfz_min=5th pctile, hfz_max=85th pctile (CDC/NCHS). Below min=underweight, above max=overweight.",
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 13.4, "hfz_max": 17.9},
+          "6":  {"hfz_min": 13.4, "hfz_max": 18.8},
+          "7":  {"hfz_min": 13.4, "hfz_max": 19.5},
+          "8":  {"hfz_min": 13.5, "hfz_max": 20.9},
+          "9":  {"hfz_min": 14.0, "hfz_max": 22.6},
+          "10": {"hfz_min": 14.2, "hfz_max": 22.6},
+          "11": {"hfz_min": 14.6, "hfz_max": 23.7},
+          "12": {"hfz_min": 15.2, "hfz_max": 24.4},
+          "13": {"hfz_min": 15.8, "hfz_max": 25.2},
+          "14": {"hfz_min": 16.4, "hfz_max": 25.9},
+          "15": {"hfz_min": 17.0, "hfz_max": 26.5},
+          "16": {"hfz_min": 17.6, "hfz_max": 27.0},
+          "17": {"hfz_min": 18.0, "hfz_max": 27.4}
+        },
+        "female": {
+          "5":  {"hfz_min": 13.0, "hfz_max": 17.6},
+          "6":  {"hfz_min": 13.0, "hfz_max": 18.5},
+          "7":  {"hfz_min": 13.0, "hfz_max": 19.5},
+          "8":  {"hfz_min": 13.2, "hfz_max": 20.9},
+          "9":  {"hfz_min": 13.7, "hfz_max": 22.1},
+          "10": {"hfz_min": 14.2, "hfz_max": 23.0},
+          "11": {"hfz_min": 14.8, "hfz_max": 24.0},
+          "12": {"hfz_min": 15.5, "hfz_max": 25.0},
+          "13": {"hfz_min": 16.3, "hfz_max": 25.7},
+          "14": {"hfz_min": 17.0, "hfz_max": 26.5},
+          "15": {"hfz_min": 17.6, "hfz_max": 27.2},
+          "16": {"hfz_min": 18.0, "hfz_max": 27.9},
+          "17": {"hfz_min": 18.4, "hfz_max": 28.4}
+        }
+      }
+    },
+    "pyfp_skinfold": {
+      "unit": "percent",
+      "is_better_higher": false,
+      "_note": "Range test: hfz_min=minimum healthy % fat, hfz_max=maximum healthy % fat (Slaughter equation output).",
+      "by_age_gender": {
+        "male": {
+          "5":  {"hfz_min": 10, "hfz_max": 25},
+          "6":  {"hfz_min": 10, "hfz_max": 25},
+          "7":  {"hfz_min": 10, "hfz_max": 25},
+          "8":  {"hfz_min": 10, "hfz_max": 25},
+          "9":  {"hfz_min": 10, "hfz_max": 25},
+          "10": {"hfz_min": 10, "hfz_max": 25},
+          "11": {"hfz_min": 10, "hfz_max": 25},
+          "12": {"hfz_min": 10, "hfz_max": 25},
+          "13": {"hfz_min": 10, "hfz_max": 25},
+          "14": {"hfz_min": 10, "hfz_max": 25},
+          "15": {"hfz_min": 10, "hfz_max": 25},
+          "16": {"hfz_min": 10, "hfz_max": 25},
+          "17": {"hfz_min": 10, "hfz_max": 25}
+        },
+        "female": {
+          "5":  {"hfz_min": 15, "hfz_max": 32},
+          "6":  {"hfz_min": 15, "hfz_max": 32},
+          "7":  {"hfz_min": 15, "hfz_max": 32},
+          "8":  {"hfz_min": 15, "hfz_max": 32},
+          "9":  {"hfz_min": 15, "hfz_max": 32},
+          "10": {"hfz_min": 15, "hfz_max": 32},
+          "11": {"hfz_min": 17, "hfz_max": 32},
+          "12": {"hfz_min": 17, "hfz_max": 32},
+          "13": {"hfz_min": 17, "hfz_max": 32},
+          "14": {"hfz_min": 17, "hfz_max": 32},
+          "15": {"hfz_min": 17, "hfz_max": 32},
+          "16": {"hfz_min": 17, "hfz_max": 32},
+          "17": {"hfz_min": 17, "hfz_max": 32}
+        }
       }
     }
   }

@@ -978,6 +978,14 @@ class DatabaseManager:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def get_pyfp_awards(self, battery_id: str) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM pyfp_award WHERE battery_id=? ORDER BY awarded_at",
+                (battery_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # ==================== PYFP EVENT RECORDING ====================
 
     def create_pyfp_event_result(self, battery_id: str, course_type: str,
