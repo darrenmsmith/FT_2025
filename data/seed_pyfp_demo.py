@@ -201,7 +201,7 @@ def seed(db):
             athlete_id = existing_athletes[name]['athlete_id']
             print(f"  skip athlete (exists): {name}")
         else:
-            athlete_id = db.create_athlete(team_id, name, jersey_number=jersey, age=age)
+            athlete_id = db.create_athlete(team_id, name, jersey_number=jersey, age=age, gender=gender)
             print(f"  created athlete: {name} (#{jersey}, age {age}, {gender})")
 
         if jersey in NOT_STARTED:

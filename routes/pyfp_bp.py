@@ -45,6 +45,13 @@ def _school_year_options() -> list[str]:
     return [f"{y - 1}-{y}", f"{y}-{y + 1}"]
 
 
+def _profile_ok(athlete: dict) -> bool:
+    """Return True if the athlete record has the data needed for PYFP battery creation."""
+    age = athlete.get('age')
+    gender = (athlete.get('gender') or '').strip().lower()
+    return bool(age) and gender in ('male', 'female')
+
+
 def _build_event_grid(battery: dict, results: list[dict], pyfp_courses: dict) -> list[dict]:
     """Return categories list with event cards for the template."""
     done_types = {r['course_type'] for r in results}
@@ -120,6 +127,7 @@ def dashboard():
                     'events_done': events_done,
                     'events_total': events_total,
                     'pct': pct,
+                    'profile_ok': _profile_ok(athlete),
                 })
 
     complete_count = sum(1 for r in athlete_rows if r.get('battery') and r['battery']['completed_at'])
@@ -263,6 +271,52 @@ def battery_complete(battery_id):
         awarded = []
 
     return jsonify({'ok': True, 'already_complete': False, 'awards': awarded})
+
+
+@pyfp_bp.route('/api/pyfp/team/<team_id>/battery/start-all', methods=['POST'])
+def team_battery_start_all(team_id):
+    """Batch-create batteries for every athlete in the team who has age + gender set."""
+    data        = request.get_json(force=True) or {}
+    school_year = data.get('school_year', _current_school_year())
+    test_window = data.get('test_window', _current_test_window())
+    rubric      = data.get('rubric', 'fitnessgram_hfz')
+
+    if rubric not in ('fitnessgram_hfz', 'pft_2026', 'both'):
+        return jsonify({'error': 'Invalid rubric'}), 400
+
+    athletes = db.get_athletes_by_team(team_id)
+    created = existing = skipped = 0
+    skipped_names: list[str] = []
+
+    for athlete in athletes:
+        if not _profile_ok(athlete):
+            skipped += 1
+            skipped_names.append(athlete['name'])
+            continue
+
+        if db.get_pyfp_battery_for_athlete_window(
+                athlete['athlete_id'], school_year, test_window):
+            existing += 1
+            continue
+
+        gender = athlete['gender'].strip().lower()
+        db.create_pyfp_battery(
+            athlete_id=athlete['athlete_id'],
+            school_year=school_year,
+            test_window=test_window,
+            rubric=rubric,
+            age_at_test=int(athlete['age']),
+            gender=gender,
+        )
+        created += 1
+
+    return jsonify({
+        'ok': True,
+        'created': created,
+        'existing': existing,
+        'skipped': skipped,
+        'skipped_names': skipped_names,
+    })
 
 
 # ==================== PHASE 3 — MANUAL EVENT RECORDING ====================

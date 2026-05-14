@@ -51,6 +51,37 @@
 </form>
 
 {% if selected_team %}
+
+<!-- Batch Battery Start -->
+<div class="card mb-4 border-primary">
+  <div class="card-header bg-primary bg-opacity-10 fw-semibold">
+    <i class="bi bi-lightning-fill text-primary"></i> Start Battery for Whole Class
+  </div>
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold mb-1">Rubric</label>
+        <select class="form-select" id="batchRubric">
+          {% for val, label in rubric_labels.items() %}
+          <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-auto">
+        <button class="btn btn-primary" id="batchStartBtn" onclick="startBatteryForClass()">
+          <i class="bi bi-play-circle-fill"></i> Start Battery for All Athletes
+        </button>
+      </div>
+    </div>
+    <div class="form-text mt-2">
+      Creates batteries only for athletes who don't already have one for this window.
+      Athletes with missing age or gender in their profile are skipped
+      — look for <i class="bi bi-exclamation-triangle-fill text-warning"></i> in the table below.
+    </div>
+    <div id="batchResult" class="mt-3 d-none"></div>
+  </div>
+</div>
+
 <!-- Completion grid -->
 <div class="card shadow-sm">
   <div class="card-header d-flex justify-content-between align-items-center bg-white">
@@ -90,6 +121,13 @@
             {% endif %}
             {% if row.athlete.age %}
               <span class="text-muted small"> · age {{ row.athlete.age }}</span>
+            {% endif %}
+            {% if not row.profile_ok %}
+              <a href="/athlete/{{ row.athlete.athlete_id }}"
+                 title="Age or gender missing — click to edit athlete profile"
+                 class="ms-1 text-warning">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+              </a>
             {% endif %}
           </td>
           <td>
@@ -143,5 +181,55 @@
   <i class="bi bi-info-circle-fill"></i>
   Select a class above to view athlete battery status and start assessments.
 </div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if selected_team %}
+<script>
+const TEAM_ID    = "{{ selected_team.team_id }}";
+const SCHOOL_YEAR = "{{ school_year }}";
+const TEST_WINDOW = "{{ test_window }}";
+
+async function startBatteryForClass() {
+  const rubric = document.getElementById('batchRubric').value;
+  if (!rubric) return;
+
+  const btn = document.getElementById('batchStartBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Starting…';
+
+  const resp = await fetch(`/api/pyfp/team/${TEAM_ID}/battery/start-all`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({school_year: SCHOOL_YEAR, test_window: TEST_WINDOW, rubric}),
+  });
+  const data = await resp.json();
+
+  const resultDiv = document.getElementById('batchResult');
+  resultDiv.classList.remove('d-none');
+
+  if (!resp.ok) {
+    resultDiv.innerHTML = `<div class="alert alert-danger mb-0">Error: ${data.error || 'Unknown error'}</div>`;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Start Battery for All Athletes';
+    return;
+  }
+
+  let msg = `<div class="alert alert-success mb-0">
+    <strong>${data.created} batteries created.</strong>`;
+  if (data.existing)
+    msg += ` ${data.existing} athlete${data.existing > 1 ? 's' : ''} already had a battery (skipped).`;
+  if (data.skipped) {
+    msg += ` <strong class="text-warning">${data.skipped} skipped</strong> — missing age or gender:
+      <em>${data.skipped_names.join(', ')}</em>.`;
+  }
+  msg += '</div>';
+  resultDiv.innerHTML = msg;
+
+  // Reload the table after a short pause so the coach sees the summary first
+  setTimeout(() => window.location.reload(), 2500);
+}
+</script>
 {% endif %}
 {% endblock %}

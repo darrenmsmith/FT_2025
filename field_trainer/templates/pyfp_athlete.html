@@ -20,6 +20,29 @@
   </ol>
 </nav>
 
+<!-- Profile completeness warning -->
+{% set age_ok    = athlete.age is not none and athlete.age > 0 %}
+{% set gender_ok = athlete.gender and athlete.gender.lower() in ('male', 'female') %}
+{% if not age_ok or not gender_ok %}
+<div class="alert alert-warning d-flex align-items-center gap-3 mb-3">
+  <i class="bi bi-exclamation-triangle-fill fs-5 flex-shrink-0"></i>
+  <div>
+    <strong>Athlete profile incomplete.</strong>
+    {% if not age_ok and not gender_ok %}
+      Age and gender are missing —
+    {% elif not age_ok %}
+      Age is missing —
+    {% else %}
+      Gender is missing (must be Male or Female) —
+    {% endif %}
+    the batch battery-start will skip this athlete until the profile is updated.
+    <a href="/athlete/{{ athlete.athlete_id }}" class="alert-link ms-1">
+      Edit athlete profile <i class="bi bi-arrow-right"></i>
+    </a>
+  </div>
+</div>
+{% endif %}
+
 <!-- Athlete header -->
 <div class="row mb-4">
   <div class="col">

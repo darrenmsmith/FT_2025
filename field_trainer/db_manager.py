@@ -777,14 +777,15 @@ class DatabaseManager:
     # ==================== ATHLETE OPERATIONS ====================
     
     def create_athlete(self, team_id: str, name: str, jersey_number: Optional[int] = None,
-                      age: Optional[int] = None, position: Optional[str] = None) -> str:
+                      age: Optional[int] = None, position: Optional[str] = None,
+                      gender: Optional[str] = None) -> str:
         """Create a new athlete, return athlete_id"""
         athlete_id = str(uuid.uuid4())
         with self.get_connection() as conn:
             conn.execute(
-                '''INSERT INTO athletes (athlete_id, team_id, name, jersey_number, age, position)
-                   VALUES (?, ?, ?, ?, ?, ?)''',
-                (athlete_id, team_id, name, jersey_number, age, position)
+                '''INSERT INTO athletes (athlete_id, team_id, name, jersey_number, age, position, gender)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (athlete_id, team_id, name, jersey_number, age, position, gender)
             )
         return athlete_id
     
@@ -805,7 +806,7 @@ class DatabaseManager:
     
     def update_athlete(self, athlete_id: str, **kwargs):
         """Update athlete fields"""
-        allowed_fields = {'name', 'jersey_number', 'age', 'position', 'team_id'}
+        allowed_fields = {'name', 'jersey_number', 'age', 'position', 'team_id', 'gender', 'birthdate'}
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         if not updates:
             return
