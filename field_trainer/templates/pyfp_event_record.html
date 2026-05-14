@@ -138,6 +138,17 @@
       {# -------- cadence -------- #}
       {% if engine == 'cadence' %}
       <div id="cadencePanel">
+        <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+          <label class="form-label mb-0 fw-semibold me-1">Cadence:</label>
+          <select class="form-select form-select-sm" id="cadenceSpeed" style="max-width:160px;">
+            <option value="1500">1.5 sec / rep</option>
+            <option value="2000">2 sec / rep</option>
+            <option value="2500">2.5 sec / rep</option>
+            <option value="3000" selected>3 sec / rep (default)</option>
+            <option value="4000">4 sec / rep</option>
+            <option value="5000">5 sec / rep</option>
+          </select>
+        </div>
         <div class="d-flex align-items-center gap-3 mb-3">
           <button type="button" class="btn btn-success btn-lg" id="cadenceStartBtn" onclick="startCadence()">
             <i class="bi bi-play-fill"></i> Start Cadence
@@ -150,7 +161,7 @@
         </div>
         <div class="alert alert-light small mb-3">
           <i class="bi bi-info-circle"></i>
-          A beep sounds every <strong>3 seconds</strong>. Each beep = one rep.
+          A beep sounds every <strong id="cadenceSpeedLabel">3 seconds</strong>. Each beep = one rep.
           Click Stop when the athlete cannot keep pace, then enter the rep count.
         </div>
         <div id="countEntry" class="d-none">
@@ -349,18 +360,25 @@ const cadenceBeep = new Audio('/static/audio/cadence_beep.mp3');
 let cadenceInterval = null;
 let cadenceTicks = 0;
 
+const _cadenceLabels = {'1500':'1.5','2000':'2','2500':'2.5','3000':'3','4000':'4','5000':'5'};
+
+document.getElementById('cadenceSpeed')?.addEventListener('change', function() {
+  const sec = _cadenceLabels[this.value] || (parseInt(this.value) / 1000);
+  document.getElementById('cadenceSpeedLabel').textContent = sec + ' seconds';
+});
+
 function startCadence() {
   cadenceTicks = 0;
+  const ms = parseInt(document.getElementById('cadenceSpeed').value) || 3000;
   document.getElementById('cadenceStartBtn').disabled = true;
   document.getElementById('cadenceStopBtn').disabled = false;
+  document.getElementById('cadenceSpeed').disabled = true;
   document.getElementById('countEntry').classList.add('d-none');
-  // Fire start beep on server (D0 speakers) if available
   fetch('/api/pyfp/audio/play', {method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({clip:'cadence_3sec'})}).catch(()=>{});
-  // Browser metronome loop: beep every 3 seconds
   beepOnce();
-  cadenceInterval = setInterval(beepOnce, 3000);
+  cadenceInterval = setInterval(beepOnce, ms);
 }
 
 function beepOnce() {
@@ -375,6 +393,7 @@ function stopCadence() {
   cadenceInterval = null;
   document.getElementById('cadenceStartBtn').disabled = false;
   document.getElementById('cadenceStopBtn').disabled = true;
+  document.getElementById('cadenceSpeed').disabled = false;
   document.getElementById('countEntry').classList.remove('d-none');
   document.getElementById('countInput').focus();
 }
