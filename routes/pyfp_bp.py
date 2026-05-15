@@ -410,6 +410,13 @@ def event_record_form(battery_id, course_type):
     existing_results = db.get_pyfp_event_results_for_battery(battery['battery_id'])
     event_results = [r for r in existing_results if r['course_type'] == course_type]
 
+    from field_trainer.pyfp.scoring import get_hfz_range, get_pft_threshold
+    age    = battery['age_at_test']
+    gender = battery['gender']
+    rubric = battery['rubric']
+    hfz_range  = get_hfz_range(course_type, age, gender, db)  if rubric in ('fitnessgram_hfz', 'both') else None
+    pft_thresh = get_pft_threshold(course_type, age, gender, db) if rubric in ('pft_2026', 'both') else None
+
     return render_template(
         'pyfp_event_record.html',
         battery=battery,
@@ -419,6 +426,9 @@ def event_record_form(battery_id, course_type):
         display_name=display_name,
         event_results=event_results,
         phase3_available=(engine in _RECORDABLE_ENGINES),
+        event_description=EVENT_DESCRIPTIONS.get(course_type, ''),
+        hfz_range=hfz_range,
+        pft_thresh=pft_thresh,
     )
 
 

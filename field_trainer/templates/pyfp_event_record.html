@@ -23,18 +23,55 @@
   </ol>
 </nav>
 
-<div class="row mb-4">
+<div class="row mb-3">
   <div class="col">
     <h2 class="pyfp-header">
       <i class="bi bi-pencil-square text-primary"></i> {{ display_name }}
     </h2>
-    <p class="text-muted">
+    <p class="text-muted mb-0">
       {{ athlete.name }} &nbsp;·&nbsp;
       {{ battery.school_year }} {{ battery.test_window|title }} &nbsp;·&nbsp;
       {{ battery.rubric|replace('_',' ')|title }}
     </p>
   </div>
 </div>
+
+{% if event_description or hfz_range or pft_thresh %}
+<div class="card mb-4 border-0 bg-light">
+  <div class="card-body py-3">
+    {% if event_description %}
+    <p class="mb-2">{{ event_description }}</p>
+    {% endif %}
+    {% if hfz_range or pft_thresh %}
+    <div class="d-flex flex-wrap gap-3 small">
+      <span class="fw-semibold text-muted">Targets for {{ battery.gender|title }}, age {{ battery.age_at_test }}:</span>
+      {% if hfz_range %}
+        {% if hfz_range.is_better_higher %}
+          {% if hfz_range.hfz_max >= 999 %}
+            <span class="badge bg-success">HFZ: {{ hfz_range.hfz_min }}+</span>
+          {% else %}
+            <span class="badge bg-success">HFZ: {{ hfz_range.hfz_min }}–{{ hfz_range.hfz_max }}</span>
+          {% endif %}
+        {% else %}
+          {% set mins = (hfz_range.hfz_max // 60) | int %}
+          {% set secs = (hfz_range.hfz_max % 60) | int %}
+          <span class="badge bg-success">HFZ: complete in {{ mins }}:{{ '%02d' % secs }} or less</span>
+        {% endif %}
+      {% endif %}
+      {% if pft_thresh %}
+        {% if pft_thresh.is_better_higher %}
+          <span class="badge bg-primary">PFT 85th: {{ pft_thresh.p85 }}+</span>
+        {% else %}
+          {% set mins = (pft_thresh.p85 // 60) | int %}
+          {% set secs = (pft_thresh.p85 % 60) | int %}
+          <span class="badge bg-primary">PFT 85th: {{ mins }}:{{ '%02d' % secs }} or less</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 
 {% if engine == 'beep_test_bridge' %}
 <!-- PACER: beep_test_bridge -->
