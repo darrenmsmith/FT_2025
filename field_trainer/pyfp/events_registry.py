@@ -26,9 +26,7 @@ EVENT_DESCRIPTIONS = {
         "the line before the beep twice."
     ),
     "pyfp_mile_run": (
-        "One-Mile Run. Athlete runs one mile as fast as possible (typically 4 laps of a "
-        "standard 400 m track). Timer starts at GO and stops when the athlete crosses "
-        "the finish line. Scored on elapsed time — lower is better."
+        "Timer starts at GO and stops when the athlete crosses the finish line."
     ),
     "pyfp_mile_walk": (
         "One-Mile Walk. Athlete walks one mile without running. Timer starts at GO and "
