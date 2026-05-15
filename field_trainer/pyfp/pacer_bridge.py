@@ -57,11 +57,10 @@ def start_pacer(battery_id: str, start_level: int = 1) -> dict:
         sid = pacer_row['beep_test_session_id']
         return {'session_id': sid, 'redirect_url': f'/beep-test/monitor/{sid}', 'created': False}
 
-    # Resolve team and athletes
-    athlete = db.get_athlete(battery['athlete_id'])
-    team_id = athlete['team_id']
-    athletes = db.get_athletes_by_team(team_id)
-    athlete_ids = [a['athlete_id'] for a in athletes]
+    # Individual athlete only — the beep-test session is for this one athlete
+    athlete    = db.get_athlete(battery['athlete_id'])
+    team_id    = athlete['team_id']
+    athlete_ids = [battery['athlete_id']]
 
     # Resolve beep_test course_id
     with db.get_connection() as conn:

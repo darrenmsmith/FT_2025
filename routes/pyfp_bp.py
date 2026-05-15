@@ -654,7 +654,7 @@ def audio_play():
 _CONE_EVENTS = {'pyfp_mile_run', 'pyfp_mile_walk', 'pyfp_shuttle_run'}
 
 _IP_TO_LABEL = {
-    '192.168.99.100': 'Cone 0 — 192.168.99.100',
+    '192.168.99.100': 'Start — Cone 0',
     '192.168.99.101': 'Cone 1',
     '192.168.99.102': 'Cone 2',
     '192.168.99.103': 'Cone 3',
