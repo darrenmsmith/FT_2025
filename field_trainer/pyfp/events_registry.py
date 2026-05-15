@@ -20,7 +20,7 @@ EVENTS = {
 # Coach-facing descriptions shown on setup and recording pages.
 EVENT_DESCRIPTIONS = {
     "pyfp_pacer": (
-        "20-metre Progressive Aerobic Cardiovascular Endurance Run (PACER). "
+        "20-meter Progressive Aerobic Cardiovascular Endurance Run (PACER). "
         "Athlete shuttles between two lines 20 m apart, keeping pace with audio beeps "
         "that increase in speed each level. Test ends when the athlete fails to reach "
         "the line before the beep twice."
