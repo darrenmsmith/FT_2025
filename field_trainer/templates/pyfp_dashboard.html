@@ -251,23 +251,33 @@ async function startBatteryForClass() {
     return;
   }
 
-  let msg = `<div class="alert alert-success mb-0">
-    <strong>${data.created} batter${data.created === 1 ? 'y' : 'ies'} created.</strong>`;
-  if (data.existing)
-    msg += ` ${data.existing} athlete${data.existing !== 1 ? 's' : ''} already had a battery (unchanged).`;
-  if (data.skipped) {
-    msg += ` <strong class="text-warning">${data.skipped} skipped</strong> — missing age or gender:
-      <em>${data.skipped_names.join(', ')}</em>.`;
-  }
-  msg += ' Redirecting…</div>';
-  resultDiv.innerHTML = msg;
+  const hasbatteries = (data.created + data.existing) > 0;
+  const alertClass  = hasbatteries ? 'alert-success' : 'alert-warning';
+  let msg = `<div class="alert ${alertClass} mb-0">`;
 
-  // Navigate to the class-level event roster
-  const courseType = document.getElementById('batchEvent').value;
-  setTimeout(() => {
-    window.location.href =
-      `/pyfp/team/${TEAM_ID}/event/${courseType}?school_year=${SCHOOL_YEAR}&test_window=${TEST_WINDOW}`;
-  }, 1800);
+  if (data.created)
+    msg += `<strong>${data.created} batter${data.created === 1 ? 'y' : 'ies'} created.</strong> `;
+  if (data.existing)
+    msg += `${data.existing} athlete${data.existing !== 1 ? 's' : ''} already had a battery. `;
+  if (data.skipped) {
+    msg += `<strong class="text-warning">${data.skipped} skipped</strong> — missing age or gender: ` +
+           `<em>${data.skipped_names.join(', ')}</em>.`;
+  }
+
+  if (hasbatteries) {
+    msg += ' Redirecting…</div>';
+    resultDiv.innerHTML = msg;
+    const courseType = document.getElementById('batchEvent').value;
+    setTimeout(() => {
+      window.location.href =
+        `/pyfp/team/${TEAM_ID}/event/${courseType}?school_year=${SCHOOL_YEAR}&test_window=${TEST_WINDOW}`;
+    }, 1800);
+  } else {
+    msg += '</div>';
+    resultDiv.innerHTML = msg;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Start Battery for Class';
+  }
 }
 </script>
 {% endif %}

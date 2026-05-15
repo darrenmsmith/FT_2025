@@ -304,14 +304,15 @@ def team_battery_start_all(team_id):
     skipped_names: list[str] = []
 
     for athlete in athletes:
-        if not _profile_ok(athlete):
-            skipped += 1
-            skipped_names.append(athlete['name'])
-            continue
-
+        # Check for existing battery first — regardless of profile completeness
         if db.get_pyfp_battery_for_athlete_window(
                 athlete['athlete_id'], school_year, test_window):
             existing += 1
+            continue
+
+        if not _profile_ok(athlete):
+            skipped += 1
+            skipped_names.append(athlete['name'])
             continue
 
         gender = athlete['gender'].strip().lower()
