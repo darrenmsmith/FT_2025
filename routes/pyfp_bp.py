@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, url_fo
 
 sys.path.insert(0, '/opt')
 from field_trainer.db_manager import DatabaseManager
-from field_trainer.pyfp.events_registry import EVENTS, events_for_rubric
+from field_trainer.pyfp.events_registry import EVENTS, EVENT_DESCRIPTIONS, events_for_rubric
 
 pyfp_bp = Blueprint("pyfp", __name__)
 db = DatabaseManager('/opt/data/field_trainer.db')
@@ -704,12 +704,23 @@ def cone_picker(battery_id, course_type):
                 (existing_results[0]['event_result_id'],)
             ).fetchall()]
 
+    # HFZ range for this athlete
+    from field_trainer.pyfp.scoring import get_hfz_range, get_pft_threshold
+    age    = battery['age_at_test']
+    gender = battery['gender']
+    rubric = battery['rubric']
+    hfz_range  = get_hfz_range(course_type, age, gender, db)  if rubric in ('fitnessgram_hfz', 'both') else None
+    pft_thresh = get_pft_threshold(course_type, age, gender, db) if rubric in ('pft_2026', 'both') else None
+
     return render_template(
         'pyfp_cone_picker.html',
         battery=battery,
         athlete=athlete,
         course_type=course_type,
         display_name=display_name,
+        event_description=EVENT_DESCRIPTIONS.get(course_type, ''),
+        hfz_range=hfz_range,
+        pft_thresh=pft_thresh,
         online_cones=_online_cones(include_d0=course_type in ('pyfp_mile_run', 'pyfp_mile_walk')),
         existing_cones={c['role']: c for c in existing_cones},
     )

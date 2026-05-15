@@ -25,7 +25,58 @@
 <h2 class="pyfp-header mb-3">
   <i class="bi bi-broadcast-pin text-primary"></i> Cone Setup — {{ display_name }}
 </h2>
-<p class="text-muted">{{ athlete.name }} · {{ battery.school_year }} {{ battery.test_window|title }}</p>
+<p class="text-muted mb-3">{{ athlete.name }} · {{ battery.school_year }} {{ battery.test_window|title }}</p>
+
+{% if event_description or hfz_range or pft_thresh %}
+<div class="card mb-4 border-0 bg-light">
+  <div class="card-body py-3">
+    {% if event_description %}
+    <p class="mb-2">{{ event_description }}</p>
+    {% endif %}
+
+    {% if hfz_range or pft_thresh %}
+    <div class="d-flex flex-wrap gap-3 small">
+      <span class="fw-semibold text-muted">
+        Targets for {{ battery.gender|title }}, age {{ battery.age_at_test }}:
+      </span>
+
+      {% if hfz_range %}
+        {% set lo = hfz_range.hfz_min %}
+        {% set hi = hfz_range.hfz_max %}
+        {% set ibh = hfz_range.is_better_higher %}
+        {% if ibh %}
+          {# Higher is better — show min (and max if not 999) #}
+          {% if hi >= 999 %}
+            <span class="badge bg-success">HFZ: {{ lo }}+ {{ hfz_range.unit if hfz_range.unit is defined else '' }}</span>
+          {% else %}
+            <span class="badge bg-success">HFZ: {{ lo }}–{{ hi }}</span>
+          {% endif %}
+        {% else %}
+          {# Lower is better (time) — show max as M:SS #}
+          {% set mins = (hi // 60) | int %}
+          {% set secs = (hi % 60) | int %}
+          <span class="badge bg-success">
+            HFZ: complete in {{ mins }}:{{ '%02d' % secs }} or less
+          </span>
+        {% endif %}
+      {% endif %}
+
+      {% if pft_thresh %}
+        {% set p = pft_thresh.p85 %}
+        {% set ibh = pft_thresh.is_better_higher %}
+        {% if ibh %}
+          <span class="badge bg-primary">PFT 85th: {{ p }}+</span>
+        {% else %}
+          {% set mins = (p // 60) | int %}
+          {% set secs = (p % 60) | int %}
+          <span class="badge bg-primary">PFT 85th: {{ mins }}:{{ '%02d' % secs }} or less</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 
 <!-- Online cones -->
 <div class="card mb-4">

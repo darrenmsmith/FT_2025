@@ -90,6 +90,46 @@ def classify_pft(course_type: str, raw_value: float, age: int, gender: str, db) 
         return 'meets' if raw_value <= p85 else 'below'
 
 
+def get_hfz_range(course_type: str, age: int, gender: str, db) -> dict | None:
+    """
+    Return the raw HFZ range for a specific event/age/gender, or None if not found.
+    Keys: hfz_min, hfz_max, is_better_higher
+    """
+    path = _default_path('fitnessgram_hfz', db)
+    if not path:
+        return None
+    table = _load_json(path)
+    ev = table.get('events', {}).get(course_type)
+    if not ev:
+        return None
+    row = _age_row(ev.get('by_age_gender', {}).get(gender, {}), age)
+    if not row:
+        return None
+    return {
+        'hfz_min': row.get('hfz_min', 0),
+        'hfz_max': row.get('hfz_max', 9999),
+        'is_better_higher': ev.get('is_better_higher', True),
+    }
+
+
+def get_pft_threshold(course_type: str, age: int, gender: str, db) -> dict | None:
+    """
+    Return the PFT 85th-percentile threshold for a specific event/age/gender, or None.
+    Keys: p85, is_better_higher
+    """
+    path = _default_path('pft_2026', db)
+    if not path:
+        return None
+    table = _load_json(path)
+    ev = table.get('events', {}).get(course_type)
+    if not ev:
+        return None
+    row = _age_row(ev.get('by_age_gender', {}).get(gender, {}), age)
+    if not row or 'p85' not in row:
+        return None
+    return {'p85': row['p85'], 'is_better_higher': ev.get('is_better_higher', True)}
+
+
 def score_battery(battery: dict, results: list, db) -> dict:
     """
     Return {course_type: {'hfz': classification, 'pft': classification}}
