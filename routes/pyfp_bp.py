@@ -132,11 +132,14 @@ def dashboard():
 
     complete_count = sum(1 for r in athlete_rows if r.get('battery') and r['battery']['completed_at'])
 
-    # Event name lists per rubric for the battery-picker UI
+    # Event lists per rubric: list of {course_type, name} dicts for the battery-picker UI
     pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
     event_lists = {
         rubric: [
-            pyfp_courses.get(k, {}).get('course_name', k).replace('PYFP - ', '')
+            {
+                'course_type': k,
+                'name': pyfp_courses.get(k, {}).get('course_name', k).replace('PYFP - ', ''),
+            }
             for k in events_for_rubric(rubric)
         ]
         for rubric in ('pft_2026', 'fitnessgram_hfz', 'both')
@@ -356,6 +359,16 @@ _METRIC = {
 }
 
 
+def _next_attempt(battery_id: str, course_type: str) -> int:
+    """Return the next attempt number for this event (1 if none recorded yet)."""
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT MAX(attempt_number) FROM pyfp_event_result WHERE battery_id=? AND course_type=?",
+            (battery_id, course_type),
+        ).fetchone()
+    return (row[0] or 0) + 1
+
+
 def _get_course_id(course_type: str) -> int | None:
     courses = db.get_pyfp_courses()
     for c in courses:
@@ -414,8 +427,6 @@ def event_record_submit(battery_id, course_type):
     battery = db.get_pyfp_battery(battery_id)
     if not battery:
         return jsonify({'error': 'Battery not found'}), 404
-    if battery['completed_at']:
-        return jsonify({'error': 'Battery is already completed'}), 409
     if course_type not in EVENTS:
         return jsonify({'error': 'Unknown event'}), 404
 
@@ -427,9 +438,10 @@ def event_record_submit(battery_id, course_type):
     metric_name, metric_unit, is_better_higher = _METRIC.get(
         course_type, (course_type, 'units', True)
     )
-    course_id = _get_course_id(course_type)
-    athlete_id = battery['athlete_id']
-    perf_notes = f"PYFP battery {battery_id}"
+    course_id   = _get_course_id(course_type)
+    athlete_id  = battery['athlete_id']
+    perf_notes  = f"PYFP battery {battery_id}"
+    next_attempt = _next_attempt(battery_id, course_type)
 
     # ---- manual_count: pull_up, modified_pull_up ----
     if engine == 'manual_count':
@@ -439,8 +451,9 @@ def event_record_submit(battery_id, course_type):
         count = int(count)
         result_id = db.create_pyfp_event_result(
             battery_id, course_type, float(count), 'reps',
-            attempt_number=1, is_best=1,
+            attempt_number=next_attempt, is_best=0,
         )
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=True)
         db.write_pyfp_performance_history(
             athlete_id, metric_name, float(count), metric_unit,
             course_id=course_id, notes=perf_notes, is_better_higher=True,
@@ -451,12 +464,13 @@ def event_record_submit(battery_id, course_type):
     if engine == 'manual_passfail':
         right = 1 if data.get('right_pass') else 0
         left  = 1 if data.get('left_pass')  else 0
-        score = float(right + left)  # 0, 1, or 2
+        score = float(right + left)
         result_id = db.create_pyfp_event_result(
             battery_id, course_type, score, 'pass_fail',
-            attempt_number=1, is_best=1, secondary_value=float(left),
+            attempt_number=next_attempt, is_best=0, secondary_value=float(left),
             notes=json.dumps({'right': right, 'left': left}),
         )
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=True)
         db.write_pyfp_performance_history(
             athlete_id, metric_name, score, metric_unit,
             course_id=course_id, notes=perf_notes, is_better_higher=True,
@@ -471,15 +485,16 @@ def event_record_submit(battery_id, course_type):
         inches = min(float(inches), 12.0)
         result_id = db.create_pyfp_event_result(
             battery_id, course_type, inches, 'inches',
-            attempt_number=1, is_best=1,
+            attempt_number=next_attempt, is_best=0,
         )
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=True)
         db.write_pyfp_performance_history(
             athlete_id, metric_name, inches, metric_unit,
             course_id=course_id, notes=perf_notes,
         )
         return jsonify({'ok': True, 'event_result_id': result_id})
 
-    # ---- manual_measure: sit_and_reach (best per side — right + left) ----
+    # ---- manual_measure: sit_and_reach ----
     if course_type == 'pyfp_sit_and_reach':
         right = data.get('right_inches')
         left  = data.get('left_inches')
@@ -489,17 +504,18 @@ def event_record_submit(battery_id, course_type):
         left  = float(left) if left is not None else None
         result_id = db.create_pyfp_event_result(
             battery_id, course_type, right, 'inches',
-            attempt_number=1, is_best=1,
+            attempt_number=next_attempt, is_best=0,
             secondary_value=left,
             notes=json.dumps({'right_inches': right, 'left_inches': left}),
         )
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=True)
         db.write_pyfp_performance_history(
             athlete_id, metric_name, right, metric_unit,
             course_id=course_id, notes=perf_notes,
         )
         return jsonify({'ok': True, 'event_result_id': result_id})
 
-    # ---- manual_measure: v_sit_reach (up to 3 attempts, best marked) ----
+    # ---- manual_measure: v_sit_reach (up to 3 attempts per submission) ----
     if course_type == 'pyfp_v_sit_reach':
         raw_attempts = data.get('attempts', [])
         if not raw_attempts:
@@ -508,7 +524,7 @@ def event_record_submit(battery_id, course_type):
         if not attempts:
             return jsonify({'error': 'At least one attempt value required'}), 400
         result_ids = []
-        for i, val in enumerate(attempts[:3], start=1):
+        for i, val in enumerate(attempts[:3], start=next_attempt):
             result_ids.append(db.create_pyfp_event_result(
                 battery_id, course_type, val, 'inches',
                 attempt_number=i, is_best=0,
@@ -538,9 +554,10 @@ def event_record_submit(battery_id, course_type):
         })
         result_id = db.create_pyfp_event_result(
             battery_id, course_type, bmi, 'bmi',
-            attempt_number=1, is_best=1,
+            attempt_number=next_attempt, is_best=0,
             secondary_value=float(weight_lbs), notes=bmi_notes,
         )
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=False)
         db.write_pyfp_performance_history(
             athlete_id, metric_name, bmi, metric_unit,
             course_id=course_id, notes=perf_notes, is_better_higher=False,
@@ -558,9 +575,10 @@ def event_record_submit(battery_id, course_type):
         skinfold_notes = json.dumps({'triceps_mm': triceps, 'calf_mm': calf, 'gender': gender})
         result_id = db.create_pyfp_event_result(
             battery_id, course_type, pct_bf, 'percent',
-            attempt_number=1, is_best=1,
+            attempt_number=next_attempt, is_best=0,
             secondary_value=float(triceps) + float(calf), notes=skinfold_notes,
         )
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=False)
         db.write_pyfp_performance_history(
             athlete_id, metric_name, pct_bf, metric_unit,
             course_id=course_id, notes=perf_notes, is_better_higher=False,
@@ -575,8 +593,9 @@ def event_record_submit(battery_id, course_type):
         count = int(count)
         result_id = db.create_pyfp_event_result(
             battery_id, course_type, float(count), 'reps',
-            attempt_number=1, is_best=1,
+            attempt_number=next_attempt, is_best=0,
         )
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=True)
         db.write_pyfp_performance_history(
             athlete_id, metric_name, float(count), metric_unit,
             course_id=course_id, notes=perf_notes, is_better_higher=True,
@@ -591,8 +610,9 @@ def event_record_submit(battery_id, course_type):
         duration = round(float(duration), 1)
         result_id = db.create_pyfp_event_result(
             battery_id, course_type, duration, 'seconds',
-            attempt_number=1, is_best=1,
+            attempt_number=next_attempt, is_best=0,
         )
+        db.recompute_pyfp_best(battery_id, course_type, is_better_higher=True)
         db.write_pyfp_performance_history(
             athlete_id, metric_name, duration, metric_unit,
             course_id=course_id, notes=perf_notes, is_better_higher=True,
@@ -896,6 +916,54 @@ def pacer_import(battery_id):
         return jsonify({'ok': True, **result})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@pyfp_bp.route('/pyfp/team/<team_id>/event/<course_type>')
+def class_event_view(team_id, course_type):
+    """Class-level event roster — shows all athletes with Record / Re-run buttons."""
+    if course_type not in EVENTS:
+        return "Unknown event", 404
+    team = db.get_team(team_id)
+    if not team:
+        return "Team not found", 404
+
+    school_year = request.args.get('school_year', _current_school_year())
+    test_window = request.args.get('test_window', _current_test_window())
+
+    pyfp_courses = {c['course_type']: c for c in db.get_pyfp_courses()}
+    display_name = pyfp_courses.get(course_type, {}).get('course_name', course_type).replace('PYFP - ', '')
+
+    athletes = db.get_athletes_by_team(team_id)
+    batteries_by_athlete = {
+        b['athlete_id']: b
+        for b in db.get_pyfp_team_batteries(team_id, school_year, test_window)
+    }
+
+    athlete_rows = []
+    for athlete in athletes:
+        battery = batteries_by_athlete.get(athlete['athlete_id'])
+        result = None
+        if battery:
+            best = [r for r in db.get_pyfp_event_results_for_battery(battery['battery_id'])
+                    if r['course_type'] == course_type and r['is_best'] and r['raw_value'] > 0]
+            if best:
+                result = best[0]
+        athlete_rows.append({
+            'athlete': athlete,
+            'battery': battery,
+            'result': result,
+        })
+
+    return render_template(
+        'pyfp_class_event.html',
+        team=team,
+        course_type=course_type,
+        display_name=display_name,
+        engine=EVENTS[course_type]['engine'],
+        athlete_rows=athlete_rows,
+        school_year=school_year,
+        test_window=test_window,
+    )
 
 
 # ==================== PHASE 7 — SCORING, AWARDS, REPORTS ====================

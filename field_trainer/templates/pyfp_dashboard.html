@@ -215,8 +215,8 @@ function updateBatteryPreview() {
   const events = EVENT_LISTS[rubric] || [];
   events.forEach(e => {
     const opt = document.createElement('option');
-    opt.value       = e;
-    opt.textContent = e;
+    opt.value       = e.course_type;
+    opt.textContent = e.name;
     eventSel.appendChild(opt);
   });
   eventSel.disabled = false;
@@ -262,10 +262,11 @@ async function startBatteryForClass() {
   msg += ' Redirecting…</div>';
   resultDiv.innerHTML = msg;
 
-  // Navigate to the class view for this battery
+  // Navigate to the class-level event roster
+  const courseType = document.getElementById('batchEvent').value;
   setTimeout(() => {
     window.location.href =
-      `/pyfp/?team_id=${TEAM_ID}&school_year=${SCHOOL_YEAR}&test_window=${TEST_WINDOW}`;
+      `/pyfp/team/${TEAM_ID}/event/${courseType}?school_year=${SCHOOL_YEAR}&test_window=${TEST_WINDOW}`;
   }, 1800);
 }
 </script>

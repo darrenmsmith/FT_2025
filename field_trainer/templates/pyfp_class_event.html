@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}{{ display_name }} — {{ team.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.pyfp-header { border-left: 4px solid #0d6efd; padding-left: 1rem; }
+.result-done    { color: #198754; font-weight: 600; }
+.result-pending { color: #6c757d; }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/pyfp/">PYFP</a></li>
+    <li class="breadcrumb-item">
+      <a href="/pyfp/?team_id={{ team.team_id }}&school_year={{ school_year }}&test_window={{ test_window }}">
+        {{ team.name }}</a>
+    </li>
+    <li class="breadcrumb-item active">{{ display_name }}</li>
+  </ol>
+</nav>
+
+<div class="row mb-4 align-items-center">
+  <div class="col">
+    <h2 class="pyfp-header">
+      <i class="bi bi-list-check text-primary"></i> {{ display_name }}
+    </h2>
+    <p class="text-muted mb-0">
+      {{ team.name }} · {{ school_year }} {{ test_window|title }}
+    </p>
+  </div>
+  <div class="col-auto">
+    {% set done_count = athlete_rows | selectattr('result') | list | length %}
+    {% set total_count = athlete_rows | length %}
+    <span class="badge bg-{{ 'success' if done_count == total_count and total_count else 'secondary' }} fs-6">
+      {{ done_count }} / {{ total_count }} recorded
+    </span>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Athlete</th>
+          <th>Result</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in athlete_rows %}
+        <tr>
+          <td class="fw-semibold">
+            {{ row.athlete.name }}
+            {% if row.athlete.jersey_number %}
+              <span class="text-muted small ms-1">#{{ row.athlete.jersey_number }}</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {% if row.result %}
+              <span class="result-done">
+                <i class="bi bi-check-circle-fill"></i>
+                {{ row.result.raw_value }}
+                <span class="text-muted fw-normal small">{{ row.result.raw_unit }}</span>
+              </span>
+            {% else %}
+              <span class="result-pending">—</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {% if not row.battery %}
+              <span class="badge bg-secondary">No battery</span>
+            {% elif row.result %}
+              <span class="badge bg-success">Recorded</span>
+            {% else %}
+              <span class="badge bg-light text-dark border">Not recorded</span>
+            {% endif %}
+          </td>
+
+          <td class="text-end">
+            {% if row.battery %}
+              <a href="/pyfp/battery/{{ row.battery.battery_id }}/event/{{ course_type }}/record"
+                 class="btn btn-sm {{ 'btn-outline-success' if row.result else 'btn-primary' }}">
+                {% if row.result %}
+                  <i class="bi bi-arrow-repeat"></i> Re-run
+                {% else %}
+                  <i class="bi bi-play-fill"></i> Record
+                {% endif %}
+              </a>
+            {% else %}
+              <a href="/pyfp/athlete/{{ row.athlete.athlete_id }}?school_year={{ school_year }}&test_window={{ test_window }}"
+                 class="btn btn-sm btn-outline-secondary">
+                Start battery first
+              </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+
+        {% if not athlete_rows %}
+        <tr>
+          <td colspan="4" class="text-center text-muted py-4">No athletes in this class.</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
