@@ -191,6 +191,12 @@ NEW_MESH_SCRIPT="$(cat <<'MESH_END'
 #!/bin/bash
 set -e
 
+# Defense against rfkill blocking wifi at boot.
+# rfkill-unblock-wifi.service runs at boot but may race with systemd-rfkill
+# (which restores saved rfkill state). Doing it here too guarantees correct
+# state at the moment we actually need wlan0 up. Belt and suspenders.
+rfkill unblock wifi 2>/dev/null || echo "WARNING: rfkill unblock failed (continuing)"
+
 DEVICE_NUM=__DEVICE_NUM__
 DEVICE_IP="192.168.99.10${DEVICE_NUM}"
 
