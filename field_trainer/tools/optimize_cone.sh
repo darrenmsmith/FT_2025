@@ -42,7 +42,7 @@ Options:
 
 What it does:
   1. Creates /etc/cloud/cloud-init.disabled (if cloud-init present)
-  2. Masks 17 units: 7 cloud-init + ModemManager + 7 Bucket-B + systemd-rfkill
+  2. Masks 20 units: 7 cloud-init + ModemManager + NetworkManager + 7 Bucket-B + Bluetooth(2) + systemd-rfkill(2)
   3. Touches /var/log/ft-optimize-complete.<timestamp> as marker
 
 Recommended after running: sudo reboot
@@ -96,7 +96,7 @@ else
 fi
 
 # ---------- [2/3] mask unnecessary units ----------
-section "[2/3] Mask unnecessary units (17 total)"
+section "[2/3] Mask unnecessary units (20 total)"
 
 # Each entry: <unit>|<category>
 SERVICES_TO_MASK=(
@@ -108,6 +108,7 @@ SERVICES_TO_MASK=(
     "cloud-init.target|cloud-init"
     "cloud-init-hotplugd.socket|cloud-init"
     "ModemManager.service|no-modem-hardware"
+    "NetworkManager.service|no-NM-conflicts-with-batman-mesh"
     "avahi-daemon.service|bucket-b mDNS-not-used"
     "avahi-daemon.socket|bucket-b mDNS-not-used"
     "keyboard-setup.service|bucket-b headless-cone"
@@ -115,6 +116,8 @@ SERVICES_TO_MASK=(
     "rpi-eeprom-update.service|bucket-b firmware-managed-elsewhere"
     "e2scrub_reap.service|bucket-b scrub-cleanup-not-needed"
     "systemd-timesyncd.service|bucket-b no-internet-via-mesh"
+    "bluetooth.service|no-bluetooth-needed"
+    "bluetooth.target|no-bluetooth-needed"
     "systemd-rfkill.service|rfkill-managed-inline"
     "systemd-rfkill.socket|rfkill-managed-inline"
 )
