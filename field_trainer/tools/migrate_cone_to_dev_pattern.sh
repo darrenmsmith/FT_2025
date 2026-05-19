@@ -230,22 +230,30 @@ fi
 ip link set dev bat0 down 2>/dev/null || true
 ip link set dev $MESH_IFACE down 2>/dev/null || true
 pkill -f "wpa_supplicant.*$MESH_IFACE" 2>/dev/null || true
-sleep 2
+sleep 0.3
 
 iw dev $MESH_IFACE set type ibss || { echo "ERROR: Cannot set IBSS mode"; exit 1; }
 ip link set $MESH_IFACE up || { echo "ERROR: Cannot bring up $MESH_IFACE"; exit 1; }
 iw dev $MESH_IFACE ibss join $MESH_SSID $MESH_FREQ fixed-freq $MESH_BSSID || { echo "ERROR: Cannot join IBSS network"; exit 1; }
 
-sleep 5
+# Poll for IBSS join (replaces fixed 5s sleep; faster on most boots)
+ibss_timeout=30   # 30 iterations x 0.2s = 6 seconds max
+while [ $ibss_timeout -gt 0 ]; do
+    if iwconfig $MESH_IFACE 2>/dev/null | grep -q "$MESH_SSID"; then
+        break
+    fi
+    sleep 0.2
+    ibss_timeout=$((ibss_timeout - 1))
+done
 
-if ! iwconfig $MESH_IFACE 2>/dev/null | grep -q "$MESH_SSID"; then
-    echo "ERROR: Not connected to $MESH_SSID"
+if [ $ibss_timeout -eq 0 ]; then
+    echo "ERROR: Not connected to $MESH_SSID (timed out after 6s)"
     exit 1
 fi
 
 batctl meshif bat0 interface add $MESH_IFACE || { echo "ERROR: Cannot add to batman"; exit 1; }
 ip link set dev bat0 up || { echo "ERROR: Cannot bring up bat0"; exit 1; }
-sleep 2
+sleep 0.3
 
 ip addr flush dev bat0
 ip addr add ${DEVICE_IP}/24 dev bat0
@@ -331,7 +339,34 @@ for svc in batman-mesh.service field-trainer-client.service rfkill-unblock-wifi.
     fi
 done
 
-section "10/10" "Done"
+section "10/10" "Migration core complete"
+echo "  Beta->Dev pattern migration done."
+
+# ---------- POST-MIGRATION OPTIMIZATION ----------
+section "Post-migration" "Applying boot optimizations via optimize_cone.sh"
+OPTIMIZE_SCRIPT="$(dirname "$0")/optimize_cone.sh"
+if [ -f "$OPTIMIZE_SCRIPT" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        bash "$OPTIMIZE_SCRIPT" --dry-run
+    else
+        bash "$OPTIMIZE_SCRIPT"
+    fi
+else
+    echo "  WARNING: optimize_cone.sh not found at:"
+    echo "           $OPTIMIZE_SCRIPT"
+    echo "  Migration is complete, but boot-time optimizations were skipped."
+    echo "  To apply manually:"
+    echo "    sudo bash <path-to-optimize_cone.sh>"
+fi
+
+# Migration completion marker (resolves KU-12)
+if [ "$DRY_RUN" -eq 0 ]; then
+    MIGRATION_MARKER="/var/log/ft-migration-complete.$(date +%Y%m%d_%H%M%S)"
+    touch "$MIGRATION_MARKER"
+    echo
+    echo "  Migration marker: $MIGRATION_MARKER"
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
     echo
     echo "DRY-RUN complete. No changes made."
